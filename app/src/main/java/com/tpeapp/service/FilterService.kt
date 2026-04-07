@@ -9,16 +9,19 @@ import android.os.IBinder
 import android.os.ParcelFileDescriptor
 import android.util.Log
 import androidx.core.app.NotificationCompat
+import androidx.preference.PreferenceManager
 import com.tpeapp.R
 import com.tpeapp.filter.IFilterCallback
 import com.tpeapp.filter.IFilterService
 import com.tpeapp.ml.NudeNetClassifier
 import com.tpeapp.ui.MainActivity
+import com.tpeapp.webhook.WebhookManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
+import org.json.JSONObject
 import java.io.FileInputStream
 
 /**
@@ -44,6 +47,11 @@ class FilterService : Service() {
         private const val CHANNEL_ID           = "tpe_filter_active"
         private const val NOTIFICATION_ID      = 1001
         private const val DEFAULT_THRESHOLD    = 0.55f   // tune to balance FP/FN
+
+        /** SharedPreferences key for the webhook endpoint URL. */
+        const val PREF_WEBHOOK_URL             = "webhook_url"
+        /** SharedPreferences key for the webhook Bearer token. */
+        const val PREF_WEBHOOK_BEARER_TOKEN    = "webhook_bearer_token"
     }
 
     // ------------------------------------------------------------------
@@ -104,9 +112,11 @@ class FilterService : Service() {
         ) {
             ioScope.launch {
                 runCatching {
-                    val clf = awaitClassifier()
-                    val score = clf.classifyBytes(imageData)
-                    callback.onScanResult(requestId, score >= threshold, score)
+                    val clf     = awaitClassifier()
+                    val score   = clf.classifyBytes(imageData)
+                    val blocked = score >= threshold
+                    callback.onScanResult(requestId, blocked, score)
+                    if (blocked) dispatchAppBlockedEvent(requestId, score)
                 }.onFailure { e ->
                     Log.e(TAG, "scanImageBytes [$requestId] failed", e)
                     // Report as not-sensitive so the UI does not get stuck.
@@ -123,10 +133,12 @@ class FilterService : Service() {
             ioScope.launch {
                 fd.use { pfd ->
                     runCatching {
-                        val bytes = FileInputStream(pfd.fileDescriptor).use { it.readBytes() }
-                        val clf   = awaitClassifier()
-                        val score = clf.classifyBytes(bytes)
-                        callback.onScanResult(requestId, score >= threshold, score)
+                        val bytes   = FileInputStream(pfd.fileDescriptor).use { it.readBytes() }
+                        val clf     = awaitClassifier()
+                        val score   = clf.classifyBytes(bytes)
+                        val blocked = score >= threshold
+                        callback.onScanResult(requestId, blocked, score)
+                        if (blocked) dispatchAppBlockedEvent(requestId, score)
                     }.onFailure { e ->
                         Log.e(TAG, "scanImageFd [$requestId] failed", e)
                         callback.onScanResult(requestId, false, 0f)
@@ -141,6 +153,31 @@ class FilterService : Service() {
             threshold = newThreshold.coerceIn(0f, 1f)
             Log.i(TAG, "Confidence threshold updated → $threshold")
         }
+    }
+
+    // ------------------------------------------------------------------
+    //  Webhook dispatch
+    // ------------------------------------------------------------------
+
+    /**
+     * Reads the configurable webhook URL and Bearer token from
+     * [SharedPreferences] and forwards an "App Blocked" event to
+     * [WebhookManager].  If no URL has been configured the call is a no-op.
+     */
+    private fun dispatchAppBlockedEvent(requestId: Long, score: Float) {
+        val prefs       = PreferenceManager.getDefaultSharedPreferences(applicationContext)
+        val webhookUrl  = prefs.getString(PREF_WEBHOOK_URL, null)
+            ?.takeIf { it.isNotBlank() } ?: return
+        val bearerToken = prefs.getString(PREF_WEBHOOK_BEARER_TOKEN, "") ?: ""
+
+        val payload = JSONObject().apply {
+            put("event",      "app_blocked")
+            put("request_id", requestId)
+            put("score",      score.toDouble())
+            put("timestamp",  System.currentTimeMillis())
+        }
+
+        WebhookManager.dispatchEvent(webhookUrl, bearerToken, payload)
     }
 
     // ------------------------------------------------------------------
