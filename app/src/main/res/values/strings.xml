@@ -17,4 +17,23 @@
     <string name="adherence_channel_name">Daily Health Routine</string>
     <string name="adherence_notification_title">Daily Health Routine Required</string>
     <string name="adherence_notification_text">Tap to record your 15-second health check-in.</string>
+
+    <!-- Peer-Review Streaming Module -->
+    <string name="screencast_channel_name">Screen Review Active</string>
+    <string name="screencast_channel_desc">Shown while screen is being shared with your accountability partner.</string>
+    <string name="screencast_notification_title">Screen review is active</string>
+    <string name="screencast_notification_text">Your screen is being shared with your accountability partner.</string>
+    <string name="screencast_notification_text_remote_control">🎮 Remote control active — partner can interact with your screen.</string>
+    <string name="screencast_action_stop">Stop Review</string>
+    <string name="review_title">Peer Review</string>
+    <string name="review_instructions">Share your screen with your accountability partner for a live review session.</string>
+    <string name="review_session_id_hint">Partner Session ID</string>
+    <string name="review_remote_control_toggle">Allow partner to control my screen</string>
+    <string name="review_remote_control_confirm_title">Allow remote control?</string>
+    <string name="review_remote_control_confirm_message">Your partner will be able to tap, swipe, type, and press any key on your device while the session is active.</string>
+    <string name="review_remote_control_confirm_allow">Allow</string>
+    <string name="review_btn_start">Start Review</string>
+    <string name="review_btn_stop">Stop Review</string>
+    <string name="review_status_ready">Ready</string>
+    <string name="review_status_streaming">🔴 Streaming to partner…</string>
 </resources>

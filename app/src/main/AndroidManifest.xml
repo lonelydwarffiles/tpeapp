@@ -7,6 +7,8 @@
     <!-- Required for the foreground FilterService -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <!-- Required for ScreencastService (screen capture foreground service) -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
 
     <!-- Camera — required by PairingActivity to scan partner QR codes -->
     <uses-permission android:name="android.permission.CAMERA" />
@@ -102,6 +104,24 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- ============================================================
+             Review Activity — "Start Review" screen for peer streaming
+        ============================================================ -->
+        <activity
+            android:name=".review.ReviewActivity"
+            android:exported="false"
+            android:screenOrientation="portrait" />
+
+        <!-- ============================================================
+             ScreencastService — foreground service that captures the screen
+             and feeds it into the WebRTC peer-review stream.
+        ============================================================ -->
+        <service
+            android:name=".review.ScreencastService"
+            android:exported="false"
+            android:foregroundServiceType="mediaProjection"
+            android:stopWithTask="false" />
 
         <!-- ============================================================
              FilterService — foreground, started on boot, bound via AIDL

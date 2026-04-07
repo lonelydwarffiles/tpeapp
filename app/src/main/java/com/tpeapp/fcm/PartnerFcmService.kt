@@ -9,6 +9,7 @@ import androidx.preference.PreferenceManager
 import com.google.firebase.messaging.FirebaseMessagingService
 import com.google.firebase.messaging.RemoteMessage
 import com.tpeapp.R
+import com.tpeapp.ble.LovenseManager
 import com.tpeapp.mindful.MindfulNotificationService
 import com.tpeapp.mindful.ComplianceManager
 import com.tpeapp.mindful.ToneEnforcementService
@@ -62,6 +63,7 @@ class PartnerFcmService : FirebaseMessagingService() {
             "UPDATE_NOTIFICATION_BLOCKLIST" -> handleUpdateNotificationBlocklist(data)
             "UPDATE_RESTRICTED_VOCABULARY"  -> handleUpdateRestrictedVocabulary(data)
             "UPDATE_TONE_COMPLIANCE"        -> handleUpdateToneCompliance(data)
+            "LOVENSE_COMMAND"               -> handleLovenseCommand(data)
             else                           -> Log.w(TAG, "Unknown FCM action: ${data["action"]}")
         }
     }
@@ -149,6 +151,38 @@ class PartnerFcmService : FirebaseMessagingService() {
             "Your accountability partner has disabled strict tone enforcement."
         }
         showSettingsChangedNotification(details)
+    }
+
+    /**
+     * Processes a toy command pushed by the partner, allowing out-of-band Lovense control
+     * without requiring an active streaming session.
+     *
+     * Expected payload:
+     * ```
+     * { "action": "LOVENSE_COMMAND", "toy_command": "vibrate", "toy_level": "15" }
+     * ```
+     *
+     * Supported `toy_command` values: `vibrate`, `rotate`, `pump`, `stop`, `battery`.
+     */
+    private fun handleLovenseCommand(data: Map<String, String>) {
+        val cmd   = data["toy_command"]?.lowercase() ?: return
+        val level = data["toy_level"]?.toIntOrNull()?.coerceIn(0, 20) ?: 0
+        LovenseManager.init(applicationContext)
+        when (cmd) {
+            "vibrate" -> LovenseManager.vibrate(level)
+            "rotate"  -> LovenseManager.rotate(level)
+            "pump"    -> LovenseManager.pump(level.coerceIn(0, 3))
+            "stop"    -> LovenseManager.stopAll()
+            "battery" -> LovenseManager.queryBattery()
+            else      -> {
+                Log.w(TAG, "Unknown Lovense FCM command: $cmd")
+                return
+            }
+        }
+        val details = "Your partner sent a toy command: $cmd" +
+            if (cmd != "stop" && cmd != "battery") " (level $level)" else ""
+        showSettingsChangedNotification(details)
+        Log.i(TAG, "Lovense FCM command handled: cmd=$cmd level=$level")
     }
 
     // ------------------------------------------------------------------

@@ -63,6 +63,7 @@ class PairingActivity : AppCompatActivity() {
         private const val TAG              = "PairingActivity"
         const val PREF_IS_PAIRED           = "is_paired"
         const val PREF_PARTNER_ENDPOINT    = "partner_endpoint_url"
+        const val PREF_PARTNER_SESSION_ID  = "partner_session_id"
 
         private val JSON_TYPE = "application/json".toMediaType()
         private val httpClient = OkHttpClient.Builder()

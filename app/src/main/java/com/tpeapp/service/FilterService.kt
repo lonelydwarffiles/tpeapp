@@ -15,11 +15,13 @@ import com.tpeapp.filter.IFilterCallback
 import com.tpeapp.filter.IFilterService
 import com.tpeapp.ml.NudeNetClassifier
 import com.tpeapp.ui.MainActivity
+import com.tpeapp.ble.LovenseManager
 import com.tpeapp.webhook.WebhookManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import org.json.JSONObject
 import java.io.FileInputStream
@@ -72,6 +74,7 @@ class FilterService : Service() {
         super.onCreate()
         createNotificationChannel()
         startForeground(NOTIFICATION_ID, buildForegroundNotification())
+        LovenseManager.init(applicationContext)
         initClassifierAsync()
     }
 
@@ -82,6 +85,7 @@ class FilterService : Service() {
         ioScope.cancel()
         classifier?.close()
         classifier = null
+        LovenseManager.close()
     }
 
     // ------------------------------------------------------------------
@@ -116,7 +120,10 @@ class FilterService : Service() {
                     val score   = clf.classifyBytes(imageData)
                     val blocked = score >= threshold
                     callback.onScanResult(requestId, blocked, score)
-                    if (blocked) dispatchAppBlockedEvent(requestId, score)
+                    if (blocked) {
+                        dispatchAppBlockedEvent(requestId, score)
+                        triggerToyEscalation()
+                    }
                 }.onFailure { e ->
                     Log.e(TAG, "scanImageBytes [$requestId] failed", e)
                     // Report as not-sensitive so the UI does not get stuck.
@@ -138,7 +145,10 @@ class FilterService : Service() {
                         val score   = clf.classifyBytes(bytes)
                         val blocked = score >= threshold
                         callback.onScanResult(requestId, blocked, score)
-                        if (blocked) dispatchAppBlockedEvent(requestId, score)
+                        if (blocked) {
+                            dispatchAppBlockedEvent(requestId, score)
+                            triggerToyEscalation()
+                        }
                     }.onFailure { e ->
                         Log.e(TAG, "scanImageFd [$requestId] failed", e)
                         callback.onScanResult(requestId, false, 0f)
@@ -184,6 +194,18 @@ class FilterService : Service() {
     // ------------------------------------------------------------------
     //  Helpers
     // ------------------------------------------------------------------
+
+    /**
+     * Triggers a 3-second vibration at level 20 (maximum intensity) on the connected
+     * Lovense toy as an immediate consequence when a content violation is detected.
+     */
+    private fun triggerToyEscalation() {
+        ioScope.launch {
+            LovenseManager.vibrate(20)
+            delay(3_000)
+            LovenseManager.stopAll()
+        }
+    }
 
     /**
      * Waits (with yields) for the classifier to be initialised and returns a
