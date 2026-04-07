@@ -32,6 +32,9 @@ class ToneEnforcementService : AccessibilityService() {
 
         /** The safe replacement phrase substituted when a restricted word is detected. */
         private const val SAFE_PHRASE = "[Redacted]"
+
+        /** Pattern template for whole-word matching; filled with the escaped word. */
+        private const val WORD_BOUNDARY_REGEX = "(?<![\\w])%s(?![\\w])"
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent) {
@@ -45,9 +48,11 @@ class ToneEnforcementService : AccessibilityService() {
             val restricted = loadRestrictedVocabulary()
             if (restricted.isEmpty()) return
 
+            val textLower = currentText.lowercase()
             for (word in restricted) {
-                if (word.isNotBlank() && currentText.contains(word, ignoreCase = true)) {
-                    Log.i(TAG, "Restricted word \"$word\" detected — replacing text")
+                if (word.isNotBlank() && WORD_BOUNDARY_REGEX.format(Regex.escape(word)).toRegex()
+                        .containsMatchIn(textLower)) {
+                    Log.i(TAG, "Restricted word detected — replacing text")
                     replaceText(node, SAFE_PHRASE)
                     return
                 }

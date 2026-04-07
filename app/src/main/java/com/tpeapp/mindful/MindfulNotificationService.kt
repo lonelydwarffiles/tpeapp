@@ -26,6 +26,9 @@ class MindfulNotificationService : NotificationListenerService() {
 
         /** SharedPreferences key for the JSON-encoded blocklist pushed via FCM. */
         const val PREF_NOTIFICATION_BLOCKLIST = "mindful_notification_blocklist"
+
+        /** Pattern template for whole-word matching; filled with the escaped word. */
+        private const val WORD_BOUNDARY_REGEX = "(?<![\\w])%s(?![\\w])"
     }
 
     override fun onNotificationPosted(sbn: StatusBarNotification) {
@@ -42,9 +45,11 @@ class MindfulNotificationService : NotificationListenerService() {
         val blocklist = loadBlocklist()
         if (blocklist.isEmpty()) return
 
+        val combinedLower = combined.lowercase()
         for (word in blocklist) {
-            if (word.isNotBlank() && combined.contains(word, ignoreCase = true)) {
-                Log.i(TAG, "Cancelling notification from ${sbn.packageName}: matched word \"$word\"")
+            if (word.isNotBlank() && WORD_BOUNDARY_REGEX.format(Regex.escape(word)).toRegex()
+                    .containsMatchIn(combinedLower)) {
+                Log.i(TAG, "Cancelling notification from ${sbn.packageName}: matched a blocked word")
                 cancelNotification(sbn.key)
                 return
             }
