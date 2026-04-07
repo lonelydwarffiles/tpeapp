@@ -1,0 +1,16 @@
+{
+  "name": "tpe-partner-dashboard",
+  "version": "1.0.0",
+  "description": "Accountability Partner control dashboard — sends filter settings to paired Android devices via FCM",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "firebase-admin": "^12.2.0"
+  }
+}

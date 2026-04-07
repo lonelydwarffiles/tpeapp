@@ -39,6 +39,7 @@ class PartnerFcmService : FirebaseMessagingService() {
         const val PREF_THRESHOLD       = "filter_confidence_threshold"
         const val PREF_STRICT_MODE     = "filter_strict_mode"
         const val PREF_FCM_TOKEN       = "fcm_registration_token"
+        const val PREF_BLOCKED_CLASSES = "filter_blocked_classes"
     }
 
     override fun onNewToken(token: String) {
@@ -75,6 +76,13 @@ class PartnerFcmService : FirebaseMessagingService() {
         data["strict"]?.toBooleanStrictOrNull()?.let { strict ->
             editor.putBoolean(PREF_STRICT_MODE, strict)
             changeDescription += " Strict mode → $strict."
+        }
+
+        // JSON-encoded list of NudeNet label strings sent by the partner dashboard.
+        // Example: ["EXPOSED_GENITALIA_F","EXPOSED_BREAST_F"]
+        data["blocked_classes"]?.takeIf { it.isNotBlank() }?.let { json ->
+            editor.putString(PREF_BLOCKED_CLASSES, json)
+            changeDescription += " Blocked content classes updated."
         }
 
         editor.apply()

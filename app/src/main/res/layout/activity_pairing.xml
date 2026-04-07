@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Layout for PairingActivity.
+  The camera preview fills the whole screen; instruction and status banners
+  float on top so the user can see the viewfinder at all times.
+-->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@android:color/black">
+
+    <!-- Full-screen camera preview -->
+    <androidx.camera.view.PreviewView
+        android:id="@+id/viewFinder"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent" />
+
+    <!-- Top banner: instructions -->
+    <TextView
+        android:id="@+id/tvInstructions"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top"
+        android:background="#BB000000"
+        android:gravity="center"
+        android:padding="20dp"
+        android:text="@string/pairing_instructions"
+        android:textColor="@android:color/white"
+        android:textSize="15sp" />
+
+    <!-- Bottom banner: live status updates -->
+    <TextView
+        android:id="@+id/tvStatus"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom"
+        android:background="#BB000000"
+        android:gravity="center"
+        android:minHeight="56dp"
+        android:padding="16dp"
+        android:text="@string/pairing_status_scanning"
+        android:textColor="@android:color/white"
+        android:textSize="14sp" />
+
+</FrameLayout>
