@@ -17,12 +17,12 @@ import com.tpeapp.ml.NudeNetClassifier
 import com.tpeapp.ui.MainActivity
 import com.tpeapp.ble.LovenseManager
 import com.tpeapp.ble.PavlokManager
+import com.tpeapp.consequence.ConsequenceDispatcher
 import com.tpeapp.webhook.WebhookManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import org.json.JSONObject
 import java.io.FileInputStream
@@ -66,6 +66,10 @@ class FilterService : Service() {
 
     @Volatile private var classifier: NudeNetClassifier? = null
     @Volatile private var threshold: Float = DEFAULT_THRESHOLD
+
+    /** Minimum gap between consecutive clean-scan reward triggers (30 minutes). */
+    private val cleanScanRewardIntervalMs = 30 * 60 * 1_000L
+    @Volatile private var lastCleanScanRewardAt: Long = 0L
 
     // ------------------------------------------------------------------
     //  Lifecycle
@@ -126,6 +130,8 @@ class FilterService : Service() {
                     if (blocked) {
                         dispatchAppBlockedEvent(requestId, score)
                         triggerToyEscalation()
+                    } else {
+                        maybeRewardCleanScan()
                     }
                 }.onFailure { e ->
                     Log.e(TAG, "scanImageBytes [$requestId] failed", e)
@@ -151,6 +157,8 @@ class FilterService : Service() {
                         if (blocked) {
                             dispatchAppBlockedEvent(requestId, score)
                             triggerToyEscalation()
+                        } else {
+                            maybeRewardCleanScan()
                         }
                     }.onFailure { e ->
                         Log.e(TAG, "scanImageFd [$requestId] failed", e)
@@ -199,17 +207,23 @@ class FilterService : Service() {
     // ------------------------------------------------------------------
 
     /**
-     * Triggers a 3-second vibration at level 20 (maximum intensity) on the connected
-     * Lovense toy, and a matching zap on the connected Pavlok wristband, as an
-     * immediate consequence when a content violation is detected.
+     * Delegates to [ConsequenceDispatcher] to trigger a punishment stimulus
+     * (Lovense max vibration + Pavlok zap + webhook) when a content violation
+     * is detected.
      */
     private fun triggerToyEscalation() {
-        ioScope.launch {
-            LovenseManager.vibrate(20)
-            PavlokManager.zap(intensity = 64, durationMs = 3_000)
-            delay(3_000)
-            LovenseManager.stopAll()
-            PavlokManager.stopAll()
+        ConsequenceDispatcher.punish(applicationContext, "content_violation")
+    }
+
+    /**
+     * Fires a reward stimulus at most once every [cleanScanRewardIntervalMs]
+     * to acknowledge sustained compliant browsing without spamming the devices.
+     */
+    private fun maybeRewardCleanScan() {
+        val now = System.currentTimeMillis()
+        if (now - lastCleanScanRewardAt >= cleanScanRewardIntervalMs) {
+            lastCleanScanRewardAt = now
+            ConsequenceDispatcher.reward(applicationContext, "clean_content_scan")
         }
     }
 
