@@ -10,6 +10,7 @@ import com.google.firebase.messaging.FirebaseMessagingService
 import com.google.firebase.messaging.RemoteMessage
 import com.tpeapp.R
 import com.tpeapp.mindful.MindfulNotificationService
+import com.tpeapp.mindful.ComplianceManager
 import com.tpeapp.mindful.ToneEnforcementService
 
 /**
@@ -57,10 +58,11 @@ class PartnerFcmService : FirebaseMessagingService() {
         Log.i(TAG, "FCM data received: $data")
 
         when (data["action"]) {
-            "UPDATE_SETTINGS"           -> handleUpdateSettings(data)
+            "UPDATE_SETTINGS"              -> handleUpdateSettings(data)
             "UPDATE_NOTIFICATION_BLOCKLIST" -> handleUpdateNotificationBlocklist(data)
             "UPDATE_RESTRICTED_VOCABULARY"  -> handleUpdateRestrictedVocabulary(data)
-            else                        -> Log.w(TAG, "Unknown FCM action: ${data["action"]}")
+            "UPDATE_TONE_COMPLIANCE"        -> handleUpdateToneCompliance(data)
+            else                           -> Log.w(TAG, "Unknown FCM action: ${data["action"]}")
         }
     }
 
@@ -127,6 +129,26 @@ class PartnerFcmService : FirebaseMessagingService() {
             .apply()
         Log.i(TAG, "Restricted vocabulary updated via FCM")
         showSettingsChangedNotification("Your accountability partner updated the restricted keyword list.")
+    }
+
+    /**
+     * Toggles the strict tone-enforcement mode pushed by the partner.
+     *
+     * Expected payload:
+     * ```
+     * { "action": "UPDATE_TONE_COMPLIANCE", "strict_tone_mode": "true" }
+     * ```
+     */
+    private fun handleUpdateToneCompliance(data: Map<String, String>) {
+        val strict = data["strict_tone_mode"]?.toBooleanStrictOrNull() ?: return
+        ComplianceManager.setStrictToneMode(applicationContext, strict)
+        Log.i(TAG, "Strict tone mode updated via FCM → $strict")
+        val details = if (strict) {
+            "Your accountability partner has enabled strict tone enforcement."
+        } else {
+            "Your accountability partner has disabled strict tone enforcement."
+        }
+        showSettingsChangedNotification(details)
     }
 
     // ------------------------------------------------------------------
