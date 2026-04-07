@@ -58,6 +58,14 @@ class AdherenceVisionAnalyzer(context: Context) : ImageAnalysis.Analyzer {
         const val MIN_DETECTION_RATIO = 0.60f
 
         /**
+         * Only run inference on every Nth frame so that TFLite analysis never
+         * competes with the VideoCapture pipeline.  With a 30 fps camera feed
+         * this gives ~10 analyzed frames per second, which is sufficient for
+         * reliable detection over a 15-second session.
+         */
+        private const val FRAME_SKIP = 3
+
+        /**
          * Object categories that MUST all be present in a frame for it to be
          * counted as verified.  Labels are matched case-insensitively via
          * substring so that model-specific label variants (e.g.
@@ -80,6 +88,9 @@ class AdherenceVisionAnalyzer(context: Context) : ImageAnalysis.Analyzer {
     private val totalFrames    = AtomicInteger(0)
     private val detectedFrames = AtomicInteger(0)
 
+    /** Incremented for every frame received; used to implement FRAME_SKIP. */
+    private val frameCounter = AtomicInteger(0)
+
     /** Last top-label and score forwarded to observers (informational). */
     @Volatile var lastLabel: String = "–"
     @Volatile var lastScore: Float  = 0f
@@ -98,6 +109,7 @@ class AdherenceVisionAnalyzer(context: Context) : ImageAnalysis.Analyzer {
     fun reset() {
         totalFrames.set(0)
         detectedFrames.set(0)
+        frameCounter.set(0)
         lastLabel = "–"
         lastScore = 0f
     }
@@ -107,6 +119,13 @@ class AdherenceVisionAnalyzer(context: Context) : ImageAnalysis.Analyzer {
     // ------------------------------------------------------------------
 
     override fun analyze(image: ImageProxy) {
+        // Skip frames to keep inference lightweight alongside VideoCapture.
+        val count = frameCounter.incrementAndGet()
+        if (count % FRAME_SKIP != 0) {
+            image.close()
+            return
+        }
+
         // toBitmap() converts the YUV_420_888 ImageProxy to an RGB Bitmap without
         // requiring @ExperimentalGetImage; available since CameraX 1.1.0.
         val bitmap = image.toBitmap()

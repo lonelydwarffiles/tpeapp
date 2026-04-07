@@ -15,7 +15,6 @@ import okhttp3.MultipartBody
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.asRequestBody
-import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
 import java.io.File
 import java.util.concurrent.TimeUnit
@@ -63,7 +62,6 @@ class AuditUploadWorker(
         private const val NOTIFICATION_ID          = 0xAD1
 
         private val MP4_MEDIA_TYPE  = "video/mp4".toMediaType()
-        private val JSON_MEDIA_TYPE = "application/json".toMediaType()
 
         private val httpClient = OkHttpClient.Builder()
             .connectTimeout(30, TimeUnit.SECONDS)
@@ -119,10 +117,9 @@ class AuditUploadWorker(
                 videoFile.name,
                 videoFile.asRequestBody(MP4_MEDIA_TYPE)
             )
-            .addFormDataPart(
-                "scores",
-                scoresJson.toRequestBody(JSON_MEDIA_TYPE)
-            )
+            // Send scores as a plain string form field so the server reads it
+            // from req.body.scores without needing file-based handling.
+            .addFormDataPart("scores", scoresJson)
             .build()
 
         val request = Request.Builder()

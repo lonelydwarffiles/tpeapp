@@ -23,11 +23,12 @@
  *   3. Run:  npm install && npm start
  */
 
-const express = require('express');
-const admin   = require('firebase-admin');
-const multer  = require('multer');
-const path    = require('path');
-const fs      = require('fs');
+const express     = require('express');
+const admin       = require('firebase-admin');
+const multer      = require('multer');
+const rateLimit   = require('express-rate-limit');
+const path        = require('path');
+const fs          = require('fs');
 
 // -------------------------------------------------------------------
 // Firebase Admin SDK initialisation
@@ -88,13 +89,12 @@ const auditStorage = multer.diskStorage({
 });
 
 /**
- * Allow only video/mp4 files (the recorded adherence video) and
- * application/json (the ML scores part).  Reject everything else so that
- * clients cannot upload arbitrary file types.
+ * Allow only video/mp4 (the recorded adherence video).
+ * The ML scores are sent as a plain text form field and handled via req.body,
+ * so they are not subject to file filtering.
  */
 const auditFileFilter = (req, file, cb) => {
-  const allowed = ['video/mp4', 'application/json', 'application/octet-stream'];
-  if (allowed.includes(file.mimetype)) {
+  if (file.mimetype === 'video/mp4') {
     cb(null, true);
   } else {
     cb(new Error(`Unsupported file type: ${file.mimetype}`), false);
@@ -153,6 +153,18 @@ app.post('/api/pair', (req, res) => {
 });
 
 // -------------------------------------------------------------------
+// Rate limiter for the audit upload endpoint
+// Paired devices upload once per day; allow a small burst for retries.
+// -------------------------------------------------------------------
+const auditUploadLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000, // 1 hour
+  max:      20,              // 20 uploads per IP per hour
+  standardHeaders: true,
+  legacyHeaders:   false,
+  message: { error: 'Too many audit upload requests. Please try again later.' }
+});
+
+// -------------------------------------------------------------------
 // POST /api/audit/upload
 //
 // Receives the adherence audit artifact from AuditUploadWorker:
@@ -171,38 +183,27 @@ app.post('/api/pair', (req, res) => {
 // -------------------------------------------------------------------
 app.post(
   '/api/audit/upload',
-  auditUpload.fields([
-    { name: 'video',  maxCount: 1 },
-    { name: 'scores', maxCount: 1 }
-  ]),
+  auditUploadLimiter,
+  auditUpload.fields([{ name: 'video', maxCount: 1 }]),
   (req, res) => {
-    const videoFiles  = req.files?.video;
-    const scoresFiles = req.files?.scores;
-
-    // scores may also arrive as a text field (FormData string part).
-    const scoresText = req.body?.scores;
+    const videoFiles = req.files?.video;
 
     if (!videoFiles || videoFiles.length === 0) {
       return res.status(400).json({ error: 'Missing video file part' });
     }
 
+    // scores is a plain text form field (no filename), placed in req.body by multer.
+    const scoresText = req.body?.scores;
     let scores = null;
-    try {
-      // scores part can be a saved temp file (application/json) or a plain
-      // text body field — try both.
-      if (scoresFiles && scoresFiles.length > 0) {
-        const raw = fs.readFileSync(scoresFiles[0].path, 'utf8');
-        scores = JSON.parse(raw);
-        // Clean up temp scores file; only the .mp4 is kept for audit.
-        fs.unlink(scoresFiles[0].path, () => {});
-      } else if (scoresText) {
+    if (scoresText) {
+      try {
         scores = JSON.parse(scoresText);
+      } catch (e) {
+        return res.status(400).json({ error: `Invalid scores JSON: ${e.message}` });
       }
-    } catch (e) {
-      return res.status(400).json({ error: `Invalid scores JSON: ${e.message}` });
     }
 
-    const savedFilename = videoFiles[0].filename;
+    const savedFilename  = videoFiles[0].filename;
     const detectionRatio = scores?.detection_ratio ?? null;
 
     console.log(

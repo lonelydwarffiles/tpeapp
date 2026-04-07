@@ -120,10 +120,7 @@ class AdherenceKioskActivity : AppCompatActivity() {
         // ---- Kiosk window flags (applied before setContentView) ----
         setShowWhenLocked(true)
         setTurnScreenOn(true)
-        window.addFlags(
-            WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON or
-            WindowManager.LayoutParams.FLAG_DISMISS_KEYGUARD
-        )
+        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
 
         super.onCreate(savedInstanceState)
 
@@ -157,7 +154,7 @@ class AdherenceKioskActivity : AppCompatActivity() {
     //  Kiosk — back button / key swallowing
     // ------------------------------------------------------------------
 
-    @Deprecated("Handled on all API levels via this override and OnBackInvokedCallback")
+    @Deprecated("Handles back for API < 33; API 33+ is covered by OnBackInvokedCallback registered in onCreate")
     override fun onBackPressed() {
         // Intentionally do nothing — the device must not be unlocked until
         // the health routine video has been verified.
