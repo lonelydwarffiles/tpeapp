@@ -14,11 +14,13 @@ import kotlinx.coroutines.launch
 import org.json.JSONObject
 import org.webrtc.AudioSource
 import org.webrtc.AudioTrack
+import org.webrtc.DataChannel
 import org.webrtc.DefaultVideoDecoderFactory
 import org.webrtc.EglBase
 import org.webrtc.HardwareVideoEncoderFactory
 import org.webrtc.IceCandidate
 import org.webrtc.MediaConstraints
+import org.webrtc.MediaStream
 import org.webrtc.PeerConnection
 import org.webrtc.PeerConnectionFactory
 import org.webrtc.ScreenCapturerAndroid
@@ -26,6 +28,7 @@ import org.webrtc.SessionDescription
 import org.webrtc.SurfaceTextureHelper
 import org.webrtc.VideoSource
 import org.webrtc.VideoTrack
+import java.nio.charset.Charset
 
 /**
  * StreamCoordinator — coordinates the full WebRTC streaming pipeline.
@@ -85,6 +88,8 @@ object StreamCoordinator {
     @Volatile private var surfaceHelper: SurfaceTextureHelper? = null
     @Volatile private var socket: Socket?                    = null
     @Volatile private var sessionId: String                  = ""
+    @Volatile private var appContext: Context?               = null
+    @Volatile private var remoteControlEnabled: Boolean      = false
 
     // ------------------------------------------------------------------
     //  Public API
@@ -98,9 +103,20 @@ object StreamCoordinator {
      * @param resultData     The permission-grant Intent returned by
      *                       [android.media.projection.MediaProjectionManager.createScreenCaptureIntent].
      * @param partnerSession The session ID of the partner to stream to.
+     * @param remoteControlEnabled `true` if the user has consented to allow the partner to
+     *                             inject input events on this device.
      */
-    fun start(context: Context, resultCode: Int, resultData: Intent, partnerSession: String) {
+    fun start(
+        context: Context,
+        resultCode: Int,
+        resultData: Intent,
+        partnerSession: String,
+        remoteControlEnabled: Boolean = false
+    ) {
         sessionId = partnerSession
+        appContext = context.applicationContext
+        this.remoteControlEnabled = remoteControlEnabled
+        RemoteInputDispatcher.remoteControlEnabled = remoteControlEnabled
         scope.launch {
             try {
                 initWebRtc(context, resultCode, resultData)
@@ -191,6 +207,17 @@ object StreamCoordinator {
 
         pc.addTrack(videoTrack, listOf(STREAM_ID))
         pc.addTrack(audioTrack, listOf(STREAM_ID))
+
+        if (remoteControlEnabled) {
+            // Open a reliable, ordered DataChannel for inbound remote-control events.
+            val dcInit = DataChannel.Init().apply {
+                ordered = true
+                negotiated = false
+            }
+            // The outbound channel is unused on the broadcaster side; inbound events arrive
+            // via PeerConnectionObserver.onDataChannel().
+            pc.createDataChannel("remote-control", dcInit)
+        }
 
         return pc
     }
@@ -335,6 +362,9 @@ object StreamCoordinator {
         peerConnection = null
         factory        = null
         eglBase        = null
+        appContext     = null
+        remoteControlEnabled = false
+        RemoteInputDispatcher.remoteControlEnabled = false
         Log.i(TAG, "StreamCoordinator cleaned up")
     }
 
@@ -367,7 +397,23 @@ object StreamCoordinator {
         override fun onIceCandidatesRemoved(candidates: Array<IceCandidate>)     { }
         override fun onAddStream(stream: MediaStream)                            { }
         override fun onRemoveStream(stream: MediaStream)                         { }
-        override fun onDataChannel(dc: org.webrtc.DataChannel)                  { }
+        override fun onDataChannel(dc: org.webrtc.DataChannel) {
+            if (!remoteControlEnabled) return
+            Log.i(TAG, "Remote-control DataChannel opened: ${dc.label()}")
+            dc.registerObserver(object : org.webrtc.DataChannel.Observer {
+                override fun onBufferedAmountChange(previousAmount: Long) {}
+                override fun onStateChange() {
+                    Log.d(TAG, "DataChannel state → ${dc.state()}")
+                }
+                override fun onMessage(buffer: org.webrtc.DataChannel.Buffer) {
+                    val bytes = ByteArray(buffer.data.remaining())
+                    buffer.data.get(bytes)
+                    val json = String(bytes, Charset.forName("UTF-8"))
+                    val ctx = appContext ?: return
+                    RemoteInputDispatcher.dispatch(ctx, json)
+                }
+            })
+        }
         override fun onRenegotiationNeeded()                                     { }
         override fun onIceConnectionReceivingChange(receiving: Boolean)          { }
     }

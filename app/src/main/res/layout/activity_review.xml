@@ -43,6 +43,13 @@
 
     </com.google.android.material.textfield.TextInputLayout>
 
+    <com.google.android.material.switchmaterial.SwitchMaterial
+        android:id="@+id/switchRemoteControl"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="@string/review_remote_control_toggle"
+        android:layout_marginBottom="24dp" />
+
     <TextView
         android:id="@+id/tvStreamStatus"
         android:layout_width="match_parent"

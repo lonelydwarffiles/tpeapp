@@ -7,8 +7,10 @@ import android.os.Bundle
 import android.util.Log
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.preference.PreferenceManager
+import com.tpeapp.R
 import com.tpeapp.databinding.ActivityReviewBinding
 import com.tpeapp.pairing.PairingActivity
 
@@ -80,6 +82,11 @@ class ReviewActivity : AppCompatActivity() {
         binding.btnStartReview.setOnClickListener { onStartReviewClicked() }
         binding.btnStopReview.setOnClickListener  { onStopReviewClicked()  }
 
+        // Remote-control toggle: requires explicit user confirmation before enabling.
+        binding.switchRemoteControl.setOnCheckedChangeListener { _, isChecked ->
+            onRemoteControlToggled(isChecked)
+        }
+
         updateUiState(streaming = false)
     }
 
@@ -105,20 +112,41 @@ class ReviewActivity : AppCompatActivity() {
     //  Service start
     // ------------------------------------------------------------------
 
+    private fun onRemoteControlToggled(isChecked: Boolean) {
+        if (!isChecked) return  // No confirmation needed to disable.
+        AlertDialog.Builder(this)
+            .setTitle(getString(R.string.review_remote_control_confirm_title))
+            .setMessage(getString(R.string.review_remote_control_confirm_message))
+            .setPositiveButton(getString(R.string.review_remote_control_confirm_allow)) { _, _ ->
+                // Confirmed — leave the switch on.
+            }
+            .setNegativeButton(android.R.string.cancel) { _, _ ->
+                // Reverted — silently uncheck without re-triggering the listener.
+                binding.switchRemoteControl.setOnCheckedChangeListener(null)
+                binding.switchRemoteControl.isChecked = false
+                binding.switchRemoteControl.setOnCheckedChangeListener { _, checked ->
+                    onRemoteControlToggled(checked)
+                }
+            }
+            .show()
+    }
+
     private fun startScreencastService(
         resultCode: Int,
         resultData: Intent,
         sessionId: String
     ) {
+        val remoteControl = binding.switchRemoteControl.isChecked
         val serviceIntent = Intent(this, ScreencastService::class.java).apply {
-            putExtra(ScreencastService.EXTRA_RESULT_CODE, resultCode)
-            putExtra(ScreencastService.EXTRA_RESULT_DATA, resultData)
-            putExtra(ScreencastService.EXTRA_SESSION_ID,  sessionId)
+            putExtra(ScreencastService.EXTRA_RESULT_CODE,    resultCode)
+            putExtra(ScreencastService.EXTRA_RESULT_DATA,    resultData)
+            putExtra(ScreencastService.EXTRA_SESSION_ID,     sessionId)
+            putExtra(ScreencastService.EXTRA_REMOTE_CONTROL, remoteControl)
         }
         startForegroundService(serviceIntent)
         isStreaming = true
         updateUiState(streaming = true)
-        Log.i(TAG, "ScreencastService started for session=$sessionId")
+        Log.i(TAG, "ScreencastService started for session=$sessionId remoteControl=$remoteControl")
     }
 
     // ------------------------------------------------------------------
@@ -126,10 +154,11 @@ class ReviewActivity : AppCompatActivity() {
     // ------------------------------------------------------------------
 
     private fun updateUiState(streaming: Boolean) {
-        binding.btnStartReview.isEnabled = !streaming
-        binding.btnStopReview.isEnabled  = streaming
-        binding.tvStreamStatus.text      =
+        binding.btnStartReview.isEnabled        = !streaming
+        binding.btnStopReview.isEnabled         = streaming
+        binding.switchRemoteControl.isEnabled   = !streaming
+        binding.tvStreamStatus.text             =
             if (streaming) getString(R.string.review_status_streaming) else getString(R.string.review_status_ready)
-        binding.etSessionId.isEnabled    = !streaming
+        binding.etSessionId.isEnabled           = !streaming
     }
 }
