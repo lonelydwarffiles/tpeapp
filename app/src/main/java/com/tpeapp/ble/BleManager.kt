@@ -60,10 +60,16 @@ class BleManager(
     companion object {
         private const val TAG = "BleManager"
 
-        /** Generic GATT service UUID (replace with the device's service UUID). */
+        /**
+         * Example GATT service UUID (Bluetooth SIG Heart Rate Service — 0x180D).
+         * Replace with the actual UUID advertised by the target peripheral.
+         */
         val SERVICE_UUID: UUID = UUID.fromString("0000180d-0000-1000-8000-00805f9b34fb")
 
-        /** Generic GATT characteristic UUID (replace with the target characteristic). */
+        /**
+         * Example GATT characteristic UUID (Bluetooth SIG Heart Rate Measurement — 0x2A37).
+         * Replace with the UUID of the specific characteristic to write commands to.
+         */
         val CHARACTERISTIC_UUID: UUID = UUID.fromString("00002a37-0000-1000-8000-00805f9b34fb")
 
         private const val DEFAULT_SCAN_TIMEOUT_MS = 10_000L
@@ -122,7 +128,11 @@ class BleManager(
 
         isScanning = true
         Log.i(TAG, "BLE scan started (timeout=${scanTimeout}ms)")
-        scanner!!.startScan(scanCallback)
+        scanner?.startScan(scanCallback) ?: run {
+            isScanning = false
+            Log.w(TAG, "BluetoothLeScanner became null before scan could start")
+            return
+        }
 
         // Auto-stop after timeout.
         mainHandler.postDelayed({ stopScan() }, scanTimeout)
