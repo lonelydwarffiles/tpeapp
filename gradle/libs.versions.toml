@@ -1,0 +1,61 @@
+[versions]
+agp                 = "8.4.0"
+kotlin              = "1.9.24"
+coreKtx             = "1.13.1"
+appcompat           = "1.7.0"
+material            = "1.12.0"
+lifecycle           = "2.8.0"
+security-crypto     = "1.1.0-alpha06"
+tflite              = "2.16.1"
+tflite-support      = "0.4.4"
+glide               = "4.16.0"
+coil                = "2.6.0"
+okhttp              = "4.12.0"
+firebase-bom        = "33.1.0"
+lsposed-api         = "1.0.5"
+coroutines          = "1.8.1"
+renderscript-toolkit = "1.0.0-alpha10"
+devicepolicymanager = ""           # part of Android SDK — no separate dep
+
+[libraries]
+# AndroidX
+androidx-core-ktx          = { group = "androidx.core",     name = "core-ktx",         version.ref = "coreKtx" }
+androidx-appcompat         = { group = "androidx.appcompat", name = "appcompat",        version.ref = "appcompat" }
+material                   = { group = "com.google.android.material", name = "material", version.ref = "material" }
+lifecycle-service          = { group = "androidx.lifecycle", name = "lifecycle-service", version.ref = "lifecycle" }
+androidx-security-crypto   = { group = "androidx.security", name = "crypto", version.ref = "security-crypto" }
+
+# TFLite
+tflite                     = { group = "org.tensorflow", name = "tensorflow-lite",              version.ref = "tflite" }
+tflite-gpu                 = { group = "org.tensorflow", name = "tensorflow-lite-gpu",           version.ref = "tflite" }
+tflite-support             = { group = "org.tensorflow", name = "tensorflow-lite-support",       version.ref = "tflite-support" }
+tflite-task-vision         = { group = "org.tensorflow", name = "tensorflow-lite-task-vision",  version.ref = "tflite-support" }
+tflite-metadata            = { group = "org.tensorflow", name = "tensorflow-lite-metadata",     version.ref = "tflite-support" }
+
+# Image loading
+glide                      = { group = "com.github.bumptech.glide", name = "glide",           version.ref = "glide" }
+glide-compiler             = { group = "com.github.bumptech.glide", name = "compiler",        version.ref = "glide" }
+coil                       = { group = "io.coil-kt",               name = "coil",             version.ref = "coil" }
+okhttp                     = { group = "com.squareup.okhttp3",      name = "okhttp",           version.ref = "okhttp" }
+
+# Firebase
+firebase-bom               = { group = "com.google.firebase", name = "firebase-bom",         version.ref = "firebase-bom" }
+firebase-messaging-ktx     = { group = "com.google.firebase", name = "firebase-messaging-ktx" }
+firebase-analytics-ktx     = { group = "com.google.firebase", name = "firebase-analytics-ktx" }
+
+# LSPosed / Xposed
+lsposed-api                = { group = "io.github.libxposed", name = "api", version.ref = "lsposed-api" }
+lsposed-service            = { group = "io.github.libxposed", name = "service", version.ref = "lsposed-api" }
+
+# Coroutines
+coroutines-android         = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-android", version.ref = "coroutines" }
+
+# RenderScript toolkit (Gaussian blur without legacy RS)
+renderscript-toolkit       = { group = "com.google.android.renderscript", name = "renderscript-toolkit", version.ref = "renderscript-toolkit" }
+
+[plugins]
+android-application  = { id = "com.android.application",  version.ref = "agp" }
+android-library      = { id = "com.android.library",      version.ref = "agp" }
+kotlin-android       = { id = "org.jetbrains.kotlin.android", version.ref = "kotlin" }
+kotlin-kapt          = { id = "org.jetbrains.kotlin.kapt",    version.ref = "kotlin" }
+google-services      = { id = "com.google.gms.google-services", version = "4.4.2" }

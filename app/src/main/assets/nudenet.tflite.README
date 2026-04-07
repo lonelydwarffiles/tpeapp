@@ -1,0 +1,10 @@
+# Replace this file with the actual NudeNet TFLite model binary.
+# Model input:  [1, 480, 480, 3] FLOAT32
+# Model output: [1, 2] FLOAT32  (index 0 = safe, index 1 = unsafe)
+#
+# Download source: https://github.com/notAI-tech/NudeNet
+# After training/exporting run:
+#   python -m tensorflow.lite.python.tflite_convert \
+#     --saved_model_dir=nudenet_saved \
+#     --output_file=nudenet.tflite
+

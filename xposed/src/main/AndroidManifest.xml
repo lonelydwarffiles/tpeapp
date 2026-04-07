@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!--
+        This is a pure LSPosed module — it has no UI of its own.
+        The xposed_init asset file points to MainHook as the entry-point.
+    -->
+    <application
+        android:label="TPE Content Filter (Xposed)"
+        android:allowBackup="false">
+
+        <!-- LSPosed module metadata -->
+        <meta-data
+            android:name="xposedmodule"
+            android:value="true" />
+        <meta-data
+            android:name="xposeddescription"
+            android:value="Intercepts ImageView, Glide, Coil, and OkHttp to redact adult content via FilterService." />
+        <meta-data
+            android:name="xposedminversion"
+            android:value="93" />
+
+    </application>
+
+</manifest>

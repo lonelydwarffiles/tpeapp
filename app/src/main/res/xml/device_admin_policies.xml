@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Declares which Device Administrator policies this app uses.
+    Only USES_POLICY_FORCE_LOCK is needed for the uninstall-lock scenario
+    via setUninstallBlocked().  Extend if stricter MDM controls are desired.
+-->
+<device-admin>
+    <uses-policies>
+        <force-lock />
+        <reset-password />
+    </uses-policies>
+</device-admin>
