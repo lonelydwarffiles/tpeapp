@@ -16,6 +16,7 @@ import com.tpeapp.filter.IFilterService
 import com.tpeapp.ml.NudeNetClassifier
 import com.tpeapp.ui.MainActivity
 import com.tpeapp.ble.LovenseManager
+import com.tpeapp.ble.PavlokManager
 import com.tpeapp.webhook.WebhookManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -75,6 +76,7 @@ class FilterService : Service() {
         createNotificationChannel()
         startForeground(NOTIFICATION_ID, buildForegroundNotification())
         LovenseManager.init(applicationContext)
+        PavlokManager.init(applicationContext)
         initClassifierAsync()
     }
 
@@ -86,6 +88,7 @@ class FilterService : Service() {
         classifier?.close()
         classifier = null
         LovenseManager.close()
+        PavlokManager.close()
     }
 
     // ------------------------------------------------------------------
@@ -197,13 +200,16 @@ class FilterService : Service() {
 
     /**
      * Triggers a 3-second vibration at level 20 (maximum intensity) on the connected
-     * Lovense toy as an immediate consequence when a content violation is detected.
+     * Lovense toy, and a matching zap on the connected Pavlok wristband, as an
+     * immediate consequence when a content violation is detected.
      */
     private fun triggerToyEscalation() {
         ioScope.launch {
             LovenseManager.vibrate(20)
+            PavlokManager.zap(intensity = 64, durationMs = 3_000)
             delay(3_000)
             LovenseManager.stopAll()
+            PavlokManager.stopAll()
         }
     }
 

@@ -10,6 +10,7 @@ import com.google.firebase.messaging.FirebaseMessagingService
 import com.google.firebase.messaging.RemoteMessage
 import com.tpeapp.R
 import com.tpeapp.ble.LovenseManager
+import com.tpeapp.ble.PavlokManager
 import com.tpeapp.mindful.MindfulNotificationService
 import com.tpeapp.mindful.ComplianceManager
 import com.tpeapp.mindful.ToneEnforcementService
@@ -64,6 +65,7 @@ class PartnerFcmService : FirebaseMessagingService() {
             "UPDATE_RESTRICTED_VOCABULARY"  -> handleUpdateRestrictedVocabulary(data)
             "UPDATE_TONE_COMPLIANCE"        -> handleUpdateToneCompliance(data)
             "LOVENSE_COMMAND"               -> handleLovenseCommand(data)
+            "PAVLOK_COMMAND"                -> handlePavlokCommand(data)
             else                           -> Log.w(TAG, "Unknown FCM action: ${data["action"]}")
         }
     }
@@ -183,6 +185,46 @@ class PartnerFcmService : FirebaseMessagingService() {
             if (cmd != "stop" && cmd != "battery") " (level $level)" else ""
         showSettingsChangedNotification(details)
         Log.i(TAG, "Lovense FCM command handled: cmd=$cmd level=$level")
+    }
+
+    /**
+     * Processes a Pavlok stimulus command pushed by the partner, allowing out-of-band
+     * Pavlok control without requiring an active streaming session.
+     *
+     * Expected payload:
+     * ```
+     * {
+     *   "action":              "PAVLOK_COMMAND",
+     *   "pavlok_cmd":          "zap",   // zap | vibrate | beep | stop
+     *   "pavlok_intensity":    "64",    // 0–255
+     *   "pavlok_duration_ms":  "500"    // 0–25500 ms
+     * }
+     * ```
+     *
+     * Supported `pavlok_cmd` values: `zap`, `vibrate`, `beep`, `stop`.
+     */
+    private fun handlePavlokCommand(data: Map<String, String>) {
+        val cmd        = data["pavlok_cmd"]?.lowercase() ?: return
+        val intensity  = data["pavlok_intensity"]?.toIntOrNull()?.coerceIn(0, 255) ?: 64
+        val durationMs = data["pavlok_duration_ms"]?.toIntOrNull()?.coerceIn(0, 25_500) ?: 500
+        PavlokManager.init(applicationContext)
+        when (cmd) {
+            "zap"     -> PavlokManager.zap(intensity, durationMs)
+            "vibrate" -> PavlokManager.vibrate(intensity, durationMs)
+            "beep"    -> PavlokManager.beep(intensity, durationMs)
+            "stop"    -> PavlokManager.stopAll()
+            else      -> {
+                Log.w(TAG, "Unknown Pavlok FCM command: $cmd")
+                return
+            }
+        }
+        val details = if (cmd != "stop") {
+            "Your partner sent a Pavlok command: $cmd (intensity=$intensity, duration=${durationMs}ms)"
+        } else {
+            "Your partner sent a Pavlok command: $cmd"
+        }
+        showSettingsChangedNotification(details)
+        Log.i(TAG, "Pavlok FCM command handled: cmd=$cmd intensity=$intensity durationMs=$durationMs")
     }
 
     // ------------------------------------------------------------------
