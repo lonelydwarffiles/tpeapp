@@ -12,4 +12,9 @@
 
     <!-- Mindful Communication Module -->
     <string name="tone_enforcement_service_description">Monitors text fields to prevent sending messages containing restricted keywords set by your accountability partner.</string>
+
+    <!-- Adherence Kiosk Module -->
+    <string name="adherence_channel_name">Daily Health Routine</string>
+    <string name="adherence_notification_title">Daily Health Routine Required</string>
+    <string name="adherence_notification_text">Tap to record your 15-second health check-in.</string>
 </resources>
