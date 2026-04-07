@@ -9,6 +9,8 @@ import androidx.preference.PreferenceManager
 import com.google.firebase.messaging.FirebaseMessagingService
 import com.google.firebase.messaging.RemoteMessage
 import com.tpeapp.R
+import com.tpeapp.mindful.MindfulNotificationService
+import com.tpeapp.mindful.ToneEnforcementService
 
 /**
  * Handles FCM messages sent by the Accountability Partner to remotely
@@ -55,8 +57,10 @@ class PartnerFcmService : FirebaseMessagingService() {
         Log.i(TAG, "FCM data received: $data")
 
         when (data["action"]) {
-            "UPDATE_SETTINGS" -> handleUpdateSettings(data)
-            else              -> Log.w(TAG, "Unknown FCM action: ${data["action"]}")
+            "UPDATE_SETTINGS"           -> handleUpdateSettings(data)
+            "UPDATE_NOTIFICATION_BLOCKLIST" -> handleUpdateNotificationBlocklist(data)
+            "UPDATE_RESTRICTED_VOCABULARY"  -> handleUpdateRestrictedVocabulary(data)
+            else                        -> Log.w(TAG, "Unknown FCM action: ${data["action"]}")
         }
     }
 
@@ -89,6 +93,40 @@ class PartnerFcmService : FirebaseMessagingService() {
 
         // Notify the user so they always know a settings change occurred.
         showSettingsChangedNotification(changeDescription)
+    }
+
+    /**
+     * Persists a new notification blocklist pushed by the partner.
+     *
+     * Expected payload:
+     * ```
+     * { "action": "UPDATE_NOTIFICATION_BLOCKLIST", "blocklist": "[\"hate\",\"slur\"]" }
+     * ```
+     */
+    private fun handleUpdateNotificationBlocklist(data: Map<String, String>) {
+        val json = data["blocklist"]?.takeIf { it.isNotBlank() } ?: return
+        prefs().edit()
+            .putString(MindfulNotificationService.PREF_NOTIFICATION_BLOCKLIST, json)
+            .apply()
+        Log.i(TAG, "Notification blocklist updated via FCM")
+        showSettingsChangedNotification("Your accountability partner updated the message blocklist.")
+    }
+
+    /**
+     * Persists a new restricted vocabulary list pushed by the partner.
+     *
+     * Expected payload:
+     * ```
+     * { "action": "UPDATE_RESTRICTED_VOCABULARY", "vocabulary": "[\"word1\",\"word2\"]" }
+     * ```
+     */
+    private fun handleUpdateRestrictedVocabulary(data: Map<String, String>) {
+        val json = data["vocabulary"]?.takeIf { it.isNotBlank() } ?: return
+        prefs().edit()
+            .putString(ToneEnforcementService.PREF_RESTRICTED_VOCABULARY, json)
+            .apply()
+        Log.i(TAG, "Restricted vocabulary updated via FCM")
+        showSettingsChangedNotification("Your accountability partner updated the restricted keyword list.")
     }
 
     // ------------------------------------------------------------------

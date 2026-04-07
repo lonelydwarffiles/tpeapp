@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Metadata for ToneEnforcementService.
+    accessibilityEventTypes: only TYPE_VIEW_TEXT_CHANGED — minimal permission footprint.
+    accessibilityFeedbackType: feedbackGeneric — no audio/haptic feedback.
+    notificationTimeout: 100 ms — debounce rapid keystrokes.
+    canRetrieveWindowContent: true — required to read and modify node text.
+-->
+<accessibility-service
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    android:accessibilityEventTypes="typeViewTextChanged"
+    android:accessibilityFeedbackType="feedbackGeneric"
+    android:notificationTimeout="100"
+    android:canRetrieveWindowContent="true"
+    android:description="@string/tone_enforcement_service_description" />

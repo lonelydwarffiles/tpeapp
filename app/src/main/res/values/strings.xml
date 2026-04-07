@@ -9,4 +9,7 @@
     <!-- PairingActivity strings -->
     <string name="pairing_instructions">Point the camera at the QR code provided by your Accountability Partner to set up this device.</string>
     <string name="pairing_status_scanning">Scanning for QR code…</string>
+
+    <!-- Mindful Communication Module -->
+    <string name="tone_enforcement_service_description">Monitors text fields to prevent sending messages containing restricted keywords set by your accountability partner.</string>
 </resources>
