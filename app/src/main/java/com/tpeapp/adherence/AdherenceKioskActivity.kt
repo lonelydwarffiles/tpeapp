@@ -28,6 +28,7 @@ import androidx.work.Data
 import androidx.work.ExistingWorkPolicy
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
+import com.tpeapp.consequence.ConsequenceDispatcher
 import com.tpeapp.databinding.ActivityAdherenceKioskBinding
 import java.io.File
 import java.util.concurrent.ExecutorService
@@ -276,6 +277,7 @@ class AdherenceKioskActivity : AppCompatActivity() {
         }
 
         if (analyzer.isAutoApproved()) {
+            ConsequenceDispatcher.reward(applicationContext, "checkin_passed")
             enqueueUploadAndFinish()
         } else {
             val ratio = String.format("%.0f%%", analyzer.detectionRatio * 100)
@@ -283,6 +285,7 @@ class AdherenceKioskActivity : AppCompatActivity() {
                 "❌ Verification failed ($ratio detection rate). " +
                 "Ensure the required items are visible and tap Try Again."
             )
+            ConsequenceDispatcher.punish(applicationContext, "checkin_failed")
             binding.btnStartRecording.text    = "Try Again"
             binding.btnStartRecording.isEnabled = true
             videoFile?.delete()

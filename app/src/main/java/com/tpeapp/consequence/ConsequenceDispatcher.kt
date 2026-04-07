@@ -48,7 +48,7 @@ object ConsequenceDispatcher {
     //  Punishment tuning
     // ------------------------------------------------------------------
 
-    /** Lovense vibration level for a punishment (0–20). */
+    /** Lovense vibration level for a punishment (0–20; 20 is the maximum Lovense intensity). */
     const val PUNISHMENT_LOVENSE_LEVEL: Int = 20
 
     /** Pavlok zap intensity for a punishment (0–255). */

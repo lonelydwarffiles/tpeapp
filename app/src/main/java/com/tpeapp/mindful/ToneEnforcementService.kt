@@ -224,7 +224,7 @@ class ToneEnforcementService : AccessibilityService() {
                     lastCorrectedWord = null
                     Log.i(TAG, "Override bypass accepted for word: $correctedWord")
                     dispatchOverrideTelemetry(correctedWord)
-                    ConsequenceDispatcher.punish(applicationContext, "tone_bypass: $correctedWord")
+                    ConsequenceDispatcher.punish(applicationContext, "tone_bypass=$correctedWord")
                     return
                 }
             }
@@ -241,7 +241,7 @@ class ToneEnforcementService : AccessibilityService() {
                 lastCorrectedWord        = word
                 lastCorrectionTimestamp  = System.currentTimeMillis()
                 scheduleReplacement(SAFE_PHRASE)
-                ConsequenceDispatcher.punish(applicationContext, "restricted_word: $word")
+                ConsequenceDispatcher.punish(applicationContext, "restricted_word=$word")
                 return
             }
         } finally {

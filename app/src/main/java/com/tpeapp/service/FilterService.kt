@@ -68,7 +68,7 @@ class FilterService : Service() {
     @Volatile private var threshold: Float = DEFAULT_THRESHOLD
 
     /** Minimum gap between consecutive clean-scan reward triggers (30 minutes). */
-    private val cleanScanRewardIntervalMs = 30 * 60 * 1_000L
+    private val CLEAN_SCAN_REWARD_INTERVAL_MS = 30 * 60 * 1_000L
     @Volatile private var lastCleanScanRewardAt: Long = 0L
 
     // ------------------------------------------------------------------
@@ -221,7 +221,7 @@ class FilterService : Service() {
      */
     private fun maybeRewardCleanScan() {
         val now = System.currentTimeMillis()
-        if (now - lastCleanScanRewardAt >= cleanScanRewardIntervalMs) {
+        if (now - lastCleanScanRewardAt >= CLEAN_SCAN_REWARD_INTERVAL_MS) {
             lastCleanScanRewardAt = now
             ConsequenceDispatcher.reward(applicationContext, "clean_content_scan")
         }

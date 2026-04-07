@@ -196,10 +196,12 @@ object PavlokManager {
             return
         }
         val intensityByte = intensity.coerceIn(0, 255).toByte()
-        val durationUnit  = (durationMs / 100).coerceIn(0, 255).toByte()
+        // Add 50 before dividing to round to the nearest 100 ms unit rather than truncating.
+        val durationUnit  = ((durationMs + 50) / 100).coerceIn(0, 255).toByte()
         val command = byteArrayOf(type, intensityByte, durationUnit)
-        Log.d(TAG, "Sending Pavlok command: type=0x%02x intensity=%d (clamped=%d) durationMs=%d (units=%d)".format(
-            type, intensity, intensityByte.toInt() and 0xFF, durationMs, durationUnit.toInt() and 0xFF))
+        Log.d(TAG, "Sending Pavlok command: type=0x%02x sent_intensity=%d sent_units=%d (≈%dms)".format(
+            type, intensityByte.toInt() and 0xFF, durationUnit.toInt() and 0xFF,
+            (durationUnit.toInt() and 0xFF) * 100))
         b.sendByteCommand(command)
     }
 
