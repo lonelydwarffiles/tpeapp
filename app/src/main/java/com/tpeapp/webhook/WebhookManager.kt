@@ -43,6 +43,11 @@ object WebhookManager {
      * @param payload     Arbitrary JSON object that forms the request body.
      */
     fun dispatchEvent(url: String, bearerToken: String, payload: JSONObject) {
+        if (!url.startsWith("https://")) {
+            Log.w(TAG, "Webhook URL must use HTTPS — skipping dispatch: $url")
+            return
+        }
+
         val body = payload.toString().toRequestBody(JSON_TYPE)
 
         val request = Request.Builder()

@@ -168,7 +168,8 @@ class FilterService : Service() {
         val prefs       = PreferenceManager.getDefaultSharedPreferences(applicationContext)
         val webhookUrl  = prefs.getString(PREF_WEBHOOK_URL, null)
             ?.takeIf { it.isNotBlank() } ?: return
-        val bearerToken = prefs.getString(PREF_WEBHOOK_BEARER_TOKEN, "") ?: ""
+        val bearerToken = prefs.getString(PREF_WEBHOOK_BEARER_TOKEN, null)
+            ?.takeIf { it.isNotBlank() } ?: return
 
         val payload = JSONObject().apply {
             put("event",      "app_blocked")
