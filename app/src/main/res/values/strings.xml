@@ -5,4 +5,8 @@
     <string name="admin_status_inactive">⚠️ Device Admin: Inactive — tap Activate below</string>
     <string name="admin_explanation">Required to prevent uninstallation without the partner PIN.</string>
     <string name="pin_incorrect">❌ Incorrect PIN. Contact your accountability partner.</string>
+
+    <!-- PairingActivity strings -->
+    <string name="pairing_instructions">Point the camera at the QR code provided by your Accountability Partner to set up this device.</string>
+    <string name="pairing_status_scanning">Scanning for QR code…</string>
 </resources>
