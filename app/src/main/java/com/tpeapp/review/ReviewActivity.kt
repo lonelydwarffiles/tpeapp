@@ -129,7 +129,7 @@ class ReviewActivity : AppCompatActivity() {
         binding.btnStartReview.isEnabled = !streaming
         binding.btnStopReview.isEnabled  = streaming
         binding.tvStreamStatus.text      =
-            if (streaming) "🔴 Streaming to partner…" else "Ready"
+            if (streaming) getString(R.string.review_status_streaming) else getString(R.string.review_status_ready)
         binding.etSessionId.isEnabled    = !streaming
     }
 }

@@ -19,7 +19,6 @@ import org.webrtc.EglBase
 import org.webrtc.HardwareVideoEncoderFactory
 import org.webrtc.IceCandidate
 import org.webrtc.MediaConstraints
-import org.webrtc.MediaStream
 import org.webrtc.PeerConnection
 import org.webrtc.PeerConnectionFactory
 import org.webrtc.ScreenCapturerAndroid
@@ -190,10 +189,8 @@ object StreamCoordinator {
         val pc = factory!!.createPeerConnection(rtcConfig, PeerConnectionObserver())
             ?: error("createPeerConnection returned null")
 
-        val stream: MediaStream = factory!!.createLocalMediaStream(STREAM_ID)
-        stream.addTrack(videoTrack)
-        stream.addTrack(audioTrack)
-        pc.addStream(stream)
+        pc.addTrack(videoTrack, listOf(STREAM_ID))
+        pc.addTrack(audioTrack, listOf(STREAM_ID))
 
         return pc
     }
@@ -265,10 +262,11 @@ object StreamCoordinator {
         peerConnection?.createOffer(SdpObserver("createOffer") { sdp ->
             peerConnection?.setLocalDescription(SdpObserver("setLocalOffer"), sdp)
             val payload = JSONObject().apply {
-                put("sdp",  sdp.description)
-                put("type", sdp.type.canonicalForm())
+                put("sdp",       sdp.description)
+                put("type",      sdp.type.canonicalForm())
+                put("sessionId", sessionId)
             }
-            socket?.emit("offer", payload, sessionId)
+            socket?.emit("offer", payload)
         }, constraints)
     }
 
@@ -277,10 +275,11 @@ object StreamCoordinator {
         peerConnection?.createAnswer(SdpObserver("createAnswer") { sdp ->
             peerConnection?.setLocalDescription(SdpObserver("setLocalAnswer"), sdp)
             val payload = JSONObject().apply {
-                put("sdp",  sdp.description)
-                put("type", sdp.type.canonicalForm())
+                put("sdp",       sdp.description)
+                put("type",      sdp.type.canonicalForm())
+                put("sessionId", sessionId)
             }
-            socket?.emit("answer", payload, sessionId)
+            socket?.emit("answer", payload)
         }, constraints)
     }
 
@@ -314,7 +313,8 @@ object StreamCoordinator {
     // ------------------------------------------------------------------
 
     private fun cleanUp() {
-        runCatching { socket?.disconnect(); socket?.off() }
+        runCatching { socket?.disconnect() }
+        runCatching { socket?.off() }
         runCatching { videoCapturer?.stopCapture() }
         runCatching { videoCapturer?.dispose() }
         runCatching { videoTrack?.dispose() }
@@ -348,8 +348,9 @@ object StreamCoordinator {
                 put("sdpMid",        candidate.sdpMid)
                 put("sdpMLineIndex", candidate.sdpMLineIndex)
                 put("candidate",     candidate.sdp)
+                put("sessionId",     sessionId)
             }
-            socket?.emit("ice-candidate", payload, sessionId)
+            socket?.emit("ice-candidate", payload)
         }
 
         override fun onIceConnectionChange(state: PeerConnection.IceConnectionState) {

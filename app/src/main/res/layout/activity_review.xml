@@ -47,7 +47,7 @@
         android:id="@+id/tvStreamStatus"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="Ready"
+        android:text="@string/review_status_ready"
         android:textSize="15sp"
         android:gravity="center"
         android:layout_marginBottom="24dp" />

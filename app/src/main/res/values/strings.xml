@@ -29,4 +29,6 @@
     <string name="review_session_id_hint">Partner Session ID</string>
     <string name="review_btn_start">Start Review</string>
     <string name="review_btn_stop">Stop Review</string>
+    <string name="review_status_ready">Ready</string>
+    <string name="review_status_streaming">🔴 Streaming to partner…</string>
 </resources>

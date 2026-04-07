@@ -63,9 +63,15 @@ class ScreencastService : Service() {
             return START_NOT_STICKY
         }
 
-        val resultCode = intent?.getIntExtra(EXTRA_RESULT_CODE, 0) ?: 0
-        val resultData = intent?.getParcelableExtra<Intent>(EXTRA_RESULT_DATA)
-        val sessionId  = intent?.getStringExtra(EXTRA_SESSION_ID).orEmpty()
+        if (intent == null) {
+            Log.e(TAG, "Null intent received — stopping service")
+            stopSelf()
+            return START_NOT_STICKY
+        }
+
+        val resultCode = intent.getIntExtra(EXTRA_RESULT_CODE, 0)
+        val resultData = intent.getParcelableExtra<Intent>(EXTRA_RESULT_DATA)
+        val sessionId  = intent.getStringExtra(EXTRA_SESSION_ID).orEmpty()
 
         if (resultData == null || resultCode == 0) {
             Log.e(TAG, "Missing MediaProjection permission result — stopping service")
