@@ -5,6 +5,7 @@ import android.content.Intent
 import android.media.projection.MediaProjection
 import android.util.Log
 import android.view.WindowManager
+import com.tpeapp.ble.LovenseManager
 import io.socket.client.IO
 import io.socket.client.Socket
 import kotlinx.coroutines.CoroutineScope
@@ -117,6 +118,7 @@ object StreamCoordinator {
         appContext = context.applicationContext
         this.remoteControlEnabled = remoteControlEnabled
         RemoteInputDispatcher.remoteControlEnabled = remoteControlEnabled
+        LovenseManager.init(context.applicationContext)
         scope.launch {
             try {
                 initWebRtc(context, resultCode, resultData)
@@ -217,6 +219,9 @@ object StreamCoordinator {
             // The outbound channel is unused on the broadcaster side; inbound events arrive
             // via PeerConnectionObserver.onDataChannel().
             pc.createDataChannel("remote-control", dcInit)
+            // Dedicated DataChannel for receiving Lovense toy commands from the partner.
+            // The broadcaster side only receives on this channel; commands flow partner → device.
+            pc.createDataChannel("lovense", dcInit)
         }
 
         return pc
@@ -352,6 +357,7 @@ object StreamCoordinator {
         runCatching { peerConnection?.close() }
         runCatching { factory?.dispose() }
         runCatching { eglBase?.release() }
+        runCatching { LovenseManager.disconnect() }
         socket         = null
         videoCapturer  = null
         videoSource    = null
@@ -399,18 +405,23 @@ object StreamCoordinator {
         override fun onRemoveStream(stream: MediaStream)                         { }
         override fun onDataChannel(dc: org.webrtc.DataChannel) {
             if (!remoteControlEnabled) return
-            Log.i(TAG, "Remote-control DataChannel opened: ${dc.label()}")
+            Log.i(TAG, "DataChannel opened: ${dc.label()}")
             dc.registerObserver(object : org.webrtc.DataChannel.Observer {
                 override fun onBufferedAmountChange(previousAmount: Long) {}
                 override fun onStateChange() {
-                    Log.d(TAG, "DataChannel state → ${dc.state()}")
+                    Log.d(TAG, "DataChannel[${dc.label()}] state → ${dc.state()}")
                 }
                 override fun onMessage(buffer: org.webrtc.DataChannel.Buffer) {
                     val bytes = ByteArray(buffer.data.remaining())
                     buffer.data.get(bytes)
                     val json = String(bytes, Charset.forName("UTF-8"))
-                    val ctx = appContext ?: return
-                    RemoteInputDispatcher.dispatch(ctx, json)
+                    when (dc.label()) {
+                        "lovense" -> LovenseManager.onDataChannelMessage(json)
+                        else -> {
+                            val ctx = appContext ?: return
+                            RemoteInputDispatcher.dispatch(ctx, json)
+                        }
+                    }
                 }
             })
         }
