@@ -11,6 +11,7 @@ import com.tpeapp.databinding.ActivityMainBinding
 import com.tpeapp.mdm.AppDeviceAdminReceiver
 import com.tpeapp.mdm.PartnerPinManager
 import com.tpeapp.pairing.PairingActivity
+import com.tpeapp.review.ReviewActivity
 import com.tpeapp.service.FilterService
 
 /**
@@ -105,6 +106,10 @@ class MainActivity : AppCompatActivity() {
                     binding.tvAdminStatus.text = getString(R.string.pin_incorrect)
                 }
             }
+        }
+
+        binding.btnStartReview.setOnClickListener {
+            startActivity(Intent(this, ReviewActivity::class.java))
         }
     }
 

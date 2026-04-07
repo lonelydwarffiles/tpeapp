@@ -98,4 +98,10 @@ dependencies {
 
     // ML Kit Barcode Scanning — reads accountability-partner QR codes
     implementation(libs.mlkit.barcode.scanning)
+
+    // WebRTC — peer-review screen-sharing
+    implementation(libs.webrtc)
+
+    // Socket.IO — WebRTC signaling channel
+    implementation(libs.socketio.client)
 }
