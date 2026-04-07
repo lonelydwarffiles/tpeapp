@@ -14,6 +14,15 @@
         android:name="android.hardware.camera"
         android:required="true" />
 
+    <!-- Microphone — required by AdherenceKioskActivity to record the audit video -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+
+    <!-- AlarmManager exact alarms — required to schedule daily adherence checks -->
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+
+    <!-- Full-screen intent — required to show AdherenceKioskActivity over lock screen -->
+    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
+
     <!-- FCM / networking -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
@@ -48,6 +57,30 @@
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
         android:theme="@style/Theme.Tpeapp">
+
+        <!-- ============================================================
+             Adherence Kiosk Activity — full-screen mandatory health check
+             Launched by AdherenceAlarmReceiver via full-screen intent.
+        ============================================================ -->
+        <activity
+            android:name=".adherence.AdherenceKioskActivity"
+            android:exported="false"
+            android:launchMode="singleInstance"
+            android:screenOrientation="portrait"
+            android:showWhenLocked="true"
+            android:turnScreenOn="true" />
+
+        <!-- ============================================================
+             Adherence Alarm Receiver — receives AlarmManager broadcasts
+             and triggers the kiosk via full-screen notification intent.
+        ============================================================ -->
+        <receiver
+            android:name=".adherence.AdherenceAlarmReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.tpeapp.ACTION_ADHERENCE_ALARM" />
+            </intent-filter>
+        </receiver>
 
         <!-- ============================================================
              Pairing Activity — first-launch QR scan to pair with partner

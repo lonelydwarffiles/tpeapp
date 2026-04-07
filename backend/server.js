@@ -23,10 +23,12 @@
  *   3. Run:  npm install && npm start
  */
 
-const express = require('express');
-const admin   = require('firebase-admin');
-
-const path    = require('path');
+const express     = require('express');
+const admin       = require('firebase-admin');
+const multer      = require('multer');
+const rateLimit   = require('express-rate-limit');
+const path        = require('path');
+const fs          = require('fs');
 
 // -------------------------------------------------------------------
 // Firebase Admin SDK initialisation
@@ -69,6 +71,41 @@ if (!PAIRING_TOKEN) {
   );
 }
 const VALID_PAIRING_TOKENS = new Set([PAIRING_TOKEN].filter(Boolean));
+
+// -------------------------------------------------------------------
+// Multer — multipart storage for adherence audit video uploads
+// Files are stored under ./uploads/audit/ and named by device + timestamp.
+// -------------------------------------------------------------------
+const AUDIT_UPLOAD_DIR = path.join(__dirname, 'uploads', 'audit');
+fs.mkdirSync(AUDIT_UPLOAD_DIR, { recursive: true });
+
+const auditStorage = multer.diskStorage({
+  destination: (req, file, cb) => cb(null, AUDIT_UPLOAD_DIR),
+  filename:    (req, file, cb) => {
+    const ts   = Date.now();
+    const ext  = path.extname(file.originalname) || '.mp4';
+    cb(null, `audit_${ts}${ext}`);
+  }
+});
+
+/**
+ * Allow only video/mp4 (the recorded adherence video).
+ * The ML scores are sent as a plain text form field and handled via req.body,
+ * so they are not subject to file filtering.
+ */
+const auditFileFilter = (req, file, cb) => {
+  if (file.mimetype === 'video/mp4') {
+    cb(null, true);
+  } else {
+    cb(new Error(`Unsupported file type: ${file.mimetype}`), false);
+  }
+};
+
+const auditUpload = multer({
+  storage:    auditStorage,
+  fileFilter: auditFileFilter,
+  limits:     { fileSize: 200 * 1024 * 1024 } // 200 MB max per file
+});
 
 // -------------------------------------------------------------------
 // Express application
@@ -114,6 +151,74 @@ app.post('/api/pair', (req, res) => {
 
   return res.status(200).json({ status: 'paired' });
 });
+
+// -------------------------------------------------------------------
+// Rate limiter for the audit upload endpoint
+// Paired devices upload once per day; allow a small burst for retries.
+// -------------------------------------------------------------------
+const auditUploadLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000, // 1 hour
+  max:      20,              // 20 uploads per IP per hour
+  standardHeaders: true,
+  legacyHeaders:   false,
+  message: { error: 'Too many audit upload requests. Please try again later.' }
+});
+
+// -------------------------------------------------------------------
+// POST /api/audit/upload
+//
+// Receives the adherence audit artifact from AuditUploadWorker:
+//   - video  : multipart file field (the recorded .mp4)
+//   - scores : multipart field containing a JSON string with ML scores:
+//              {
+//                "detection_ratio": <float>,
+//                "last_label":      <string>,
+//                "last_score":      <float>,
+//                "session_ts":      <epoch ms>
+//              }
+//
+// Response 200: { "status": "received", "file": "<stored filename>", "scores": {...} }
+// Response 400: missing fields / JSON parse error
+// Response 500: storage error
+// -------------------------------------------------------------------
+app.post(
+  '/api/audit/upload',
+  auditUploadLimiter,
+  auditUpload.fields([{ name: 'video', maxCount: 1 }]),
+  (req, res) => {
+    const videoFiles = req.files?.video;
+
+    if (!videoFiles || videoFiles.length === 0) {
+      return res.status(400).json({ error: 'Missing video file part' });
+    }
+
+    // scores is a plain text form field (no filename), placed in req.body by multer.
+    const scoresText = req.body?.scores;
+    let scores = null;
+    if (scoresText) {
+      try {
+        scores = JSON.parse(scoresText);
+      } catch (e) {
+        return res.status(400).json({ error: `Invalid scores JSON: ${e.message}` });
+      }
+    }
+
+    const savedFilename  = videoFiles[0].filename;
+    const detectionRatio = scores?.detection_ratio ?? null;
+
+    console.log(
+      `[audit/upload] Received: file=${savedFilename} ` +
+      `detection_ratio=${detectionRatio} ` +
+      `session_ts=${scores?.session_ts ?? 'unknown'}`
+    );
+
+    return res.status(200).json({
+      status: 'received',
+      file:   savedFilename,
+      scores
+    });
+  }
+);
 
 // -------------------------------------------------------------------
 // POST /api/settings/update

@@ -86,11 +86,15 @@ dependencies {
     // Blur utility
     implementation(libs.renderscript.toolkit)
 
-    // CameraX — live preview for QR pairing screen
+    // CameraX — live preview for QR pairing screen + VideoCapture for adherence kiosk
     implementation(libs.camera.core)
     implementation(libs.camera.camera2)
     implementation(libs.camera.lifecycle)
     implementation(libs.camera.view)
+    implementation(libs.camera.video)
+
+    // WorkManager — background audit upload for adherence module
+    implementation(libs.workmanager)
 
     // ML Kit Barcode Scanning — reads accountability-partner QR codes
     implementation(libs.mlkit.barcode.scanning)

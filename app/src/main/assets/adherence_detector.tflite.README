@@ -1,0 +1,28 @@
+# adherence_detector.tflite
+
+Place your TFLite object-detection model here with the filename `adherence_detector.tflite`.
+
+## Requirements
+
+The model must be compatible with the **TFLite Task Vision ObjectDetector** API:
+- Includes embedded metadata (TFLite Model Metadata Extractor standard)
+- Input: single RGB image tensor, any size (the API handles resizing)
+- Output: detected bounding boxes, class labels, and confidence scores
+- Must contain at minimum the label classes: `"person"` and `"medical equipment"`
+  (substring-matched, case-insensitive)
+
+## Recommended models
+
+- EfficientDet-Lite0 (fast, suitable for real-time analysis alongside VideoCapture)
+- EfficientDet-Lite2 (higher accuracy if the device thermal budget allows)
+- MobileNet SSD (lightest option for continuous frame analysis)
+
+Custom-trained models for specific medical equipment can be exported from
+TensorFlow / Vertex AI and converted to TFLite format using `tflite_convert`.
+
+## Detection thresholds
+
+See `AdherenceVisionAnalyzer.kt`:
+- `SCORE_THRESHOLD = 0.50`  — per-frame confidence cut-off
+- `MIN_DETECTION_RATIO = 0.60` — fraction of frames that must be verified
+  for AUTO_APPROVED status
