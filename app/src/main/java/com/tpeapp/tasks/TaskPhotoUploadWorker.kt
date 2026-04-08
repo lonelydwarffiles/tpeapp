@@ -10,30 +10,31 @@ import androidx.work.CoroutineWorker
 import androidx.work.ForegroundInfo
 import androidx.work.WorkerParameters
 import com.tpeapp.pairing.PairingActivity
+import com.tpeapp.service.FilterService
 import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.MultipartBody
 import okhttp3.OkHttpClient
 import okhttp3.Request
-import okhttp3.RequestBody.Companion.asRequestBody
 import okhttp3.RequestBody.Companion.toRequestBody
-import java.io.File
+import org.json.JSONObject
 import java.util.concurrent.TimeUnit
 
 /**
  * TaskPhotoUploadWorker
  *
- * [CoroutineWorker] that uploads the task verification photo to the partner
- * backend at `POST /api/tasks/verify`.
+ * [CoroutineWorker] that reports task completion to the partner backend at
+ * `POST /api/tpe/task/status`.
  *
- * Mirrors [com.tpeapp.adherence.AuditUploadWorker] in structure: the request
- * is a multipart/form-data body carrying the task ID and the JPEG photo file.
+ * The request is a JSON body with `task_id`, `status`, and an optional
+ * `proof_note`.  If a webhook bearer token is configured it is included as a
+ * `Authorization: Bearer` header (same secret used by ConsequenceDispatcher).
+ *
  * Failures trigger an automatic [Result.retry] with exponential back-off.
  *
  * Input data keys
  * ---------------
  * Pass via [androidx.work.Data.Builder]:
- *  - [KEY_PHOTO_PATH] – absolute path of the JPEG proof photo.
- *  - [KEY_TASK_ID]    – UUID of the task being verified.
+ *  - [KEY_PHOTO_PATH] – absolute path of the JPEG proof photo (kept locally).
+ *  - [KEY_TASK_ID]    – UUID of the task being reported as completed.
  */
 class TaskPhotoUploadWorker(
     private val context: Context,
@@ -50,75 +51,61 @@ class TaskPhotoUploadWorker(
         private const val NOTIFICATION_CHANNEL_NAME = "Task Proof Upload"
         private const val NOTIFICATION_ID           = 0x7A52
 
-        private val JPEG_MEDIA_TYPE = "image/jpeg".toMediaType()
-        private val TEXT_MEDIA_TYPE = "text/plain".toMediaType()
+        private val JSON_MEDIA_TYPE = "application/json".toMediaType()
 
         private val httpClient = OkHttpClient.Builder()
             .connectTimeout(30, TimeUnit.SECONDS)
             .readTimeout(60, TimeUnit.SECONDS)
-            .writeTimeout(120, TimeUnit.SECONDS)
+            .writeTimeout(60, TimeUnit.SECONDS)
             .build()
     }
 
     override suspend fun doWork(): Result {
-        val photoPath = inputData.getString(KEY_PHOTO_PATH)
-        val taskId    = inputData.getString(KEY_TASK_ID)
+        val taskId = inputData.getString(KEY_TASK_ID)
 
-        if (photoPath.isNullOrBlank() || taskId.isNullOrBlank()) {
-            Log.e(TAG, "Missing input data — cannot upload task proof")
+        if (taskId.isNullOrBlank()) {
+            Log.e(TAG, "Missing task_id input — cannot report task status")
             return Result.failure()
         }
 
-        val photoFile = File(photoPath)
-        if (!photoFile.exists()) {
-            Log.e(TAG, "Photo file not found: $photoPath")
-            return Result.failure()
-        }
-
-        val endpoint = PreferenceManager
-            .getDefaultSharedPreferences(context)
-            .getString(PairingActivity.PREF_PARTNER_ENDPOINT, null)
+        val prefs    = PreferenceManager.getDefaultSharedPreferences(context)
+        val endpoint = prefs.getString(PairingActivity.PREF_PARTNER_ENDPOINT, null)
 
         if (endpoint.isNullOrBlank()) {
-            Log.e(TAG, "Partner endpoint not configured — cannot upload task proof")
+            Log.e(TAG, "Partner endpoint not configured — cannot report task status")
             return Result.failure()
         }
+
+        val bearerToken = prefs.getString(FilterService.PREF_WEBHOOK_BEARER_TOKEN, null)
+            ?.takeIf { it.isNotBlank() }
 
         setForeground(buildForegroundInfo())
 
-        val requestBody = MultipartBody.Builder()
-            .setType(MultipartBody.FORM)
-            .addFormDataPart(
-                "photo",
-                photoFile.name,
-                photoFile.asRequestBody(JPEG_MEDIA_TYPE)
-            )
-            .addFormDataPart("task_id", taskId, taskId.toRequestBody(TEXT_MEDIA_TYPE))
-            .addFormDataPart(
-                "timestamp",
-                System.currentTimeMillis().toString(),
-                System.currentTimeMillis().toString().toRequestBody(TEXT_MEDIA_TYPE)
-            )
-            .build()
+        val body = JSONObject().apply {
+            put("task_id",    taskId)
+            put("status",     "completed")
+            put("proof_note", "Photo proof captured on device")
+        }.toString().toRequestBody(JSON_MEDIA_TYPE)
 
-        val request = Request.Builder()
-            .url("$endpoint/api/tasks/verify")
-            .post(requestBody)
-            .build()
+        val requestBuilder = Request.Builder()
+            .url("$endpoint/api/tpe/task/status")
+            .post(body)
+        if (bearerToken != null) {
+            requestBuilder.addHeader("Authorization", "Bearer $bearerToken")
+        }
 
         return try {
-            httpClient.newCall(request).execute().use { response ->
+            httpClient.newCall(requestBuilder.build()).execute().use { response ->
                 if (response.isSuccessful) {
-                    Log.i(TAG, "Task proof uploaded (HTTP ${response.code}) for task $taskId")
-                    photoFile.delete()
+                    Log.i(TAG, "Task status reported (HTTP ${response.code}) for task $taskId")
                     Result.success()
                 } else {
-                    Log.w(TAG, "Server rejected task proof: HTTP ${response.code} — will retry")
+                    Log.w(TAG, "Server rejected task status: HTTP ${response.code} — will retry")
                     Result.retry()
                 }
             }
         } catch (e: Exception) {
-            Log.w(TAG, "Task proof upload failed — will retry: ${e.message}")
+            Log.w(TAG, "Task status report failed — will retry: ${e.message}")
             Result.retry()
         }
     }
@@ -131,12 +118,12 @@ class TaskPhotoUploadWorker(
                     NOTIFICATION_CHANNEL_ID,
                     NOTIFICATION_CHANNEL_NAME,
                     NotificationManager.IMPORTANCE_LOW
-                ).apply { description = "Silent channel for task proof upload" }
+                ).apply { description = "Silent channel for task status reporting" }
             )
         }
 
         val notification = NotificationCompat.Builder(context, NOTIFICATION_CHANNEL_ID)
-            .setContentTitle("Uploading task proof…")
+            .setContentTitle("Reporting task completion…")
             .setSmallIcon(android.R.drawable.stat_sys_upload)
             .setOngoing(true)
             .setSilent(true)

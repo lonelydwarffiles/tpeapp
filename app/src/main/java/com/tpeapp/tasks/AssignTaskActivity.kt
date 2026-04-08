@@ -3,13 +3,20 @@ package com.tpeapp.tasks
 import android.app.DatePickerDialog
 import android.app.TimePickerDialog
 import android.os.Bundle
+import android.util.Base64
 import android.util.Log
 import android.view.View
+import android.widget.EditText
+import android.widget.LinearLayout
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.preference.PreferenceManager
+import androidx.security.crypto.EncryptedSharedPreferences
+import androidx.security.crypto.MasterKey
 import com.tpeapp.R
 import com.tpeapp.databinding.ActivityAssignTaskBinding
 import com.tpeapp.pairing.PairingActivity
+import com.tpeapp.questions.QuestionsActivity
 import okhttp3.Call
 import okhttp3.Callback
 import okhttp3.MediaType.Companion.toMediaType
@@ -22,7 +29,6 @@ import java.io.IOException
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Locale
-import java.util.UUID
 import java.util.concurrent.TimeUnit
 
 /**
@@ -31,9 +37,9 @@ import java.util.concurrent.TimeUnit
  * Allows the accountability partner to compose a task (title, description,
  * deadline) and send it to the submissive device via the partner backend.
  *
- * The task payload is sent as JSON to `POST {endpoint}/api/tasks/assign`.
- * The backend is expected to store the task and forward an FCM
- * `TASK_ASSIGNED` push to the paired device's FCM token.
+ * The task payload is sent as JSON to `POST {endpoint}/api/admin/tpe/tasks`
+ * using HTTP Basic Auth.  The backend stores the task and forwards a
+ * `TASK_ASSIGNED` FCM push to every paired device.
  *
  * This activity is PIN-protected in [MainActivity] before launch so only the
  * partner can open it (consistent with how Deactivate Admin is guarded).
@@ -135,9 +141,13 @@ class AssignTaskActivity : AppCompatActivity() {
             return
         }
 
-        val taskId  = UUID.randomUUID().toString()
+        val creds = loadAdminCredentials()
+        if (creds == null) {
+            promptForCredentials { sendTask() }
+            return
+        }
+
         val payload = JSONObject().apply {
-            put("task_id",     taskId)
             put("title",       title)
             put("description", description)
             put("deadline_ms", deadline)
@@ -147,8 +157,14 @@ class AssignTaskActivity : AppCompatActivity() {
         showStatus("Sending task…")
         binding.progressBar.visibility = View.VISIBLE
 
+        val authHeader = "Basic " + Base64.encodeToString(
+            "${creds.first}:${creds.second}".toByteArray(Charsets.UTF_8),
+            Base64.NO_WRAP
+        )
+
         val request = Request.Builder()
-            .url("$endpoint/api/tasks/assign")
+            .url("$endpoint/api/admin/tpe/tasks")
+            .addHeader("Authorization", authHeader)
             .post(payload.toString().toRequestBody(JSON_TYPE))
             .build()
 
@@ -166,19 +182,101 @@ class AssignTaskActivity : AppCompatActivity() {
                 response.use {
                     runOnUiThread {
                         binding.progressBar.visibility = View.GONE
-                        if (it.isSuccessful) {
-                            Log.i(TAG, "Task $taskId assigned successfully")
-                            showStatus("✅ Task sent to device.")
-                            binding.btnSendTask.isEnabled = false
-                        } else {
-                            Log.w(TAG, "Server rejected task assignment: HTTP ${it.code}")
-                            binding.btnSendTask.isEnabled = true
-                            showStatus("⚠️ Server rejected request (${it.code}). Try again.")
+                        when {
+                            it.isSuccessful -> {
+                                Log.i(TAG, "Task assigned successfully (HTTP ${it.code})")
+                                showStatus("✅ Task sent to device.")
+                                binding.btnSendTask.isEnabled = false
+                            }
+                            it.code == 401 -> {
+                                Log.w(TAG, "Admin credentials rejected (HTTP 401)")
+                                binding.btnSendTask.isEnabled = true
+                                showStatus("⚠️ Invalid admin credentials. Re-enter them.")
+                                promptForCredentials { sendTask() }
+                            }
+                            else -> {
+                                Log.w(TAG, "Server rejected task assignment: HTTP ${it.code}")
+                                binding.btnSendTask.isEnabled = true
+                                showStatus("⚠️ Server rejected request (${it.code}). Try again.")
+                            }
                         }
                     }
                 }
             }
         })
+    }
+
+    // ------------------------------------------------------------------
+    //  Admin credentials (EncryptedSharedPreferences, same store as QuestionsActivity)
+    // ------------------------------------------------------------------
+
+    private fun loadAdminCredentials(): Pair<String, String>? {
+        return try {
+            val masterKey = MasterKey.Builder(applicationContext)
+                .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
+                .build()
+            val prefs = EncryptedSharedPreferences.create(
+                applicationContext,
+                QuestionsActivity.PREF_ADMIN_PREFS_FILE,
+            val pass = prefs.getString(QuestionsActivity.PREF_ADMIN_PASS, null)
+            if (user.isNullOrBlank() || pass.isNullOrBlank()) null else Pair(user, pass)
+        } catch (e: Exception) {
+            Log.e(TAG, "Could not load admin credentials", e)
+            null
+        }
+    }
+
+    private fun promptForCredentials(onSaved: () -> Unit) {
+        val layout = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(48, 24, 48, 0)
+        }
+        val etUser = EditText(this).apply { hint = getString(R.string.questions_credentials_hint_user) }
+        val etPass = EditText(this).apply {
+            hint = getString(R.string.questions_credentials_hint_pass)
+            inputType = android.text.InputType.TYPE_CLASS_TEXT or
+                android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
+        }
+        layout.addView(etUser)
+        layout.addView(etPass)
+
+        AlertDialog.Builder(this)
+            .setTitle(getString(R.string.questions_credentials_title))
+            .setMessage(getString(R.string.questions_credentials_message))
+            .setView(layout)
+            .setPositiveButton(getString(R.string.questions_credentials_save)) { _, _ ->
+                val user = etUser.text.toString().trim()
+                val pass = etPass.text.toString()
+                if (user.isBlank() || pass.isBlank()) {
+                    showStatus("⚠️ ${getString(R.string.questions_credentials_empty)}")
+                    return@setPositiveButton
+                }
+                saveAdminCredentials(user, pass)
+                onSaved()
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
+    }
+
+    private fun saveAdminCredentials(user: String, pass: String) {
+        try {
+            val masterKey = MasterKey.Builder(applicationContext)
+                .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
+                .build()
+            val prefs = EncryptedSharedPreferences.create(
+                applicationContext,
+                QuestionsActivity.PREF_ADMIN_PREFS_FILE,
+                masterKey,
+                EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+                EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
+            )
+            prefs.edit()
+                .putString(QuestionsActivity.PREF_ADMIN_USER, user)
+                .putString(QuestionsActivity.PREF_ADMIN_PASS, pass)
+                .apply()
+        } catch (e: Exception) {
+            Log.e(TAG, "Could not save admin credentials", e)
+        }
     }
 
     // ------------------------------------------------------------------

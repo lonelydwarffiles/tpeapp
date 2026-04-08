@@ -45,6 +45,7 @@ class ScreencastService : Service() {
         const val EXTRA_RESULT_DATA    = "extra_result_data"
         const val EXTRA_SESSION_ID     = "extra_session_id"
         const val EXTRA_REMOTE_CONTROL = "extra_remote_control"
+        const val EXTRA_SIGNALING_URL  = "extra_signaling_url"
 
         const val ACTION_STOP = "com.tpeapp.ACTION_STOP_SCREENCAST"
     }
@@ -74,6 +75,7 @@ class ScreencastService : Service() {
         val resultData        = intent.getParcelableExtra<Intent>(EXTRA_RESULT_DATA)
         val sessionId         = intent.getStringExtra(EXTRA_SESSION_ID).orEmpty()
         val remoteControl     = intent.getBooleanExtra(EXTRA_REMOTE_CONTROL, false)
+        val signalingUrl      = intent.getStringExtra(EXTRA_SIGNALING_URL).orEmpty()
 
         if (resultData == null || resultCode == 0) {
             Log.e(TAG, "Missing MediaProjection permission result — stopping service")
@@ -84,7 +86,7 @@ class ScreencastService : Service() {
         // Must call startForeground before acquiring the MediaProjection on Android 10+.
         startForeground(NOTIFICATION_ID, buildForegroundNotification(remoteControl))
 
-        StreamCoordinator.start(applicationContext, resultCode, resultData, sessionId, remoteControl)
+        StreamCoordinator.start(applicationContext, resultCode, resultData, sessionId, signalingUrl, remoteControl)
         return START_STICKY
     }
 

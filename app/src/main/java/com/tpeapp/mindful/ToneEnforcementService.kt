@@ -308,7 +308,9 @@ class ToneEnforcementService : AccessibilityService() {
      */
     private fun dispatchOverrideTelemetry(originalWord: String) {
         val webhookUrl  = cachedWebhookUrl  ?: return
-        val bearerToken = cachedBearerToken ?: return
+        // Bearer token is optional — server accepts no-auth requests when no
+        // webhook secret is configured.
+        val bearerToken = cachedBearerToken
 
         val payload = JSONObject().apply {
             put("event",         "override_used")
