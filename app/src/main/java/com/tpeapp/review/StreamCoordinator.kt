@@ -39,7 +39,7 @@ import java.nio.charset.Charset
  *  2. Frames are fed into a [VideoSource] backed by the Tensor G4's hardware
  *     H.264/H.265 encoder via [HardwareVideoEncoderFactory].
  *  3. A [PeerConnection] is opened to the partner and signaled through a
- *     Socket.IO server (configurable via [SIGNALING_URL]).
+ *     Socket.IO server (URL passed in via [start]).
  *  4. Resolution is adapted dynamically using [VideoSource.adaptOutputFormat]
  *     to maintain a high target frame-rate under constrained bandwidth.
  *
@@ -52,9 +52,6 @@ object StreamCoordinator {
     // ------------------------------------------------------------------
     //  Configuration
     // ------------------------------------------------------------------
-
-    /** Override with the production signaling server URL. */
-    private const val SIGNALING_URL = "https://your-signaling-server.example.com"
 
     private const val TAG            = "StreamCoordinator"
     private const val STREAM_ID      = "tpe_review_stream"
@@ -89,6 +86,7 @@ object StreamCoordinator {
     @Volatile private var surfaceHelper: SurfaceTextureHelper? = null
     @Volatile private var socket: Socket?                    = null
     @Volatile private var sessionId: String                  = ""
+    @Volatile private var signalingUrl: String               = ""
     @Volatile private var appContext: Context?               = null
     @Volatile private var remoteControlEnabled: Boolean      = false
 
@@ -112,9 +110,11 @@ object StreamCoordinator {
         resultCode: Int,
         resultData: Intent,
         partnerSession: String,
+        signalingServerUrl: String,
         remoteControlEnabled: Boolean = false
     ) {
-        sessionId = partnerSession
+        sessionId   = partnerSession
+        signalingUrl = signalingServerUrl
         appContext = context.applicationContext
         this.remoteControlEnabled = remoteControlEnabled
         RemoteInputDispatcher.remoteControlEnabled = remoteControlEnabled
@@ -237,7 +237,7 @@ object StreamCoordinator {
             .setReconnectionAttempts(5)
             .build()
 
-        val sock = IO.socket(SIGNALING_URL, opts)
+        val sock = IO.socket(signalingUrl, opts)
         socket = sock
 
         sock.on(Socket.EVENT_CONNECT) {
@@ -369,6 +369,7 @@ object StreamCoordinator {
         factory        = null
         eglBase        = null
         appContext     = null
+        signalingUrl   = ""
         remoteControlEnabled = false
         RemoteInputDispatcher.remoteControlEnabled = false
         Log.i(TAG, "StreamCoordinator cleaned up")

@@ -72,5 +72,13 @@
             android:text="@string/questions_btn_open"
             android:layout_marginTop="8dp" />
 
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btnCheckIn"
+            style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/checkin_btn_open"
+            android:layout_marginTop="8dp" />
+
     </LinearLayout>
 </ScrollView>

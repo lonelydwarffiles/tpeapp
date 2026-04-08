@@ -91,4 +91,33 @@
     <string name="questions_notif_channel_desc">Alerts when someone drops an anonymous question in the Puppy Pouch</string>
     <string name="questions_notif_title">🐾 New question in the Puppy Pouch!</string>
     <string name="questions_notif_action">Answer Now</string>
+
+    <!-- Peer-Review FCM notification -->
+    <string name="review_fcm_channel_name">Screen Review Requests</string>
+    <string name="review_fcm_channel_desc">Alerts when your accountability partner requests a live screen review</string>
+    <string name="review_fcm_notif_title">📺 Screen review requested</string>
+    <string name="review_fcm_notif_text">Your accountability partner wants to start a screen review. Tap to begin.</string>
+
+    <!-- Daily Check-In Module -->
+    <string name="checkin_title">Daily Check-In</string>
+    <string name="checkin_instructions">How are you doing today? Your partner will see your response.</string>
+    <string name="checkin_mood_label">Mood</string>
+    <string name="checkin_note_hint">Optional note for your partner…</string>
+    <string name="checkin_btn_submit">Submit Check-In</string>
+    <string name="checkin_btn_open">Daily Check-In</string>
+    <string name="checkin_status_submitting">Submitting…</string>
+    <string name="checkin_status_sent">✅ Check-in submitted!</string>
+    <string name="checkin_status_failed">⚠️ Could not submit. Check your connection and try again.</string>
+    <string name="checkin_no_endpoint">Device not paired. Scan partner QR code first.</string>
+    <!-- FCM notification strings -->
+    <string name="checkin_fcm_channel_name">Daily Check-In Reminders</string>
+    <string name="checkin_fcm_channel_desc">Alerts when your accountability partner requests a daily check-in</string>
+    <string name="checkin_fcm_notif_title">📋 Check-in requested</string>
+    <string name="checkin_fcm_notif_text">Your accountability partner is requesting your daily check-in.</string>
+
+    <!-- Rule Reminder Module -->
+    <string name="rule_reminder_notif_title">📌 Rule reminder</string>
+    <string name="rule_reminder_default_text">Your accountability partner sent a rule reminder.</string>
+    <string name="rule_reminder_channel_name">Rule Reminders</string>
+    <string name="rule_reminder_channel_desc">Notifications when your accountability partner reminds you of a rule</string>
 </resources>

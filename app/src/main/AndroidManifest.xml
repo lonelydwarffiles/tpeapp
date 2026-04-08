@@ -236,6 +236,15 @@
             android:screenOrientation="portrait" />
 
         <!-- ============================================================
+             Daily Check-In Activity — device owner submits mood + note
+             Can be opened from MainActivity or a REQUEST_CHECKIN FCM notification.
+        ============================================================ -->
+        <activity
+            android:name=".checkin.CheckInActivity"
+            android:exported="false"
+            android:screenOrientation="portrait" />
+
+        <!-- ============================================================
              Puppy Pouch — Anonymous Questions Module
              Partner-side: view and answer anonymous questions.
              PIN-protected via MainActivity before launch.

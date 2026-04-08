@@ -10,6 +10,7 @@ import com.tpeapp.R
 import com.tpeapp.databinding.ActivityMainBinding
 import com.tpeapp.mdm.AppDeviceAdminReceiver
 import com.tpeapp.mdm.PartnerPinManager
+import com.tpeapp.checkin.CheckInActivity
 import com.tpeapp.pairing.PairingActivity
 import com.tpeapp.questions.QuestionsActivity
 import com.tpeapp.review.ReviewActivity
@@ -137,6 +138,10 @@ class MainActivity : AppCompatActivity() {
                     binding.tvAdminStatus.text = getString(R.string.pin_incorrect)
                 }
             }
+        }
+
+        binding.btnCheckIn.setOnClickListener {
+            startActivity(Intent(this, CheckInActivity::class.java))
         }
     }
 

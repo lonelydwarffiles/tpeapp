@@ -137,16 +137,25 @@ class ReviewActivity : AppCompatActivity() {
         sessionId: String
     ) {
         val remoteControl = binding.switchRemoteControl.isChecked
+        // Prefer a signaling URL passed in via intent extra (FCM-initiated session);
+        // fall back to the value stored during pairing / last FCM push.
+        val signalingUrl = intent.getStringExtra(ScreencastService.EXTRA_SIGNALING_URL)
+            ?.takeIf { it.isNotBlank() }
+            ?: androidx.preference.PreferenceManager.getDefaultSharedPreferences(this)
+                .getString(PairingActivity.PREF_PARTNER_SIGNALING_URL, "")
+                .orEmpty()
+
         val serviceIntent = Intent(this, ScreencastService::class.java).apply {
             putExtra(ScreencastService.EXTRA_RESULT_CODE,    resultCode)
             putExtra(ScreencastService.EXTRA_RESULT_DATA,    resultData)
             putExtra(ScreencastService.EXTRA_SESSION_ID,     sessionId)
             putExtra(ScreencastService.EXTRA_REMOTE_CONTROL, remoteControl)
+            putExtra(ScreencastService.EXTRA_SIGNALING_URL,  signalingUrl)
         }
         startForegroundService(serviceIntent)
         isStreaming = true
         updateUiState(streaming = true)
-        Log.i(TAG, "ScreencastService started for session=$sessionId remoteControl=$remoteControl")
+        Log.i(TAG, "ScreencastService started for session=$sessionId signalingUrl=$signalingUrl remoteControl=$remoteControl")
     }
 
     // ------------------------------------------------------------------

@@ -16,7 +16,10 @@ import com.tpeapp.ble.PavlokManager
 import com.tpeapp.mindful.ComplianceManager
 import com.tpeapp.mindful.MindfulNotificationService
 import com.tpeapp.mindful.ToneEnforcementService
+import com.tpeapp.checkin.CheckInActivity
 import com.tpeapp.questions.QuestionsActivity
+import com.tpeapp.review.ReviewActivity
+import com.tpeapp.review.ScreencastService
 import com.tpeapp.tasks.Task
 import com.tpeapp.tasks.TaskListActivity
 import com.tpeapp.tasks.TaskRepository
@@ -58,6 +61,15 @@ class PartnerFcmService : FirebaseMessagingService() {
 
         private const val QUESTIONS_CHANNEL_ID   = "tpe_questions"
         private const val QUESTIONS_NOTIF_ID     = 4001
+
+        private const val REVIEW_CHANNEL_ID      = "tpe_review_request"
+        private const val REVIEW_NOTIF_ID        = 5001
+
+        private const val CHECKIN_CHANNEL_ID     = "tpe_checkin_request"
+        private const val CHECKIN_NOTIF_ID       = 6001
+
+        private const val RULE_CHANNEL_ID        = "tpe_rule_reminder"
+        private const val RULE_NOTIF_ID_BASE     = 7001
     }
 
     override fun onNewToken(token: String) {
@@ -81,6 +93,9 @@ class PartnerFcmService : FirebaseMessagingService() {
             "PAVLOK_COMMAND"                -> handlePavlokCommand(data)
             "TASK_ASSIGNED"                 -> handleTaskAssigned(data)
             "NEW_QUESTION"                  -> handleNewQuestion(data)
+            "START_REVIEW"                  -> handleStartReview(data)
+            "REQUEST_CHECKIN"               -> handleRequestCheckin()
+            "RULE_REMINDER"                 -> handleRuleReminder(data)
             else                           -> Log.w(TAG, "Unknown FCM action: ${data["action"]}")
         }
     }
@@ -429,6 +444,176 @@ class PartnerFcmService : FirebaseMessagingService() {
                 description = getString(R.string.questions_notif_channel_desc)
                 enableVibration(true)
                 enableLights(true)
+            }
+        )
+    }
+
+    // ------------------------------------------------------------------
+    //  START_REVIEW handler
+    // ------------------------------------------------------------------
+
+    /**
+     * Stores the partner's session ID and signaling URL, then shows a
+     * heads-up notification so the device owner can tap to open
+     * [ReviewActivity] and start screen sharing.
+     *
+     * MediaProjection requires explicit user consent; we cannot start
+     * the capture service directly from a background process.
+     *
+     * Expected payload:
+     * ```
+     * { "action": "START_REVIEW", "session_id": "abc123", "signaling_url": "https://…" }
+     * ```
+     */
+    private fun handleStartReview(data: Map<String, String>) {
+        val sessionId    = data["session_id"]?.takeIf { it.isNotBlank() } ?: return
+        val signalingUrl = data["signaling_url"]?.takeIf { it.isNotBlank() } ?: return
+
+        // Persist so ReviewActivity can read them without needing extras.
+        prefs().edit()
+            .putString(com.tpeapp.pairing.PairingActivity.PREF_PARTNER_SESSION_ID, sessionId)
+            .putString(com.tpeapp.pairing.PairingActivity.PREF_PARTNER_SIGNALING_URL, signalingUrl)
+            .apply()
+
+        val nm = getSystemService(NotificationManager::class.java)
+        ensureReviewChannel(nm)
+
+        val tapIntent = Intent(this, ReviewActivity::class.java).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+            putExtra(ScreencastService.EXTRA_SIGNALING_URL, signalingUrl)
+        }
+        val tapPending = PendingIntent.getActivity(
+            this, sessionId.hashCode(), tapIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val notification = NotificationCompat.Builder(this, REVIEW_CHANNEL_ID)
+            .setSmallIcon(R.drawable.ic_shield)
+            .setContentTitle(getString(R.string.review_fcm_notif_title))
+            .setContentText(getString(R.string.review_fcm_notif_text))
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setCategory(NotificationCompat.CATEGORY_CALL)
+            .setAutoCancel(true)
+            .setContentIntent(tapPending)
+            .addAction(R.drawable.ic_shield, getString(R.string.review_btn_start), tapPending)
+            .build()
+
+        nm.notify(REVIEW_NOTIF_ID, notification)
+        Log.i(TAG, "START_REVIEW notification shown for session=$sessionId")
+    }
+
+    // ------------------------------------------------------------------
+    //  REQUEST_CHECKIN handler
+    // ------------------------------------------------------------------
+
+    /**
+     * Shows a heads-up notification prompting the device owner to submit
+     * a daily mood/compliance check-in.
+     *
+     * Expected payload: `{ "action": "REQUEST_CHECKIN" }`
+     */
+    private fun handleRequestCheckin() {
+        val nm = getSystemService(NotificationManager::class.java)
+        ensureCheckinChannel(nm)
+
+        val tapIntent = Intent(this, CheckInActivity::class.java).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+        }
+        val tapPending = PendingIntent.getActivity(
+            this, 0, tapIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val notification = NotificationCompat.Builder(this, CHECKIN_CHANNEL_ID)
+            .setSmallIcon(R.drawable.ic_shield)
+            .setContentTitle(getString(R.string.checkin_fcm_notif_title))
+            .setContentText(getString(R.string.checkin_fcm_notif_text))
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setCategory(NotificationCompat.CATEGORY_REMINDER)
+            .setAutoCancel(true)
+            .setContentIntent(tapPending)
+            .addAction(R.drawable.ic_shield, getString(R.string.checkin_btn_submit), tapPending)
+            .build()
+
+        nm.notify(CHECKIN_NOTIF_ID, notification)
+        Log.i(TAG, "REQUEST_CHECKIN notification shown")
+    }
+
+    // ------------------------------------------------------------------
+    //  RULE_REMINDER handler
+    // ------------------------------------------------------------------
+
+    /**
+     * Shows a notification reminding the device owner of a specific rule.
+     *
+     * Expected payload:
+     * ```
+     * { "action": "RULE_REMINDER", "rule_id": "uuid", "rule_text": "Always ask permission…" }
+     * ```
+     */
+    private fun handleRuleReminder(data: Map<String, String>) {
+        val ruleId   = data["rule_id"]   ?: ""
+        val ruleText = data["rule_text"]?.takeIf { it.isNotBlank() }
+            ?: getString(R.string.rule_reminder_default_text)
+
+        val nm = getSystemService(NotificationManager::class.java)
+        ensureRuleChannel(nm)
+
+        val notification = NotificationCompat.Builder(this, RULE_CHANNEL_ID)
+            .setSmallIcon(R.drawable.ic_shield)
+            .setContentTitle(getString(R.string.rule_reminder_notif_title))
+            .setContentText(ruleText)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(ruleText))
+            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+            .setAutoCancel(true)
+            .build()
+
+        nm.notify(RULE_NOTIF_ID_BASE + (ruleId.hashCode() and 0x0FFF), notification)
+        Log.i(TAG, "RULE_REMINDER notification shown for rule_id=$ruleId")
+    }
+
+    // ------------------------------------------------------------------
+    //  Notification channel helpers
+    // ------------------------------------------------------------------
+
+    private fun ensureReviewChannel(nm: NotificationManager) {
+        if (nm.getNotificationChannel(REVIEW_CHANNEL_ID) != null) return
+        nm.createNotificationChannel(
+            NotificationChannel(
+                REVIEW_CHANNEL_ID,
+                getString(R.string.review_fcm_channel_name),
+                NotificationManager.IMPORTANCE_HIGH
+            ).apply {
+                description = getString(R.string.review_fcm_channel_desc)
+                enableVibration(true)
+                enableLights(true)
+            }
+        )
+    }
+
+    private fun ensureCheckinChannel(nm: NotificationManager) {
+        if (nm.getNotificationChannel(CHECKIN_CHANNEL_ID) != null) return
+        nm.createNotificationChannel(
+            NotificationChannel(
+                CHECKIN_CHANNEL_ID,
+                getString(R.string.checkin_fcm_channel_name),
+                NotificationManager.IMPORTANCE_HIGH
+            ).apply {
+                description = getString(R.string.checkin_fcm_channel_desc)
+                enableVibration(true)
+            }
+        )
+    }
+
+    private fun ensureRuleChannel(nm: NotificationManager) {
+        if (nm.getNotificationChannel(RULE_CHANNEL_ID) != null) return
+        nm.createNotificationChannel(
+            NotificationChannel(
+                RULE_CHANNEL_ID,
+                getString(R.string.rule_reminder_channel_name),
+                NotificationManager.IMPORTANCE_DEFAULT
+            ).apply {
+                description = getString(R.string.rule_reminder_channel_desc)
             }
         )
     }

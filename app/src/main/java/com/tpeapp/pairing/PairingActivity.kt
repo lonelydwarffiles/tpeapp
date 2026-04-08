@@ -60,10 +60,11 @@ class PairingActivity : AppCompatActivity() {
     // ------------------------------------------------------------------
 
     companion object {
-        private const val TAG              = "PairingActivity"
-        const val PREF_IS_PAIRED           = "is_paired"
-        const val PREF_PARTNER_ENDPOINT    = "partner_endpoint_url"
-        const val PREF_PARTNER_SESSION_ID  = "partner_session_id"
+        private const val TAG                    = "PairingActivity"
+        const val PREF_IS_PAIRED                 = "is_paired"
+        const val PREF_PARTNER_ENDPOINT          = "partner_endpoint_url"
+        const val PREF_PARTNER_SESSION_ID        = "partner_session_id"
+        const val PREF_PARTNER_SIGNALING_URL     = "partner_signaling_url"
 
         private val JSON_TYPE = "application/json".toMediaType()
         private val httpClient = OkHttpClient.Builder()
@@ -213,7 +214,8 @@ class PairingActivity : AppCompatActivity() {
      *
      * Expected format:
      * ```json
-     * { "endpoint": "https://partner.example.com", "pairing_token": "abc123" }
+     * { "endpoint": "https://partner.example.com", "pairing_token": "abc123",
+     *   "webhook_secret": "optional-bearer-token" }
      * ```
      */
     private fun handleQrPayload(raw: String) {
@@ -221,11 +223,13 @@ class PairingActivity : AppCompatActivity() {
 
         val endpoint: String
         val pairingToken: String
+        val webhookSecret: String
 
         try {
             val json     = JSONObject(raw)
             endpoint     = json.getString("endpoint").trimEnd('/')
             pairingToken = json.getString("pairing_token")
+            webhookSecret = json.optString("webhook_secret", "")
         } catch (e: JSONException) {
             Log.e(TAG, "Invalid QR payload", e)
             showStatus("⚠️ Invalid QR code. Ask your accountability partner for a new one.")
@@ -243,7 +247,7 @@ class PairingActivity : AppCompatActivity() {
 
         FirebaseMessaging.getInstance().token
             .addOnSuccessListener { fcmToken ->
-                sendPairingRequest(endpoint, pairingToken, fcmToken)
+                sendPairingRequest(endpoint, pairingToken, fcmToken, webhookSecret)
             }
             .addOnFailureListener { e ->
                 Log.e(TAG, "FCM token retrieval failed", e)
@@ -256,7 +260,12 @@ class PairingActivity : AppCompatActivity() {
      * POSTs the device's FCM token to the partner's `/api/pair` endpoint to
      * complete the pairing process.
      */
-    private fun sendPairingRequest(endpoint: String, pairingToken: String, fcmToken: String) {
+    private fun sendPairingRequest(
+        endpoint: String,
+        pairingToken: String,
+        fcmToken: String,
+        webhookSecret: String
+    ) {
         showStatus("Pairing with accountability partner…")
 
         val body = JSONObject().run {
@@ -281,11 +290,23 @@ class PairingActivity : AppCompatActivity() {
                 response.use {
                     if (it.isSuccessful) {
                         // Persist paired state so this screen is never shown again.
-                        prefs().edit()
+                        // Also auto-wire the webhook URL so ConsequenceDispatcher can
+                        // report events to the partner backend without manual config.
+                        val editor = prefs().edit()
                             .putBoolean(PREF_IS_PAIRED, true)
                             .putString(PREF_PARTNER_ENDPOINT, endpoint)
                             .putString(PartnerFcmService.PREF_FCM_TOKEN, fcmToken)
-                            .apply()
+                            .putString(
+                                com.tpeapp.service.FilterService.PREF_WEBHOOK_URL,
+                                "$endpoint/api/tpe/webhook"
+                            )
+                        if (webhookSecret.isNotBlank()) {
+                            editor.putString(
+                                com.tpeapp.service.FilterService.PREF_WEBHOOK_BEARER_TOKEN,
+                                webhookSecret
+                            )
+                        }
+                        editor.apply()
                         runOnUiThread {
                             Toast.makeText(
                                 this@PairingActivity,
