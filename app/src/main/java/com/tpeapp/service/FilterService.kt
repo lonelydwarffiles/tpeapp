@@ -96,18 +96,12 @@ class FilterService : Service() {
         .OnSharedPreferenceChangeListener { prefs, key ->
             when (key) {
                 PREF_THRESHOLD -> {
-                    val newThreshold = prefs.getFloat(key, DEFAULT_THRESHOLD)
-                    threshold = if (strictModeEnabled) minOf(newThreshold, STRICT_THRESHOLD)
-                                else newThreshold
+                    threshold = effectiveThreshold(prefs.getFloat(key, DEFAULT_THRESHOLD))
                     Log.i(TAG, "Threshold updated via FCM → $threshold")
                 }
                 PREF_STRICT_MODE -> {
                     strictModeEnabled = prefs.getBoolean(key, false)
-                    if (strictModeEnabled && threshold > STRICT_THRESHOLD) {
-                        threshold = STRICT_THRESHOLD
-                    } else if (!strictModeEnabled) {
-                        threshold = prefs.getFloat(PREF_THRESHOLD, DEFAULT_THRESHOLD)
-                    }
+                    threshold = effectiveThreshold(prefs.getFloat(PREF_THRESHOLD, DEFAULT_THRESHOLD))
                     Log.i(TAG, "Strict mode updated via FCM → $strictModeEnabled (threshold=$threshold)")
                 }
                 PREF_BLOCKED_CLASSES ->
@@ -159,11 +153,7 @@ class FilterService : Service() {
         val prefs = androidx.preference.PreferenceManager
             .getDefaultSharedPreferences(applicationContext)
         strictModeEnabled = prefs.getBoolean(PREF_STRICT_MODE, false)
-        threshold = if (strictModeEnabled) {
-            minOf(prefs.getFloat(PREF_THRESHOLD, DEFAULT_THRESHOLD), STRICT_THRESHOLD)
-        } else {
-            prefs.getFloat(PREF_THRESHOLD, DEFAULT_THRESHOLD)
-        }
+        threshold = effectiveThreshold(prefs.getFloat(PREF_THRESHOLD, DEFAULT_THRESHOLD))
         prefs.registerOnSharedPreferenceChangeListener(prefsListener)
         Log.i(TAG, "Filter settings loaded — threshold=$threshold strictMode=$strictModeEnabled")
     }
@@ -306,6 +296,13 @@ class FilterService : Service() {
      * so a concurrent null assignment (during service destruction) cannot cause
      * a NullPointerException after the null check.
      */
+    /**
+     * Returns the effective threshold value for the given raw [base] threshold,
+     * clamping to [STRICT_THRESHOLD] when [strictModeEnabled] is active.
+     */
+    private fun effectiveThreshold(base: Float): Float =
+        if (strictModeEnabled) minOf(base, STRICT_THRESHOLD) else base
+
     private suspend fun awaitClassifier(): NudeNetClassifier {
         var local: NudeNetClassifier?
         do {

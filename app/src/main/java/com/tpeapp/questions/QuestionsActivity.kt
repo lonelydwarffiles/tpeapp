@@ -53,8 +53,10 @@ class QuestionsActivity : AppCompatActivity() {
         private const val TAG = "QuestionsActivity"
 
         /** SharedPreferences keys for admin HTTP Basic Auth credentials. */
-        const val PREF_ADMIN_USER = "admin_username"
-        const val PREF_ADMIN_PASS = "admin_password"
+        const val PREF_ADMIN_USER        = "admin_username"
+        const val PREF_ADMIN_PASS        = "admin_password"
+        /** EncryptedSharedPreferences filename shared with [com.tpeapp.tasks.AssignTaskActivity]. */
+        const val PREF_ADMIN_PREFS_FILE  = "questions_admin_prefs"
 
         private val JSON_TYPE = "application/json".toMediaType()
 
@@ -411,7 +413,7 @@ class QuestionsActivity : AppCompatActivity() {
 
     private fun encryptedPrefs() = EncryptedSharedPreferences.create(
         this,
-        "questions_admin_prefs",
+        PREF_ADMIN_PREFS_FILE,
         MasterKey.Builder(this).setKeyScheme(MasterKey.KeyScheme.AES256_GCM).build(),
         EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
         EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
