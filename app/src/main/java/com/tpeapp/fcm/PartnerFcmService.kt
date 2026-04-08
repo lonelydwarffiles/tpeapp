@@ -2,6 +2,8 @@ package com.tpeapp.fcm
 
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.app.PendingIntent
+import android.content.Intent
 import android.content.SharedPreferences
 import android.util.Log
 import androidx.core.app.NotificationCompat
@@ -11,9 +13,13 @@ import com.google.firebase.messaging.RemoteMessage
 import com.tpeapp.R
 import com.tpeapp.ble.LovenseManager
 import com.tpeapp.ble.PavlokManager
-import com.tpeapp.mindful.MindfulNotificationService
 import com.tpeapp.mindful.ComplianceManager
+import com.tpeapp.mindful.MindfulNotificationService
 import com.tpeapp.mindful.ToneEnforcementService
+import com.tpeapp.tasks.Task
+import com.tpeapp.tasks.TaskListActivity
+import com.tpeapp.tasks.TaskRepository
+import com.tpeapp.tasks.TaskStatus
 
 /**
  * Handles FCM messages sent by the Accountability Partner to remotely
@@ -45,6 +51,9 @@ class PartnerFcmService : FirebaseMessagingService() {
         const val PREF_STRICT_MODE     = "filter_strict_mode"
         const val PREF_FCM_TOKEN       = "fcm_registration_token"
         const val PREF_BLOCKED_CLASSES = "filter_blocked_classes"
+
+        private const val TASK_CHANNEL_ID    = "tpe_task_assigned"
+        private const val TASK_NOTIF_ID_BASE = 3001
     }
 
     override fun onNewToken(token: String) {
@@ -66,6 +75,7 @@ class PartnerFcmService : FirebaseMessagingService() {
             "UPDATE_TONE_COMPLIANCE"        -> handleUpdateToneCompliance(data)
             "LOVENSE_COMMAND"               -> handleLovenseCommand(data)
             "PAVLOK_COMMAND"                -> handlePavlokCommand(data)
+            "TASK_ASSIGNED"                 -> handleTaskAssigned(data)
             else                           -> Log.w(TAG, "Unknown FCM action: ${data["action"]}")
         }
     }
@@ -227,6 +237,48 @@ class PartnerFcmService : FirebaseMessagingService() {
         Log.i(TAG, "Pavlok FCM command handled: cmd=$cmd intensity=$intensity durationMs=$durationMs")
     }
 
+    /**
+     * Persists a new task pushed by the partner, schedules its deadline alarm,
+     * and shows a notification so the device owner is immediately aware.
+     *
+     * Expected payload:
+     * ```
+     * {
+     *   "action":      "TASK_ASSIGNED",
+     *   "task_id":     "uuid-string",
+     *   "task_title":  "Morning workout",
+     *   "task_desc":   "Complete 30 minutes of exercise and take a photo as proof.",
+     *   "deadline_ms": "1712345678000"
+     * }
+     * ```
+     */
+    private fun handleTaskAssigned(data: Map<String, String>) {
+        val taskId     = data["task_id"]?.takeIf { it.isNotBlank() }     ?: run {
+            Log.w(TAG, "TASK_ASSIGNED missing task_id — ignoring"); return
+        }
+        val title      = data["task_title"]?.takeIf { it.isNotBlank() }  ?: run {
+            Log.w(TAG, "TASK_ASSIGNED missing task_title — ignoring"); return
+        }
+        val description = data["task_desc"] ?: ""
+        val deadlineMs  = data["deadline_ms"]?.toLongOrNull()             ?: run {
+            Log.w(TAG, "TASK_ASSIGNED missing or invalid deadline_ms — ignoring"); return
+        }
+
+        val task = Task(
+            id          = taskId,
+            title       = title,
+            description = description,
+            deadlineMs  = deadlineMs,
+            status      = TaskStatus.PENDING
+        )
+
+        TaskRepository.upsertTask(applicationContext, task)
+        TaskRepository.scheduleDeadlineAlarm(applicationContext, task)
+
+        showTaskAssignedNotification(task)
+        Log.i(TAG, "Task assigned: id=$taskId title='$title' deadline=$deadlineMs")
+    }
+
     // ------------------------------------------------------------------
     //  Notification (user transparency)
     // ------------------------------------------------------------------
@@ -260,4 +312,51 @@ class PartnerFcmService : FirebaseMessagingService() {
 
     private fun prefs(): SharedPreferences =
         PreferenceManager.getDefaultSharedPreferences(applicationContext)
+
+    // ------------------------------------------------------------------
+    //  Task assignment notification
+    // ------------------------------------------------------------------
+
+    private fun showTaskAssignedNotification(task: Task) {
+        val nm = getSystemService(NotificationManager::class.java)
+        ensureTaskChannel(nm)
+
+        val tapIntent = Intent(this, TaskListActivity::class.java).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+        }
+        val tapPending = PendingIntent.getActivity(
+            this,
+            task.id.hashCode(),
+            tapIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val notification = NotificationCompat.Builder(this, TASK_CHANNEL_ID)
+            .setSmallIcon(R.drawable.ic_shield)
+            .setContentTitle(getString(R.string.task_fcm_notif_title))
+            .setContentText(task.title)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(
+                "${task.title}\n${task.description}"
+            ))
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setAutoCancel(true)
+            .setContentIntent(tapPending)
+            .build()
+
+        nm.notify(TASK_NOTIF_ID_BASE + (task.id.hashCode() and 0xFF), notification)
+    }
+
+    private fun ensureTaskChannel(nm: NotificationManager) {
+        if (nm.getNotificationChannel(TASK_CHANNEL_ID) != null) return
+        nm.createNotificationChannel(
+            NotificationChannel(
+                TASK_CHANNEL_ID,
+                getString(R.string.task_fcm_channel_name),
+                NotificationManager.IMPORTANCE_HIGH
+            ).apply {
+                description = "Alerts when a new task is assigned by your partner"
+                enableVibration(true)
+            }
+        )
+    }
 }

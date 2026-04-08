@@ -36,4 +36,26 @@
     <string name="review_btn_stop">Stop Review</string>
     <string name="review_status_ready">Ready</string>
     <string name="review_status_streaming">🔴 Streaming to partner…</string>
+
+    <!-- Task Assignment &amp; Verification Module -->
+    <string name="task_list_title">My Tasks</string>
+    <string name="task_section_pending">Pending Tasks</string>
+    <string name="task_section_done">Completed / Missed</string>
+    <string name="task_no_pending">No pending tasks. ✅</string>
+    <string name="task_no_done">No completed tasks yet.</string>
+    <string name="task_btn_verify">Verify Task</string>
+    <string name="task_btn_capture">Capture Photo</string>
+    <string name="task_btn_submit_proof">Submit Proof</string>
+    <string name="task_btn_view">View My Tasks</string>
+    <string name="task_btn_assign">Assign Task (Partner)</string>
+    <string name="assign_task_title">Assign Task</string>
+    <string name="assign_task_instructions">Fill in the details below and tap Send to assign a task to the device owner.</string>
+    <string name="assign_task_hint_title">Task title</string>
+    <string name="assign_task_hint_description">Task description (optional)</string>
+    <string name="assign_task_deadline_label">Deadline</string>
+    <string name="assign_task_deadline_placeholder">Not set — tap below to choose</string>
+    <string name="assign_task_btn_pick_deadline">Pick Date &amp; Time</string>
+    <string name="assign_task_btn_send">Send Task to Device</string>
+    <string name="task_fcm_channel_name">Task Assignments</string>
+    <string name="task_fcm_notif_title">New task assigned</string>
 </resources>
