@@ -17,7 +17,6 @@ import com.tpeapp.mindful.ComplianceManager
 import com.tpeapp.mindful.MindfulNotificationService
 import com.tpeapp.mindful.ToneEnforcementService
 import com.tpeapp.tasks.Task
-import com.tpeapp.tasks.TaskDeadlineReceiver
 import com.tpeapp.tasks.TaskListActivity
 import com.tpeapp.tasks.TaskRepository
 import com.tpeapp.tasks.TaskStatus

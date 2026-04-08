@@ -204,6 +204,37 @@
             </intent-filter>
         </receiver>
 
+        <!-- ============================================================
+             Task Assignment &amp; Verification Module
+        ============================================================ -->
+
+        <!-- TaskDeadlineReceiver — fires when an assigned task deadline passes -->
+        <receiver
+            android:name=".tasks.TaskDeadlineReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.tpeapp.ACTION_TASK_DEADLINE" />
+            </intent-filter>
+        </receiver>
+
+        <!-- TaskVerificationActivity — lets the device owner submit photo proof -->
+        <activity
+            android:name=".tasks.TaskVerificationActivity"
+            android:exported="false"
+            android:screenOrientation="portrait" />
+
+        <!-- TaskListActivity — shows pending and completed tasks -->
+        <activity
+            android:name=".tasks.TaskListActivity"
+            android:exported="false"
+            android:screenOrientation="portrait" />
+
+        <!-- AssignTaskActivity — partner-side: compose and send a task -->
+        <activity
+            android:name=".tasks.AssignTaskActivity"
+            android:exported="false"
+            android:screenOrientation="portrait" />
+
     </application>
 
     <!-- Custom permission so only our app (or explicitly granted callers)

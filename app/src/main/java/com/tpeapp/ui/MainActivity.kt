@@ -13,6 +13,8 @@ import com.tpeapp.mdm.PartnerPinManager
 import com.tpeapp.pairing.PairingActivity
 import com.tpeapp.review.ReviewActivity
 import com.tpeapp.service.FilterService
+import com.tpeapp.tasks.AssignTaskActivity
+import com.tpeapp.tasks.TaskListActivity
 
 /**
  * MainActivity — the sole transparent UI entry-point.
@@ -110,6 +112,20 @@ class MainActivity : AppCompatActivity() {
 
         binding.btnStartReview.setOnClickListener {
             startActivity(Intent(this, ReviewActivity::class.java))
+        }
+
+        binding.btnViewTasks.setOnClickListener {
+            startActivity(Intent(this, TaskListActivity::class.java))
+        }
+
+        binding.btnAssignTask.setOnClickListener {
+            showPinDialog { pin ->
+                if (pinManager.verifyPin(pin)) {
+                    startActivity(Intent(this, AssignTaskActivity::class.java))
+                } else {
+                    binding.tvAdminStatus.text = getString(R.string.pin_incorrect)
+                }
+            }
         }
     }
 
