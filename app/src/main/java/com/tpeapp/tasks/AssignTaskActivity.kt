@@ -217,7 +217,7 @@ class AssignTaskActivity : AppCompatActivity() {
                 .build()
             val prefs = EncryptedSharedPreferences.create(
                 applicationContext,
-                "tpe_admin_creds",
+                "questions_admin_prefs",
                 masterKey,
                 EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
                 EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
@@ -270,7 +270,7 @@ class AssignTaskActivity : AppCompatActivity() {
                 .build()
             val prefs = EncryptedSharedPreferences.create(
                 applicationContext,
-                "tpe_admin_creds",
+                "questions_admin_prefs",
                 masterKey,
                 EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
                 EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
