@@ -146,8 +146,10 @@ object ConsequenceDispatcher {
         val prefs       = PreferenceManager.getDefaultSharedPreferences(context)
         val webhookUrl  = prefs.getString(FilterService.PREF_WEBHOOK_URL, null)
             ?.takeIf { it.isNotBlank() } ?: return
+        // Bearer token is optional — server accepts no-auth requests when no
+        // webhook secret is configured.
         val bearerToken = prefs.getString(FilterService.PREF_WEBHOOK_BEARER_TOKEN, null)
-            ?.takeIf { it.isNotBlank() } ?: return
+            ?.takeIf { it.isNotBlank() }
 
         val payload = JSONObject().apply {
             put("event",     event)

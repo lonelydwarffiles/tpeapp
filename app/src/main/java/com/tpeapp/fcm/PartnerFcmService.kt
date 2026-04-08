@@ -50,11 +50,13 @@ class PartnerFcmService : FirebaseMessagingService() {
         private const val CHANNEL_ID   = "tpe_partner_updates"
         private const val NOTIF_ID     = 2001
 
-        // SharedPreferences keys (also read by FilterService / Settings UI)
-        const val PREF_THRESHOLD       = "filter_confidence_threshold"
-        const val PREF_STRICT_MODE     = "filter_strict_mode"
-        const val PREF_FCM_TOKEN       = "fcm_registration_token"
-        const val PREF_BLOCKED_CLASSES = "filter_blocked_classes"
+        // SharedPreferences keys for filter settings are now defined in FilterService
+        // to avoid a circular dependency.  Kept here as aliases for backward compatibility.
+        val PREF_THRESHOLD       get() = FilterService.PREF_THRESHOLD
+        val PREF_STRICT_MODE     get() = FilterService.PREF_STRICT_MODE
+        val PREF_BLOCKED_CLASSES get() = FilterService.PREF_BLOCKED_CLASSES
+
+        const val PREF_FCM_TOKEN = "fcm_registration_token"
 
         private const val TASK_CHANNEL_ID    = "tpe_task_assigned"
         private const val TASK_NOTIF_ID_BASE = 3001

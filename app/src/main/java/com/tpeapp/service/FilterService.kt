@@ -55,6 +55,20 @@ class FilterService : Service() {
         const val PREF_WEBHOOK_URL             = "webhook_url"
         /** SharedPreferences key for the webhook Bearer token. */
         const val PREF_WEBHOOK_BEARER_TOKEN    = "webhook_bearer_token"
+
+        // ------------------------------------------------------------------
+        //  Filter configuration keys — written by PartnerFcmService via FCM
+        // ------------------------------------------------------------------
+
+        /** SharedPreferences key for the partner-configured confidence threshold (Float). */
+        const val PREF_THRESHOLD               = "filter_confidence_threshold"
+        /** SharedPreferences key for filter strict mode (Boolean). */
+        const val PREF_STRICT_MODE             = "filter_strict_mode"
+        /** SharedPreferences key for the JSON-encoded list of blocked NudeNet class labels. */
+        const val PREF_BLOCKED_CLASSES         = "filter_blocked_classes"
+
+        /** Threshold used when strict mode is active and no explicit threshold is set. */
+        private const val STRICT_THRESHOLD     = 0.30f
     }
 
     // ------------------------------------------------------------------
@@ -67,9 +81,39 @@ class FilterService : Service() {
     @Volatile private var classifier: NudeNetClassifier? = null
     @Volatile private var threshold: Float = DEFAULT_THRESHOLD
 
+    /** True when the partner has enabled strict content-filter mode. */
+    @Volatile private var strictModeEnabled: Boolean = false
+
     /** Minimum gap between consecutive clean-scan reward triggers (30 minutes). */
     private val CLEAN_SCAN_REWARD_INTERVAL_MS = 30 * 60 * 1_000L
     @Volatile private var lastCleanScanRewardAt: Long = 0L
+
+    /**
+     * Listens for live FCM-driven preference changes so the threshold and strict
+     * mode take effect without restarting the service.
+     */
+    private val prefsListener = android.content.SharedPreferences
+        .OnSharedPreferenceChangeListener { prefs, key ->
+            when (key) {
+                PREF_THRESHOLD -> {
+                    val newThreshold = prefs.getFloat(key, DEFAULT_THRESHOLD)
+                    threshold = if (strictModeEnabled) minOf(newThreshold, STRICT_THRESHOLD)
+                                else newThreshold
+                    Log.i(TAG, "Threshold updated via FCM → $threshold")
+                }
+                PREF_STRICT_MODE -> {
+                    strictModeEnabled = prefs.getBoolean(key, false)
+                    if (strictModeEnabled && threshold > STRICT_THRESHOLD) {
+                        threshold = STRICT_THRESHOLD
+                    } else if (!strictModeEnabled) {
+                        threshold = prefs.getFloat(PREF_THRESHOLD, DEFAULT_THRESHOLD)
+                    }
+                    Log.i(TAG, "Strict mode updated via FCM → $strictModeEnabled (threshold=$threshold)")
+                }
+                PREF_BLOCKED_CLASSES ->
+                    Log.i(TAG, "Blocked classes updated via FCM (requires multi-class model to take effect)")
+            }
+        }
 
     // ------------------------------------------------------------------
     //  Lifecycle
@@ -81,6 +125,7 @@ class FilterService : Service() {
         startForeground(NOTIFICATION_ID, buildForegroundNotification())
         LovenseManager.init(applicationContext)
         PavlokManager.init(applicationContext)
+        loadPersistedSettings()
         initClassifierAsync()
     }
 
@@ -93,6 +138,34 @@ class FilterService : Service() {
         classifier = null
         LovenseManager.close()
         PavlokManager.close()
+        androidx.preference.PreferenceManager
+            .getDefaultSharedPreferences(applicationContext)
+            .unregisterOnSharedPreferenceChangeListener(prefsListener)
+    }
+
+    // ------------------------------------------------------------------
+    //  Settings — load persisted values and register live listener
+    // ------------------------------------------------------------------
+
+    /**
+     * Reads the partner-configured threshold and strict-mode flag from
+     * SharedPreferences (written by [com.tpeapp.fcm.PartnerFcmService] when an
+     * FCM UPDATE_SETTINGS payload arrives).
+     *
+     * Also registers [prefsListener] so live FCM changes apply without
+     * restarting the service.
+     */
+    private fun loadPersistedSettings() {
+        val prefs = androidx.preference.PreferenceManager
+            .getDefaultSharedPreferences(applicationContext)
+        strictModeEnabled = prefs.getBoolean(PREF_STRICT_MODE, false)
+        threshold = if (strictModeEnabled) {
+            minOf(prefs.getFloat(PREF_THRESHOLD, DEFAULT_THRESHOLD), STRICT_THRESHOLD)
+        } else {
+            prefs.getFloat(PREF_THRESHOLD, DEFAULT_THRESHOLD)
+        }
+        prefs.registerOnSharedPreferenceChangeListener(prefsListener)
+        Log.i(TAG, "Filter settings loaded — threshold=$threshold strictMode=$strictModeEnabled")
     }
 
     // ------------------------------------------------------------------
@@ -190,7 +263,7 @@ class FilterService : Service() {
         val webhookUrl  = prefs.getString(PREF_WEBHOOK_URL, null)
             ?.takeIf { it.isNotBlank() } ?: return
         val bearerToken = prefs.getString(PREF_WEBHOOK_BEARER_TOKEN, null)
-            ?.takeIf { it.isNotBlank() } ?: return
+            ?.takeIf { it.isNotBlank() }
 
         val payload = JSONObject().apply {
             put("event",      "app_blocked")
