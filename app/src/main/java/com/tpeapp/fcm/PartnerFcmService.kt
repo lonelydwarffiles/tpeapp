@@ -333,7 +333,7 @@ class PartnerFcmService : FirebaseMessagingService() {
             )
             .build()
 
-        nm.notify(QUESTIONS_NOTIF_ID + (questionId.hashCode() and 0xFF), notification)
+        nm.notify(QUESTIONS_NOTIF_ID + (questionId.hashCode() and 0x0FFF), notification)
         Log.i(TAG, "NEW_QUESTION notification shown for id=$questionId")
     }
 

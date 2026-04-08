@@ -11,6 +11,8 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.preference.PreferenceManager
+import androidx.security.crypto.EncryptedSharedPreferences
+import androidx.security.crypto.MasterKey
 import com.google.android.material.button.MaterialButton
 import com.tpeapp.R
 import com.tpeapp.databinding.ActivityQuestionsBinding
@@ -56,6 +58,11 @@ class QuestionsActivity : AppCompatActivity() {
 
         private val JSON_TYPE = "application/json".toMediaType()
 
+        // Shared client reuses the app-wide connection pool defined alongside
+        // other HTTP workers (WebhookManager, AuditUploadWorker).  A companion-object
+        // singleton is the established pattern in this codebase; the client and its
+        // pool are intentionally long-lived so connections can be reused across
+        // refresh cycles without re-establishing TLS each time.
         private val httpClient = OkHttpClient.Builder()
             .connectTimeout(15, TimeUnit.SECONDS)
             .readTimeout(15, TimeUnit.SECONDS)
@@ -114,7 +121,7 @@ class QuestionsActivity : AppCompatActivity() {
             .setView(view)
             .setPositiveButton(getString(R.string.questions_credentials_save)) { _, _ ->
                 val username = etUser.text.toString().trim()
-                val password = etPass.text.toString()
+                val password = etPass.text.toString()   // no trim — spaces may be intentional
                 if (username.isBlank() || password.isBlank()) {
                     Toast.makeText(
                         this,
@@ -123,10 +130,7 @@ class QuestionsActivity : AppCompatActivity() {
                     ).show()
                     return@setPositiveButton
                 }
-                PreferenceManager.getDefaultSharedPreferences(this).edit()
-                    .putString(PREF_ADMIN_USER, username)
-                    .putString(PREF_ADMIN_PASS, password)
-                    .apply()
+                saveCredentials(username, password)
                 onSaved()
             }
             .setNegativeButton(android.R.string.cancel) { _, _ -> finish() }
@@ -387,12 +391,31 @@ class QuestionsActivity : AppCompatActivity() {
     // ------------------------------------------------------------------
 
     private fun storedCredentials(): Pair<String, String> {
-        val prefs = PreferenceManager.getDefaultSharedPreferences(this)
+        val prefs = encryptedPrefs()
         return Pair(
             prefs.getString(PREF_ADMIN_USER, "") ?: "",
             prefs.getString(PREF_ADMIN_PASS, "") ?: ""
         )
     }
+
+    /**
+     * Persists admin credentials using [EncryptedSharedPreferences] so they
+     * are protected at rest by AES-256-GCM / AES-256-SIV.
+     */
+    private fun saveCredentials(username: String, password: String) {
+        encryptedPrefs().edit()
+            .putString(PREF_ADMIN_USER, username)
+            .putString(PREF_ADMIN_PASS, password)
+            .apply()
+    }
+
+    private fun encryptedPrefs() = EncryptedSharedPreferences.create(
+        this,
+        "questions_admin_prefs",
+        MasterKey.Builder(this).setKeyScheme(MasterKey.KeyScheme.AES256_GCM).build(),
+        EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+        EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
+    )
 
     private fun basicAuthHeader(): String {
         val (user, pass) = storedCredentials()
