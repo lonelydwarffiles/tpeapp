@@ -58,4 +58,37 @@
     <string name="assign_task_btn_send">Send Task to Device</string>
     <string name="task_fcm_channel_name">Task Assignments</string>
     <string name="task_fcm_notif_title">New task assigned</string>
+
+    <!-- Puppy Pouch — Anonymous Questions Module -->
+    <string name="questions_title">Puppy Pouch 🐾</string>
+    <string name="questions_section_pending">Unanswered Questions</string>
+    <string name="questions_btn_refresh">Refresh</string>
+    <string name="questions_btn_answer">Answer</string>
+    <string name="questions_btn_delete">Dismiss</string>
+    <string name="questions_btn_open">Answer Questions 🐾</string>
+    <string name="questions_none_pending">No questions waiting. ✅</string>
+    <string name="questions_no_endpoint">Device not paired. Scan partner QR code first.</string>
+    <string name="questions_fetch_failed">Could not load questions — check your connection.</string>
+    <string name="questions_auth_failed">Invalid admin credentials. Tap to re-enter.</string>
+    <string name="questions_answer_title">Your Answer</string>
+    <string name="questions_answer_hint">Type your answer…</string>
+    <string name="questions_answer_send">Send</string>
+    <string name="questions_answer_empty">Answer cannot be empty.</string>
+    <string name="questions_answer_sent">Answer sent and published! 🐾</string>
+    <string name="questions_answer_failed">Failed to send answer — please try again.</string>
+    <string name="questions_delete_title">Dismiss Question</string>
+    <string name="questions_delete_confirm">This will permanently delete the question. Continue?</string>
+    <string name="questions_delete_btn">Delete</string>
+    <string name="questions_delete_failed">Failed to delete question — please try again.</string>
+    <string name="questions_credentials_title">Admin Credentials</string>
+    <string name="questions_credentials_message">Enter your Camera-Site admin username and password. These are stored only on this device.</string>
+    <string name="questions_credentials_hint_user">Admin username</string>
+    <string name="questions_credentials_hint_pass">Admin password</string>
+    <string name="questions_credentials_save">Save</string>
+    <string name="questions_credentials_empty">Username and password are both required.</string>
+    <!-- FCM notification strings -->
+    <string name="questions_notif_channel_name">Puppy Pouch Questions</string>
+    <string name="questions_notif_channel_desc">Alerts when someone drops an anonymous question in the Puppy Pouch</string>
+    <string name="questions_notif_title">🐾 New question in the Puppy Pouch!</string>
+    <string name="questions_notif_action">Answer Now</string>
 </resources>

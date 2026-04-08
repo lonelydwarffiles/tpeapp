@@ -235,6 +235,16 @@
             android:exported="false"
             android:screenOrientation="portrait" />
 
+        <!-- ============================================================
+             Puppy Pouch — Anonymous Questions Module
+             Partner-side: view and answer anonymous questions.
+             PIN-protected via MainActivity before launch.
+        ============================================================ -->
+        <activity
+            android:name=".questions.QuestionsActivity"
+            android:exported="false"
+            android:screenOrientation="portrait" />
+
     </application>
 
     <!-- Custom permission so only our app (or explicitly granted callers)

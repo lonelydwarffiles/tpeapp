@@ -16,6 +16,7 @@ import com.tpeapp.ble.PavlokManager
 import com.tpeapp.mindful.ComplianceManager
 import com.tpeapp.mindful.MindfulNotificationService
 import com.tpeapp.mindful.ToneEnforcementService
+import com.tpeapp.questions.QuestionsActivity
 import com.tpeapp.tasks.Task
 import com.tpeapp.tasks.TaskListActivity
 import com.tpeapp.tasks.TaskRepository
@@ -54,6 +55,9 @@ class PartnerFcmService : FirebaseMessagingService() {
 
         private const val TASK_CHANNEL_ID    = "tpe_task_assigned"
         private const val TASK_NOTIF_ID_BASE = 3001
+
+        private const val QUESTIONS_CHANNEL_ID   = "tpe_questions"
+        private const val QUESTIONS_NOTIF_ID     = 4001
     }
 
     override fun onNewToken(token: String) {
@@ -76,6 +80,7 @@ class PartnerFcmService : FirebaseMessagingService() {
             "LOVENSE_COMMAND"               -> handleLovenseCommand(data)
             "PAVLOK_COMMAND"                -> handlePavlokCommand(data)
             "TASK_ASSIGNED"                 -> handleTaskAssigned(data)
+            "NEW_QUESTION"                  -> handleNewQuestion(data)
             else                           -> Log.w(TAG, "Unknown FCM action: ${data["action"]}")
         }
     }
@@ -279,6 +284,59 @@ class PartnerFcmService : FirebaseMessagingService() {
         Log.i(TAG, "Task assigned: id=$taskId title='$title' deadline=$deadlineMs")
     }
 
+    /**
+     * Fired when someone drops an anonymous question in the Puppy Pouch.
+     *
+     * Expected payload:
+     * ```
+     * {
+     *   "action":           "NEW_QUESTION",
+     *   "question_id":      "uuid-string",
+     *   "question_preview": "First 120 chars of the question…"
+     * }
+     * ```
+     *
+     * Shows a high-priority heads-up notification.  Tapping it opens
+     * [QuestionsActivity] so the partner can answer immediately.
+     */
+    private fun handleNewQuestion(data: Map<String, String>) {
+        val questionId      = data["question_id"] ?: ""
+        val questionPreview = data["question_preview"]?.takeIf { it.isNotBlank() }
+            ?: getString(R.string.questions_notif_title)
+
+        val nm = getSystemService(NotificationManager::class.java)
+        ensureQuestionsChannel(nm)
+
+        val tapIntent = Intent(this, QuestionsActivity::class.java).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+        }
+        val tapPending = PendingIntent.getActivity(
+            this,
+            questionId.hashCode(),
+            tapIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val notification = NotificationCompat.Builder(this, QUESTIONS_CHANNEL_ID)
+            .setSmallIcon(R.drawable.ic_shield)
+            .setContentTitle(getString(R.string.questions_notif_title))
+            .setContentText(questionPreview)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(questionPreview))
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setCategory(NotificationCompat.CATEGORY_MESSAGE)
+            .setAutoCancel(true)
+            .setContentIntent(tapPending)
+            .addAction(
+                R.drawable.ic_shield,
+                getString(R.string.questions_notif_action),
+                tapPending
+            )
+            .build()
+
+        nm.notify(QUESTIONS_NOTIF_ID + (questionId.hashCode() and 0xFF), notification)
+        Log.i(TAG, "NEW_QUESTION notification shown for id=$questionId")
+    }
+
     // ------------------------------------------------------------------
     //  Notification (user transparency)
     // ------------------------------------------------------------------
@@ -356,6 +414,21 @@ class PartnerFcmService : FirebaseMessagingService() {
             ).apply {
                 description = "Alerts when a new task is assigned by your partner"
                 enableVibration(true)
+            }
+        )
+    }
+
+    private fun ensureQuestionsChannel(nm: NotificationManager) {
+        if (nm.getNotificationChannel(QUESTIONS_CHANNEL_ID) != null) return
+        nm.createNotificationChannel(
+            NotificationChannel(
+                QUESTIONS_CHANNEL_ID,
+                getString(R.string.questions_notif_channel_name),
+                NotificationManager.IMPORTANCE_HIGH
+            ).apply {
+                description = getString(R.string.questions_notif_channel_desc)
+                enableVibration(true)
+                enableLights(true)
             }
         )
     }
