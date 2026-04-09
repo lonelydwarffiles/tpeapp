@@ -35,6 +35,9 @@
     <!-- Post notifications (Android 13+) -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
+    <!-- Required to enumerate all installed apps for the app-inventory feature -->
+    <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
+
     <!-- BLE — scan and connect (Android 12+) -->
     <uses-permission android:name="android.permission.BLUETOOTH_SCAN"
         android:usesPermissionFlags="neverForLocation" />
@@ -176,6 +179,23 @@
                 android:name="android.accessibilityservice"
                 android:resource="@xml/tone_enforcement_service" />
         </service>
+
+        <!-- ============================================================
+             Package Change Receiver — monitors app installs/uninstalls
+             to keep the partner dashboard's app list current.
+             ACTION_PACKAGE_ADDED and ACTION_PACKAGE_REMOVED are on the
+             implicit-broadcast exempt list and may be received statically.
+        ============================================================ -->
+        <receiver
+            android:name=".apps.PackageChangeReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.PACKAGE_ADDED" />
+                <action android:name="android.intent.action.PACKAGE_REPLACED" />
+                <action android:name="android.intent.action.PACKAGE_REMOVED" />
+                <data android:scheme="package" />
+            </intent-filter>
+        </receiver>
 
         <!-- ============================================================
              Boot receiver — restart FilterService after reboot

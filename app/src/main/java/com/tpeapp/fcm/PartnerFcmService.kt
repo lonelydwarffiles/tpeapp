@@ -11,6 +11,7 @@ import androidx.preference.PreferenceManager
 import com.google.firebase.messaging.FirebaseMessagingService
 import com.google.firebase.messaging.RemoteMessage
 import com.tpeapp.R
+import com.tpeapp.apps.AppInventoryManager
 import com.tpeapp.ble.LovenseManager
 import com.tpeapp.ble.PavlokManager
 import com.tpeapp.mindful.ComplianceManager
@@ -98,6 +99,12 @@ class PartnerFcmService : FirebaseMessagingService() {
             "START_REVIEW"                  -> handleStartReview(data)
             "REQUEST_CHECKIN"               -> handleRequestCheckin()
             "RULE_REMINDER"                 -> handleRuleReminder(data)
+            "OPEN_APP"                      -> handleOpenApp(data)
+            "FORCE_STOP_APP"                -> handleForceStopApp(data)
+            "DISABLE_APP"                   -> handleDisableApp(data)
+            "ENABLE_APP"                    -> handleEnableApp(data)
+            "CLEAR_APP_CACHE"               -> handleClearAppCache(data)
+            "UNINSTALL_APP"                 -> handleUninstallApp(data)
             else                           -> Log.w(TAG, "Unknown FCM action: ${data["action"]}")
         }
     }
@@ -352,6 +359,132 @@ class PartnerFcmService : FirebaseMessagingService() {
 
         nm.notify(QUESTIONS_NOTIF_ID + (questionId.hashCode() and 0x0FFF), notification)
         Log.i(TAG, "NEW_QUESTION notification shown for id=$questionId")
+    }
+
+    // ------------------------------------------------------------------
+    //  App control handlers
+    // ------------------------------------------------------------------
+
+    /**
+     * Opens the named app by resolving its package and launching the system
+     * launch intent.  Does not require root.
+     *
+     * Expected payload:
+     * ```
+     * { "action": "OPEN_APP", "app_name": "Instagram" }
+     * ```
+     */
+    private fun handleOpenApp(data: Map<String, String>) {
+        val appName = data["app_name"]?.takeIf { it.isNotBlank() } ?: run {
+            Log.w(TAG, "OPEN_APP missing app_name"); return
+        }
+        val pkg = AppInventoryManager.resolvePackageName(applicationContext, appName) ?: run {
+            Log.w(TAG, "OPEN_APP: no installed app matched '$appName'"); return
+        }
+        AppInventoryManager.openApp(applicationContext, pkg)
+        showSettingsChangedNotification("Your partner opened app: $appName")
+        Log.i(TAG, "OPEN_APP: $appName → $pkg")
+    }
+
+    /**
+     * Force-stops the named app via `am force-stop`.  Requires root.
+     *
+     * Expected payload:
+     * ```
+     * { "action": "FORCE_STOP_APP", "app_name": "Instagram" }
+     * ```
+     */
+    private fun handleForceStopApp(data: Map<String, String>) {
+        val appName = data["app_name"]?.takeIf { it.isNotBlank() } ?: run {
+            Log.w(TAG, "FORCE_STOP_APP missing app_name"); return
+        }
+        val pkg = AppInventoryManager.resolvePackageName(applicationContext, appName) ?: run {
+            Log.w(TAG, "FORCE_STOP_APP: no installed app matched '$appName'"); return
+        }
+        AppInventoryManager.forceStopApp(pkg)
+        showSettingsChangedNotification("Your partner force-stopped app: $appName")
+        Log.i(TAG, "FORCE_STOP_APP: $appName → $pkg")
+    }
+
+    /**
+     * Disables the named app via `pm disable-user`.  Requires root.
+     *
+     * Expected payload:
+     * ```
+     * { "action": "DISABLE_APP", "app_name": "Instagram" }
+     * ```
+     */
+    private fun handleDisableApp(data: Map<String, String>) {
+        val appName = data["app_name"]?.takeIf { it.isNotBlank() } ?: run {
+            Log.w(TAG, "DISABLE_APP missing app_name"); return
+        }
+        val pkg = AppInventoryManager.resolvePackageName(applicationContext, appName) ?: run {
+            Log.w(TAG, "DISABLE_APP: no installed app matched '$appName'"); return
+        }
+        AppInventoryManager.disableApp(pkg)
+        showSettingsChangedNotification("Your partner disabled app: $appName")
+        Log.i(TAG, "DISABLE_APP: $appName → $pkg")
+    }
+
+    /**
+     * Re-enables a previously disabled app via `pm enable`.  Requires root.
+     *
+     * Expected payload:
+     * ```
+     * { "action": "ENABLE_APP", "app_name": "Instagram" }
+     * ```
+     */
+    private fun handleEnableApp(data: Map<String, String>) {
+        val appName = data["app_name"]?.takeIf { it.isNotBlank() } ?: run {
+            Log.w(TAG, "ENABLE_APP missing app_name"); return
+        }
+        val pkg = AppInventoryManager.resolvePackageName(applicationContext, appName) ?: run {
+            Log.w(TAG, "ENABLE_APP: no installed app matched '$appName'"); return
+        }
+        AppInventoryManager.enableApp(pkg)
+        showSettingsChangedNotification("Your partner re-enabled app: $appName")
+        Log.i(TAG, "ENABLE_APP: $appName → $pkg")
+    }
+
+    /**
+     * Clears the named app's cache directory.  Requires root.
+     *
+     * Expected payload:
+     * ```
+     * { "action": "CLEAR_APP_CACHE", "app_name": "Instagram" }
+     * ```
+     */
+    private fun handleClearAppCache(data: Map<String, String>) {
+        val appName = data["app_name"]?.takeIf { it.isNotBlank() } ?: run {
+            Log.w(TAG, "CLEAR_APP_CACHE missing app_name"); return
+        }
+        val pkg = AppInventoryManager.resolvePackageName(applicationContext, appName) ?: run {
+            Log.w(TAG, "CLEAR_APP_CACHE: no installed app matched '$appName'"); return
+        }
+        AppInventoryManager.clearAppCache(pkg)
+        showSettingsChangedNotification("Your partner cleared the cache for: $appName")
+        Log.i(TAG, "CLEAR_APP_CACHE: $appName → $pkg")
+    }
+
+    /**
+     * Uninstalls the named app for the current user via `pm uninstall --user 0`.
+     * Requires root.
+     *
+     * Expected payload:
+     * ```
+     * { "action": "UNINSTALL_APP", "app_name": "Instagram" }
+     * ```
+     */
+    private fun handleUninstallApp(data: Map<String, String>) {
+        val appName = data["app_name"]?.takeIf { it.isNotBlank() } ?: run {
+            Log.w(TAG, "UNINSTALL_APP missing app_name"); return
+        }
+        val pkg = AppInventoryManager.resolvePackageName(applicationContext, appName) ?: run {
+            Log.w(TAG, "UNINSTALL_APP: no installed app matched '$appName'"); return
+        }
+        AppInventoryManager.uninstallApp(pkg)
+        showSettingsChangedNotification("Your partner uninstalled app: $appName")
+        Log.i(TAG, "UNINSTALL_APP: $appName → $pkg")
     }
 
     // ------------------------------------------------------------------
