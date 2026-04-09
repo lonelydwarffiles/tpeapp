@@ -94,9 +94,6 @@ object GeofenceManager {
     }
 
     private fun checkGeofences(location: Location) {
-        val ctx = locationManager?.let { return@let null } // can't get ctx here easily
-        // We store geofences in a static reference to ctx set at startMonitoring time.
-        // See GeofenceManager.storedCtx
         val appCtx = storedCtx ?: return
         val geofences = getGeofences(appCtx)
         for (gf in geofences) {

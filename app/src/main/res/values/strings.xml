@@ -120,4 +120,35 @@
     <string name="rule_reminder_default_text">Your accountability partner sent a rule reminder.</string>
     <string name="rule_reminder_channel_name">Rule Reminders</string>
     <string name="rule_reminder_channel_desc">Notifications when your accountability partner reminds you of a rule</string>
+
+    <!-- Ritual Module -->
+    <string name="ritual_checklist_title">Morning Ritual</string>
+    <string name="ritual_complete_btn">All Steps Complete ✅</string>
+    <string name="ritual_back_blocked">Complete all steps first.</string>
+    <string name="ritual_photo_btn">Take Photo</string>
+    <string name="ritual_notif_channel">Daily Rituals</string>
+    <string name="ritual_morning_notif_title">🌅 Morning Ritual Required</string>
+    <string name="ritual_evening_notif_title">🌙 Evening Ritual Required</string>
+
+    <!-- Corner Time -->
+    <string name="corner_time_title">Corner Time</string>
+    <string name="corner_time_instruction">Stay in position. Your partner is watching.</string>
+    <string name="corner_time_done">Corner time complete. ✅</string>
+
+    <!-- Affirmation Module -->
+    <string name="affirmation_title">Affirmation</string>
+    <string name="affirmation_instruction">Type the affirmation exactly to continue:</string>
+    <string name="affirmation_hint">Type here…</string>
+    <string name="affirmation_submit">Continue</string>
+    <string name="affirmation_incorrect">Not quite — try again.</string>
+    <string name="affirmation_notif_channel">Mantra Reminders</string>
+    <string name="affirmation_notif_title">💭 Time for your affirmation</string>
+
+    <!-- Status Indicator -->
+    <string name="status_channel_name">Sub Status</string>
+    <string name="status_notif_title">Status</string>
+    <string name="status_free_time">🟢 Free Time</string>
+    <string name="status_task_active">🔵 Task Active</string>
+    <string name="status_restricted">🔴 Restricted</string>
+    <string name="status_punished">🟣 Punished</string>
 </resources>

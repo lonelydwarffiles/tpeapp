@@ -66,6 +66,7 @@
     <!-- ACCESS_FINE_LOCATION — required for GET_LOCATION -->
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
     <!-- FLASHLIGHT — needed for setTorchMode (some devices) -->
     <uses-permission android:name="android.permission.FLASHLIGHT" />
     <!-- FOREGROUND_SERVICE_CAMERA and _LOCATION declared for future foreground-service uploads -->
@@ -328,6 +329,71 @@
             android:turnScreenOn="true"
             android:screenOrientation="portrait"
             android:theme="@style/Theme.Tpeapp" />
+
+        <!-- ================================================================
+             Submission-deepening features
+        ================================================================ -->
+
+        <!-- Ritual Module -->
+        <activity
+            android:name=".ritual.RitualChecklistActivity"
+            android:exported="false"
+            android:launchMode="singleInstance"
+            android:showWhenLocked="true"
+            android:turnScreenOn="true"
+            android:screenOrientation="portrait"
+            android:theme="@style/Theme.Tpeapp" />
+        <receiver
+            android:name=".ritual.RitualAlarmReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.tpeapp.ACTION_RITUAL_MORNING" />
+                <action android:name="com.tpeapp.ACTION_RITUAL_EVENING" />
+            </intent-filter>
+        </receiver>
+
+        <!-- Corner Time -->
+        <activity
+            android:name=".consequence.CornerTimeActivity"
+            android:exported="false"
+            android:launchMode="singleInstance"
+            android:showWhenLocked="true"
+            android:turnScreenOn="true"
+            android:screenOrientation="portrait"
+            android:theme="@style/Theme.Tpeapp" />
+        <receiver
+            android:name=".consequence.ConsequenceEscalationReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.tpeapp.ACTION_CONSEQUENCE_ESCALATE" />
+            </intent-filter>
+        </receiver>
+
+        <!-- Affirmation Module -->
+        <activity
+            android:name=".affirmation.AffirmationActivity"
+            android:exported="false"
+            android:launchMode="singleInstance"
+            android:showWhenLocked="true"
+            android:turnScreenOn="true"
+            android:screenOrientation="portrait"
+            android:theme="@style/Theme.Tpeapp" />
+        <receiver
+            android:name=".affirmation.MantraAlarmReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.tpeapp.ACTION_MANTRA_ALARM" />
+            </intent-filter>
+        </receiver>
+
+        <!-- Lovense Schedules -->
+        <receiver
+            android:name=".ble.LovenseScheduleReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.tpeapp.ACTION_LOVENSE_SCHEDULED" />
+            </intent-filter>
+        </receiver>
 
     </application>
 
