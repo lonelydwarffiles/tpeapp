@@ -18,6 +18,7 @@ import com.tpeapp.ui.MainActivity
 import com.tpeapp.ble.LovenseManager
 import com.tpeapp.ble.PavlokManager
 import com.tpeapp.consequence.ConsequenceDispatcher
+import com.tpeapp.apps.AppInventoryManager
 import com.tpeapp.webhook.WebhookManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -121,6 +122,7 @@ class FilterService : Service() {
         PavlokManager.init(applicationContext)
         loadPersistedSettings()
         initClassifierAsync()
+        AppInventoryManager.syncFullInventory(applicationContext)
     }
 
     override fun onBind(intent: Intent): IBinder = binder

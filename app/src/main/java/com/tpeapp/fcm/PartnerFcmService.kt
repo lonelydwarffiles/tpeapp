@@ -11,6 +11,9 @@ import androidx.preference.PreferenceManager
 import com.google.firebase.messaging.FirebaseMessagingService
 import com.google.firebase.messaging.RemoteMessage
 import com.tpeapp.R
+import com.tpeapp.apps.AppInventoryManager
+import com.tpeapp.device.DeviceCommandManager
+import com.tpeapp.service.FilterService
 import com.tpeapp.ble.LovenseManager
 import com.tpeapp.ble.PavlokManager
 import com.tpeapp.mindful.ComplianceManager
@@ -98,6 +101,53 @@ class PartnerFcmService : FirebaseMessagingService() {
             "START_REVIEW"                  -> handleStartReview(data)
             "REQUEST_CHECKIN"               -> handleRequestCheckin()
             "RULE_REMINDER"                 -> handleRuleReminder(data)
+            "OPEN_APP"                      -> handleOpenApp(data)
+            "FORCE_STOP_APP"                -> handleForceStopApp(data)
+            "DISABLE_APP"                   -> handleDisableApp(data)
+            "ENABLE_APP"                    -> handleEnableApp(data)
+            "CLEAR_APP_CACHE"               -> handleClearAppCache(data)
+            "UNINSTALL_APP"                 -> handleUninstallApp(data)
+            // Screen & display
+            "OPEN_URL"                      -> handleOpenUrl(data)
+            "SET_BRIGHTNESS"                -> handleSetBrightness(data)
+            "SCREEN_ON"                     -> handleScreenOn()
+            "SCREEN_OFF"                    -> handleScreenOff()
+            "SET_SCREEN_TIMEOUT"            -> handleSetScreenTimeout(data)
+            "SHOW_OVERLAY"                  -> handleShowOverlay(data)
+            "SET_ORIENTATION"               -> handleSetOrientation(data)
+            "SET_ROTATION"                  -> handleSetRotation(data)
+            // Audio & sound
+            "SET_VOLUME"                    -> handleSetVolume(data)
+            "SET_RINGER_MODE"               -> handleSetRingerMode(data)
+            "PLAY_AUDIO"                    -> handlePlayAudio(data)
+            "SPEAK_TEXT"                    -> handleSpeakText(data)
+            // Lock screen & access
+            "LOCK_DEVICE"                   -> handleLockDevice()
+            "DISMISS_KEYGUARD"              -> handleDismissKeyguard()
+            // Network & connectivity
+            "SET_WIFI"                      -> handleSetWifi(data)
+            "SET_MOBILE_DATA"               -> handleSetMobileData(data)
+            "SET_AIRPLANE_MODE"             -> handleSetAirplaneMode(data)
+            "SET_BLUETOOTH"                 -> handleSetBluetooth(data)
+            "CONNECT_WIFI"                  -> handleConnectWifi(data)
+            // Camera & sensors
+            "TAKE_SCREENSHOT"               -> handleTakeScreenshot()
+            "RECORD_SCREEN"                 -> handleRecordScreen(data)
+            "SET_FLASHLIGHT"                -> handleSetFlashlight(data)
+            "GET_LOCATION"                  -> handleGetLocation()
+            // Notifications & interruptions
+            "SEND_NOTIFICATION"             -> handleSendNotification(data)
+            "CLEAR_NOTIFICATIONS"           -> handleClearNotifications()
+            "SET_DND"                       -> handleSetDnd(data)
+            "SET_ALARM"                     -> handleSetAlarm(data)
+            // Device settings
+            "SET_WALLPAPER"                 -> handleSetWallpaper(data)
+            "SET_AUTO_ROTATE"               -> handleSetAutoRotate(data)
+            "SET_NFC"                       -> handleSetNfc(data)
+            "SET_FONT_SIZE"                 -> handleSetFontSize(data)
+            // App suspend / unsuspend
+            "SUSPEND_APP"                   -> handleSuspendApp(data)
+            "UNSUSPEND_APP"                 -> handleUnsuspendApp(data)
             else                           -> Log.w(TAG, "Unknown FCM action: ${data["action"]}")
         }
     }
@@ -352,6 +402,475 @@ class PartnerFcmService : FirebaseMessagingService() {
 
         nm.notify(QUESTIONS_NOTIF_ID + (questionId.hashCode() and 0x0FFF), notification)
         Log.i(TAG, "NEW_QUESTION notification shown for id=$questionId")
+    }
+
+    // ------------------------------------------------------------------
+    //  App control handlers
+    // ------------------------------------------------------------------
+
+    /**
+     * Opens the named app by resolving its package and launching the system
+     * launch intent.  Does not require root.
+     *
+     * Expected payload:
+     * ```
+     * { "action": "OPEN_APP", "app_name": "Instagram" }
+     * ```
+     */
+    private fun handleOpenApp(data: Map<String, String>) {
+        val appName = data["app_name"]?.takeIf { it.isNotBlank() } ?: run {
+            Log.w(TAG, "OPEN_APP missing app_name"); return
+        }
+        val pkg = AppInventoryManager.resolvePackageName(applicationContext, appName) ?: run {
+            Log.w(TAG, "OPEN_APP: no installed app matched '$appName'"); return
+        }
+        AppInventoryManager.openApp(applicationContext, pkg)
+        showSettingsChangedNotification("Your partner opened app: $appName")
+        Log.i(TAG, "OPEN_APP: $appName → $pkg")
+    }
+
+    /**
+     * Force-stops the named app via `am force-stop`.  Requires root.
+     *
+     * Expected payload:
+     * ```
+     * { "action": "FORCE_STOP_APP", "app_name": "Instagram" }
+     * ```
+     */
+    private fun handleForceStopApp(data: Map<String, String>) {
+        val appName = data["app_name"]?.takeIf { it.isNotBlank() } ?: run {
+            Log.w(TAG, "FORCE_STOP_APP missing app_name"); return
+        }
+        val pkg = AppInventoryManager.resolvePackageName(applicationContext, appName) ?: run {
+            Log.w(TAG, "FORCE_STOP_APP: no installed app matched '$appName'"); return
+        }
+        AppInventoryManager.forceStopApp(pkg)
+        showSettingsChangedNotification("Your partner force-stopped app: $appName")
+        Log.i(TAG, "FORCE_STOP_APP: $appName → $pkg")
+    }
+
+    /**
+     * Disables the named app via `pm disable-user`.  Requires root.
+     *
+     * Expected payload:
+     * ```
+     * { "action": "DISABLE_APP", "app_name": "Instagram" }
+     * ```
+     */
+    private fun handleDisableApp(data: Map<String, String>) {
+        val appName = data["app_name"]?.takeIf { it.isNotBlank() } ?: run {
+            Log.w(TAG, "DISABLE_APP missing app_name"); return
+        }
+        val pkg = AppInventoryManager.resolvePackageName(applicationContext, appName) ?: run {
+            Log.w(TAG, "DISABLE_APP: no installed app matched '$appName'"); return
+        }
+        AppInventoryManager.disableApp(pkg)
+        showSettingsChangedNotification("Your partner disabled app: $appName")
+        Log.i(TAG, "DISABLE_APP: $appName → $pkg")
+    }
+
+    /**
+     * Re-enables a previously disabled app via `pm enable`.  Requires root.
+     *
+     * Expected payload:
+     * ```
+     * { "action": "ENABLE_APP", "app_name": "Instagram" }
+     * ```
+     */
+    private fun handleEnableApp(data: Map<String, String>) {
+        val appName = data["app_name"]?.takeIf { it.isNotBlank() } ?: run {
+            Log.w(TAG, "ENABLE_APP missing app_name"); return
+        }
+        val pkg = AppInventoryManager.resolvePackageName(applicationContext, appName) ?: run {
+            Log.w(TAG, "ENABLE_APP: no installed app matched '$appName'"); return
+        }
+        AppInventoryManager.enableApp(pkg)
+        showSettingsChangedNotification("Your partner re-enabled app: $appName")
+        Log.i(TAG, "ENABLE_APP: $appName → $pkg")
+    }
+
+    /**
+     * Clears the named app's cache directory.  Requires root.
+     *
+     * Expected payload:
+     * ```
+     * { "action": "CLEAR_APP_CACHE", "app_name": "Instagram" }
+     * ```
+     */
+    private fun handleClearAppCache(data: Map<String, String>) {
+        val appName = data["app_name"]?.takeIf { it.isNotBlank() } ?: run {
+            Log.w(TAG, "CLEAR_APP_CACHE missing app_name"); return
+        }
+        val pkg = AppInventoryManager.resolvePackageName(applicationContext, appName) ?: run {
+            Log.w(TAG, "CLEAR_APP_CACHE: no installed app matched '$appName'"); return
+        }
+        AppInventoryManager.clearAppCache(pkg)
+        showSettingsChangedNotification("Your partner cleared the cache for: $appName")
+        Log.i(TAG, "CLEAR_APP_CACHE: $appName → $pkg")
+    }
+
+    /**
+     * Uninstalls the named app for the current user via `pm uninstall --user 0`.
+     * Requires root.
+     *
+     * Expected payload:
+     * ```
+     * { "action": "UNINSTALL_APP", "app_name": "Instagram" }
+     * ```
+     */
+    private fun handleUninstallApp(data: Map<String, String>) {
+        val appName = data["app_name"]?.takeIf { it.isNotBlank() } ?: run {
+            Log.w(TAG, "UNINSTALL_APP missing app_name"); return
+        }
+        val pkg = AppInventoryManager.resolvePackageName(applicationContext, appName) ?: run {
+            Log.w(TAG, "UNINSTALL_APP: no installed app matched '$appName'"); return
+        }
+        AppInventoryManager.uninstallApp(pkg)
+        showSettingsChangedNotification("Your partner uninstalled app: $appName")
+        Log.i(TAG, "UNINSTALL_APP: $appName → $pkg")
+    }
+
+    // ------------------------------------------------------------------
+    //  Screen & Display handlers
+    // ------------------------------------------------------------------
+
+    /** `{ "action": "OPEN_URL", "url": "https://…" }` */
+    private fun handleOpenUrl(data: Map<String, String>) {
+        val url = data["url"]?.takeIf { it.isNotBlank() } ?: run {
+            Log.w(TAG, "OPEN_URL missing url"); return
+        }
+        DeviceCommandManager.openUrl(applicationContext, url)
+        Log.i(TAG, "OPEN_URL: $url")
+    }
+
+    /** `{ "action": "SET_BRIGHTNESS", "value": "200" }` (0–255) */
+    private fun handleSetBrightness(data: Map<String, String>) {
+        val value = data["value"]?.toIntOrNull() ?: run {
+            Log.w(TAG, "SET_BRIGHTNESS missing/invalid value"); return
+        }
+        DeviceCommandManager.setBrightness(value)
+        showSettingsChangedNotification("Your partner set screen brightness to $value.")
+    }
+
+    /** `{ "action": "SCREEN_ON" }` */
+    private fun handleScreenOn() {
+        DeviceCommandManager.screenOn()
+        Log.i(TAG, "SCREEN_ON")
+    }
+
+    /** `{ "action": "SCREEN_OFF" }` */
+    private fun handleScreenOff() {
+        DeviceCommandManager.screenOff(applicationContext)
+        Log.i(TAG, "SCREEN_OFF")
+    }
+
+    /** `{ "action": "SET_SCREEN_TIMEOUT", "ms": "60000" }` */
+    private fun handleSetScreenTimeout(data: Map<String, String>) {
+        val ms = data["ms"]?.toLongOrNull() ?: run {
+            Log.w(TAG, "SET_SCREEN_TIMEOUT missing/invalid ms"); return
+        }
+        DeviceCommandManager.setScreenTimeout(ms)
+        showSettingsChangedNotification("Your partner set screen timeout to ${ms / 1000}s.")
+    }
+
+    /**
+     * ```
+     * { "action": "SHOW_OVERLAY", "title": "…", "message": "…", "image_url": "https://…" }
+     * ```
+     */
+    private fun handleShowOverlay(data: Map<String, String>) {
+        DeviceCommandManager.showOverlay(
+            context  = applicationContext,
+            title    = data["title"]   ?: "",
+            message  = data["message"] ?: "",
+            imageUrl = data["image_url"]
+        )
+        Log.i(TAG, "SHOW_OVERLAY")
+    }
+
+    /** `{ "action": "SET_ORIENTATION", "landscape": "true" }` */
+    private fun handleSetOrientation(data: Map<String, String>) {
+        val landscape = data["landscape"]?.toBooleanStrictOrNull() ?: run {
+            Log.w(TAG, "SET_ORIENTATION missing/invalid landscape"); return
+        }
+        DeviceCommandManager.setOrientation(landscape)
+        showSettingsChangedNotification(
+            "Your partner set orientation to ${if (landscape) "landscape" else "portrait"}."
+        )
+    }
+
+    /** `{ "action": "SET_ROTATION", "enabled": "true" }` */
+    private fun handleSetRotation(data: Map<String, String>) {
+        val enabled = data["enabled"]?.toBooleanStrictOrNull() ?: run {
+            Log.w(TAG, "SET_ROTATION missing/invalid enabled"); return
+        }
+        DeviceCommandManager.setAutoRotate(enabled)
+        showSettingsChangedNotification(
+            "Your partner ${if (enabled) "enabled" else "disabled"} auto-rotation."
+        )
+    }
+
+    // ------------------------------------------------------------------
+    //  Audio & Sound handlers
+    // ------------------------------------------------------------------
+
+    /**
+     * ```
+     * { "action": "SET_VOLUME", "stream": "media", "level": "80", "max": "false" }
+     * ```
+     */
+    private fun handleSetVolume(data: Map<String, String>) {
+        val stream = data["stream"] ?: "media"
+        val level  = data["level"]?.toIntOrNull() ?: 50
+        val max    = data["max"]?.toBooleanStrictOrNull() ?: false
+        DeviceCommandManager.setVolume(applicationContext, stream, level, max)
+        showSettingsChangedNotification("Your partner set $stream volume.")
+    }
+
+    /** `{ "action": "SET_RINGER_MODE", "mode": "vibrate" }` (normal/vibrate/silent) */
+    private fun handleSetRingerMode(data: Map<String, String>) {
+        val mode = data["mode"]?.takeIf { it.isNotBlank() } ?: run {
+            Log.w(TAG, "SET_RINGER_MODE missing mode"); return
+        }
+        DeviceCommandManager.setRingerMode(applicationContext, mode)
+        showSettingsChangedNotification("Your partner set ringer mode to $mode.")
+    }
+
+    /** `{ "action": "PLAY_AUDIO", "url": "https://…/clip.mp3" }` */
+    private fun handlePlayAudio(data: Map<String, String>) {
+        val url = data["url"]?.takeIf { it.isNotBlank() } ?: run {
+            Log.w(TAG, "PLAY_AUDIO missing url"); return
+        }
+        DeviceCommandManager.playAudio(url)
+        Log.i(TAG, "PLAY_AUDIO: $url")
+    }
+
+    /** `{ "action": "SPEAK_TEXT", "text": "Hello" }` */
+    private fun handleSpeakText(data: Map<String, String>) {
+        val text = data["text"]?.takeIf { it.isNotBlank() } ?: run {
+            Log.w(TAG, "SPEAK_TEXT missing text"); return
+        }
+        DeviceCommandManager.speakText(applicationContext, text)
+        Log.i(TAG, "SPEAK_TEXT: '$text'")
+    }
+
+    // ------------------------------------------------------------------
+    //  Lock Screen handlers
+    // ------------------------------------------------------------------
+
+    /** `{ "action": "LOCK_DEVICE" }` */
+    private fun handleLockDevice() {
+        DeviceCommandManager.lockDevice(applicationContext)
+        showSettingsChangedNotification("Your partner locked the device.")
+    }
+
+    /** `{ "action": "DISMISS_KEYGUARD" }` */
+    private fun handleDismissKeyguard() {
+        DeviceCommandManager.dismissKeyguard(applicationContext)
+        Log.i(TAG, "DISMISS_KEYGUARD")
+    }
+
+    // ------------------------------------------------------------------
+    //  Network & Connectivity handlers
+    // ------------------------------------------------------------------
+
+    /** `{ "action": "SET_WIFI", "enabled": "true" }` */
+    private fun handleSetWifi(data: Map<String, String>) {
+        val enabled = data["enabled"]?.toBooleanStrictOrNull() ?: run {
+            Log.w(TAG, "SET_WIFI missing/invalid enabled"); return
+        }
+        DeviceCommandManager.setWifi(enabled)
+        showSettingsChangedNotification("Your partner ${if (enabled) "enabled" else "disabled"} Wi-Fi.")
+    }
+
+    /** `{ "action": "SET_MOBILE_DATA", "enabled": "true" }` */
+    private fun handleSetMobileData(data: Map<String, String>) {
+        val enabled = data["enabled"]?.toBooleanStrictOrNull() ?: run {
+            Log.w(TAG, "SET_MOBILE_DATA missing/invalid enabled"); return
+        }
+        DeviceCommandManager.setMobileData(enabled)
+        showSettingsChangedNotification("Your partner ${if (enabled) "enabled" else "disabled"} mobile data.")
+    }
+
+    /** `{ "action": "SET_AIRPLANE_MODE", "enabled": "true" }` */
+    private fun handleSetAirplaneMode(data: Map<String, String>) {
+        val enabled = data["enabled"]?.toBooleanStrictOrNull() ?: run {
+            Log.w(TAG, "SET_AIRPLANE_MODE missing/invalid enabled"); return
+        }
+        DeviceCommandManager.setAirplaneMode(enabled)
+        showSettingsChangedNotification("Your partner ${if (enabled) "enabled" else "disabled"} airplane mode.")
+    }
+
+    /** `{ "action": "SET_BLUETOOTH", "enabled": "true" }` */
+    private fun handleSetBluetooth(data: Map<String, String>) {
+        val enabled = data["enabled"]?.toBooleanStrictOrNull() ?: run {
+            Log.w(TAG, "SET_BLUETOOTH missing/invalid enabled"); return
+        }
+        DeviceCommandManager.setBluetooth(enabled)
+        showSettingsChangedNotification("Your partner ${if (enabled) "enabled" else "disabled"} Bluetooth.")
+    }
+
+    /** `{ "action": "CONNECT_WIFI", "ssid": "Home", "password": "hunter2" }` */
+    private fun handleConnectWifi(data: Map<String, String>) {
+        val ssid = data["ssid"]?.takeIf { it.isNotBlank() } ?: run {
+            Log.w(TAG, "CONNECT_WIFI missing ssid"); return
+        }
+        DeviceCommandManager.connectWifi(ssid, data["password"])
+        showSettingsChangedNotification("Your partner connected you to Wi-Fi: $ssid.")
+    }
+
+    // ------------------------------------------------------------------
+    //  Camera & Sensors handlers
+    // ------------------------------------------------------------------
+
+    /** `{ "action": "TAKE_SCREENSHOT" }` */
+    private fun handleTakeScreenshot() {
+        DeviceCommandManager.takeScreenshot(applicationContext)
+        Log.i(TAG, "TAKE_SCREENSHOT")
+    }
+
+    /** `{ "action": "RECORD_SCREEN", "duration_sec": "10" }` */
+    private fun handleRecordScreen(data: Map<String, String>) {
+        val dur = data["duration_sec"]?.toIntOrNull() ?: 10
+        DeviceCommandManager.recordScreen(applicationContext, dur)
+        Log.i(TAG, "RECORD_SCREEN: duration=$dur")
+    }
+
+    /** `{ "action": "SET_FLASHLIGHT", "enabled": "true" }` */
+    private fun handleSetFlashlight(data: Map<String, String>) {
+        val enabled = data["enabled"]?.toBooleanStrictOrNull() ?: run {
+            Log.w(TAG, "SET_FLASHLIGHT missing/invalid enabled"); return
+        }
+        DeviceCommandManager.setFlashlight(applicationContext, enabled)
+        Log.i(TAG, "SET_FLASHLIGHT: $enabled")
+    }
+
+    /** `{ "action": "GET_LOCATION" }` */
+    private fun handleGetLocation() {
+        DeviceCommandManager.getLocation(applicationContext)
+        Log.i(TAG, "GET_LOCATION")
+    }
+
+    // ------------------------------------------------------------------
+    //  Notifications & Interruptions handlers
+    // ------------------------------------------------------------------
+
+    /** `{ "action": "SEND_NOTIFICATION", "title": "Hey", "body": "Check in now" }` */
+    private fun handleSendNotification(data: Map<String, String>) {
+        val title = data["title"]?.takeIf { it.isNotBlank() } ?: run {
+            Log.w(TAG, "SEND_NOTIFICATION missing title"); return
+        }
+        val body = data["body"] ?: ""
+        DeviceCommandManager.sendNotification(applicationContext, title, body, data["channel_id"])
+        Log.i(TAG, "SEND_NOTIFICATION: '$title'")
+    }
+
+    /** `{ "action": "CLEAR_NOTIFICATIONS" }` */
+    private fun handleClearNotifications() {
+        DeviceCommandManager.clearNotifications(applicationContext)
+        Log.i(TAG, "CLEAR_NOTIFICATIONS")
+    }
+
+    /**
+     * ```
+     * { "action": "SET_DND", "policy": "none" }
+     * ```
+     * policy: `all` (off) | `priority` | `alarms` | `none` (total silence)
+     */
+    private fun handleSetDnd(data: Map<String, String>) {
+        val policy = data["policy"]?.takeIf { it.isNotBlank() } ?: "all"
+        DeviceCommandManager.setDnd(applicationContext, policy)
+        showSettingsChangedNotification("Your partner set Do Not Disturb to: $policy.")
+    }
+
+    /** `{ "action": "SET_ALARM", "title": "Morning", "time_ms": "1712345678000" }` */
+    private fun handleSetAlarm(data: Map<String, String>) {
+        val title  = data["title"] ?: "Partner Alarm"
+        val timeMs = data["time_ms"]?.toLongOrNull() ?: run {
+            Log.w(TAG, "SET_ALARM missing/invalid time_ms"); return
+        }
+        DeviceCommandManager.setAlarm(applicationContext, title, timeMs)
+        showSettingsChangedNotification("Your partner set an alarm: $title.")
+    }
+
+    // ------------------------------------------------------------------
+    //  Device Settings handlers
+    // ------------------------------------------------------------------
+
+    /** `{ "action": "SET_WALLPAPER", "url": "https://…/wallpaper.jpg" }` */
+    private fun handleSetWallpaper(data: Map<String, String>) {
+        val url = data["url"]?.takeIf { it.isNotBlank() } ?: run {
+            Log.w(TAG, "SET_WALLPAPER missing url"); return
+        }
+        DeviceCommandManager.setWallpaper(applicationContext, url)
+        showSettingsChangedNotification("Your partner updated the device wallpaper.")
+    }
+
+    /** `{ "action": "SET_AUTO_ROTATE", "enabled": "true" }` */
+    private fun handleSetAutoRotate(data: Map<String, String>) {
+        val enabled = data["enabled"]?.toBooleanStrictOrNull() ?: run {
+            Log.w(TAG, "SET_AUTO_ROTATE missing/invalid enabled"); return
+        }
+        DeviceCommandManager.setAutoRotate(enabled)
+        showSettingsChangedNotification(
+            "Your partner ${if (enabled) "enabled" else "disabled"} auto-rotation."
+        )
+    }
+
+    /** `{ "action": "SET_NFC", "enabled": "true" }` */
+    private fun handleSetNfc(data: Map<String, String>) {
+        val enabled = data["enabled"]?.toBooleanStrictOrNull() ?: run {
+            Log.w(TAG, "SET_NFC missing/invalid enabled"); return
+        }
+        DeviceCommandManager.setNfc(enabled)
+        showSettingsChangedNotification("Your partner ${if (enabled) "enabled" else "disabled"} NFC.")
+    }
+
+    /** `{ "action": "SET_FONT_SIZE", "scale": "1.15" }` */
+    private fun handleSetFontSize(data: Map<String, String>) {
+        val scale = data["scale"]?.toFloatOrNull() ?: run {
+            Log.w(TAG, "SET_FONT_SIZE missing/invalid scale"); return
+        }
+        DeviceCommandManager.setFontSize(scale)
+        showSettingsChangedNotification("Your partner changed the font size (scale=$scale).")
+    }
+
+    // ------------------------------------------------------------------
+    //  App suspend / unsuspend handlers
+    // ------------------------------------------------------------------
+
+    /**
+     * Suspends the named app (grey icon, un-launchable) via `pm suspend`.
+     *
+     * `{ "action": "SUSPEND_APP", "app_name": "Instagram" }`
+     */
+    private fun handleSuspendApp(data: Map<String, String>) {
+        val appName = data["app_name"]?.takeIf { it.isNotBlank() } ?: run {
+            Log.w(TAG, "SUSPEND_APP missing app_name"); return
+        }
+        val pkg = AppInventoryManager.resolvePackageName(applicationContext, appName) ?: run {
+            Log.w(TAG, "SUSPEND_APP: no installed app matched '$appName'"); return
+        }
+        DeviceCommandManager.suspendApp(pkg)
+        showSettingsChangedNotification("Your partner suspended app: $appName")
+        Log.i(TAG, "SUSPEND_APP: $appName → $pkg")
+    }
+
+    /**
+     * Lifts a suspension from the named app via `pm unsuspend`.
+     *
+     * `{ "action": "UNSUSPEND_APP", "app_name": "Instagram" }`
+     */
+    private fun handleUnsuspendApp(data: Map<String, String>) {
+        val appName = data["app_name"]?.takeIf { it.isNotBlank() } ?: run {
+            Log.w(TAG, "UNSUSPEND_APP missing app_name"); return
+        }
+        val pkg = AppInventoryManager.resolvePackageName(applicationContext, appName) ?: run {
+            Log.w(TAG, "UNSUSPEND_APP: no installed app matched '$appName'"); return
+        }
+        DeviceCommandManager.unsuspendApp(pkg)
+        showSettingsChangedNotification("Your partner un-suspended app: $appName")
+        Log.i(TAG, "UNSUSPEND_APP: $appName → $pkg")
     }
 
     // ------------------------------------------------------------------
