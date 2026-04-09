@@ -10,6 +10,8 @@ import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import androidx.preference.PreferenceManager
 import com.tpeapp.consequence.ConsequenceDispatcher
+import com.tpeapp.mindful.HonorificManager
+import com.tpeapp.mindful.PermissionToSpeakManager
 import com.tpeapp.service.FilterService
 import com.tpeapp.webhook.WebhookManager
 import org.json.JSONArray
@@ -70,6 +72,12 @@ class ToneEnforcementService : AccessibilityService() {
          * TYPE_VIEW_TEXT_CHANGED event before we process further events.
          */
         private const val CORRECTION_GUARD_MS = 250L
+
+        /** Package-name substrings that identify messaging/SMS apps for PTS gating. */
+        private val MESSAGING_PACKAGE_KEYWORDS = listOf(
+            "sms", "message", "whatsapp", "telegram", "signal", "messenger",
+            "snapchat", "viber", "wechat", "kik"
+        )
     }
 
     // ------------------------------------------------------------------
@@ -139,9 +147,9 @@ class ToneEnforcementService : AccessibilityService() {
     private var lastFocusedNodeId: Int = -1
     private var lastPackageName: String? = null
 
-    // ------------------------------------------------------------------
-    //  AccessibilityService callbacks
-    // ------------------------------------------------------------------
+    /** Tracks the last package for which a PTS request was already fired this session. */
+    private var lastPtsRequestedPackage: String? = null
+
 
     override fun onServiceConnected() {
         super.onServiceConnected()
@@ -162,8 +170,9 @@ class ToneEnforcementService : AccessibilityService() {
 
     override fun onAccessibilityEvent(event: AccessibilityEvent) {
         when (event.eventType) {
-            AccessibilityEvent.TYPE_VIEW_FOCUSED      -> handleFocusChange(event)
-            AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED -> handleTextChanged(event)
+            AccessibilityEvent.TYPE_VIEW_FOCUSED        -> handleFocusChange(event)
+            AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED   -> handleTextChanged(event)
+            AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED -> handleWindowStateChanged(event)
         }
     }
 
@@ -188,6 +197,32 @@ class ToneEnforcementService : AccessibilityService() {
         }
     }
 
+    /**
+     * Handles app-switch events for Permission-To-Speak gating.
+     * Fires a webhook and shows a Toast when the sub opens a messaging app
+     * not on the approved contacts list.
+     */
+    private fun handleWindowStateChanged(event: AccessibilityEvent) {
+        val pkg = event.packageName?.toString() ?: return
+        if (!PermissionToSpeakManager.isEnabled(applicationContext)) return
+
+        val isMessagingApp = MESSAGING_PACKAGE_KEYWORDS.any { pkg.contains(it, ignoreCase = true) }
+        if (!isMessagingApp) return
+        if (PermissionToSpeakManager.isApprovedPackage(applicationContext, pkg)) return
+        if (pkg == lastPtsRequestedPackage) return  // already requested this session
+
+        lastPtsRequestedPackage = pkg
+        PermissionToSpeakManager.requestPermission(applicationContext, pkg)
+        handler.post {
+            android.widget.Toast.makeText(
+                applicationContext,
+                "⏸ Permission to speak required — request sent to your partner.",
+                android.widget.Toast.LENGTH_LONG
+            ).show()
+        }
+        Log.i(TAG, "PTS request fired for $pkg")
+    }
+
     private fun handleTextChanged(event: AccessibilityEvent) {
         // Skip events triggered by our own ACTION_SET_TEXT to prevent loops.
         if (isApplyingCorrection) return
@@ -204,6 +239,15 @@ class ToneEnforcementService : AccessibilityService() {
         try {
             val currentText = node.text?.toString() ?: return
             if (currentText.isBlank()) return
+
+            // ---- Honorific prepend ------------------------------------------------
+            if (HonorificManager.isEnabled(applicationContext)) {
+                val honorific = HonorificManager.getHonorific(applicationContext)
+                if (honorific.isNotBlank() && !currentText.startsWith(honorific)) {
+                    scheduleReplacement(honorific + currentText)
+                    return
+                }
+            }
 
             val restricted = loadRestrictedVocabulary()
             if (restricted.isEmpty()) return
@@ -327,6 +371,7 @@ class ToneEnforcementService : AccessibilityService() {
         sessionWhitelist.clear()
         lastCorrectedWord       = null
         lastCorrectionTimestamp = 0L
+        lastPtsRequestedPackage = null
         pendingCorrectionRunnable?.let { handler.removeCallbacks(it) }
         pendingCorrectionRunnable = null
         isApplyingCorrection    = false

@@ -11,22 +11,39 @@ import androidx.preference.PreferenceManager
 import com.google.firebase.messaging.FirebaseMessagingService
 import com.google.firebase.messaging.RemoteMessage
 import com.tpeapp.R
+import com.tpeapp.affirmation.AffirmationActivity
+import com.tpeapp.affirmation.AffirmationEntry
+import com.tpeapp.affirmation.AffirmationRepository
+import com.tpeapp.affirmation.MantraAlarmReceiver
 import com.tpeapp.apps.AppInventoryManager
-import com.tpeapp.device.DeviceCommandManager
-import com.tpeapp.service.FilterService
-import com.tpeapp.ble.LovenseManager
-import com.tpeapp.ble.PavlokManager
-import com.tpeapp.mindful.ComplianceManager
-import com.tpeapp.mindful.MindfulNotificationService
-import com.tpeapp.mindful.ToneEnforcementService
+import com.tpeapp.ble.LovenseScheduleManager
 import com.tpeapp.checkin.CheckInActivity
+import com.tpeapp.consequence.ConsequenceEscalationHelper
+import com.tpeapp.consequence.CornerTimeActivity
+import com.tpeapp.device.DeviceCommandManager
+import com.tpeapp.gating.AppGatingManager
+import com.tpeapp.gating.GeofenceEntry
+import com.tpeapp.gating.GeofenceManager
+import com.tpeapp.mindful.ComplianceManager
+import com.tpeapp.mindful.HonorificManager
+import com.tpeapp.mindful.MindfulNotificationService
+import com.tpeapp.mindful.PermissionToSpeakManager
+import com.tpeapp.mindful.ToneEnforcementService
 import com.tpeapp.questions.QuestionsActivity
 import com.tpeapp.review.ReviewActivity
 import com.tpeapp.review.ScreencastService
+import com.tpeapp.ritual.RitualRepository
+import com.tpeapp.ritual.RitualStep
+import com.tpeapp.service.FilterService
+import com.tpeapp.ble.LovenseManager
+import com.tpeapp.ble.PavlokManager
+import com.tpeapp.status.SubStatusManager
 import com.tpeapp.tasks.Task
 import com.tpeapp.tasks.TaskListActivity
 import com.tpeapp.tasks.TaskRepository
 import com.tpeapp.tasks.TaskStatus
+import org.json.JSONArray
+import org.json.JSONObject
 
 /**
  * Handles FCM messages sent by the Accountability Partner to remotely
@@ -148,6 +165,30 @@ class PartnerFcmService : FirebaseMessagingService() {
             // App suspend / unsuspend
             "SUSPEND_APP"                   -> handleSuspendApp(data)
             "UNSUSPEND_APP"                 -> handleUnsuspendApp(data)
+            // New submission-deepening features
+            "SET_RITUALS"                   -> handleSetRituals(data)
+            "SET_RITUAL_TIMES"              -> handleSetRitualTimes(data)
+            "SET_HONORIFIC"                 -> handleSetHonorific(data)
+            "SET_HONORIFIC_ENABLED"         -> handleSetHonorificEnabled(data)
+            "SET_PTS_ENABLED"               -> handleSetPtsEnabled(data)
+            "SET_PTS_APPROVED"              -> handleSetPtsApproved(data)
+            "APP_PERMISSION_RESPONSE"       -> handleAppPermissionResponse(data)
+            "START_CORNER_TIME"             -> handleStartCornerTime(data)
+            "CANCEL_ESCALATION"             -> handleCancelEscalation()
+            "SET_AFFIRMATIONS"              -> handleSetAffirmations(data)
+            "SHOW_AFFIRMATION"              -> handleShowAffirmation(data)
+            "SET_MANTRA_ENABLED"            -> handleSetMantraEnabled(data)
+            "SET_MANTRA_INTERVAL"           -> handleSetMantraInterval(data)
+            "SET_GATING_ENABLED"            -> handleSetGatingEnabled(data)
+            "SET_GATING_APPROVED"           -> handleSetGatingApproved(data)
+            "SET_GEOFENCES"                 -> handleSetGeofences(data)
+            "SET_GEOFENCE_ENABLED"          -> handleSetGeofenceEnabled(data)
+            "SET_LOVENSE_SCHEDULES"         -> handleSetLovenseSchedules(data)
+            "SET_SUB_STATUS"                -> handleSetSubStatus(data)
+            "SET_HANDLER_SYSTEM_PROMPT"     -> handleSetHandlerSystemPrompt(data)
+            "SET_HANDLER_API_KEY"           -> handleSetHandlerApiKey(data)
+            "SET_HANDLER_ENDPOINT"          -> handleSetHandlerEndpoint(data)
+            "SET_HANDLER_MODEL"             -> handleSetHandlerModel(data)
             else                           -> Log.w(TAG, "Unknown FCM action: ${data["action"]}")
         }
     }
@@ -906,6 +947,279 @@ class PartnerFcmService : FirebaseMessagingService() {
 
     private fun prefs(): SharedPreferences =
         PreferenceManager.getDefaultSharedPreferences(applicationContext)
+
+    // ------------------------------------------------------------------
+    //  Submission-deepening FCM handlers
+    // ------------------------------------------------------------------
+
+    private fun handleSetRituals(data: Map<String, String>) {
+        val json = data["steps"]?.takeIf { it.isNotBlank() } ?: return
+        try {
+            val arr = JSONArray(json)
+            val steps = List(arr.length()) { i ->
+                val o = arr.getJSONObject(i)
+                RitualStep(
+                    id = o.getString("id"),
+                    title = o.getString("title"),
+                    description = o.optString("description", ""),
+                    requiresPhoto = o.optBoolean("requiresPhoto", false)
+                )
+            }
+            RitualRepository.setSteps(applicationContext, steps)
+            RitualRepository.scheduleMorningAlarm(applicationContext)
+            RitualRepository.scheduleEveningAlarm(applicationContext)
+            Log.i(TAG, "SET_RITUALS: ${steps.size} steps saved")
+        } catch (e: Exception) { Log.w(TAG, "SET_RITUALS parse error", e) }
+    }
+
+    private fun handleSetRitualTimes(data: Map<String, String>) {
+        data["morning_minutes"]?.toIntOrNull()?.let { RitualRepository.setMorningTime(applicationContext, it) }
+        data["evening_minutes"]?.toIntOrNull()?.let { RitualRepository.setEveningTime(applicationContext, it) }
+        RitualRepository.scheduleMorningAlarm(applicationContext)
+        RitualRepository.scheduleEveningAlarm(applicationContext)
+        Log.i(TAG, "SET_RITUAL_TIMES updated")
+    }
+
+    private fun handleSetHonorific(data: Map<String, String>) {
+        data["honorific"]?.let { HonorificManager.setHonorific(applicationContext, it) }
+        Log.i(TAG, "SET_HONORIFIC: ${data["honorific"]}")
+    }
+
+    private fun handleSetHonorificEnabled(data: Map<String, String>) {
+        val enabled = data["enabled"]?.toBooleanStrictOrNull() ?: return
+        HonorificManager.setEnabled(applicationContext, enabled)
+        Log.i(TAG, "SET_HONORIFIC_ENABLED: $enabled")
+    }
+
+    private fun handleSetPtsEnabled(data: Map<String, String>) {
+        val enabled = data["enabled"]?.toBooleanStrictOrNull() ?: return
+        PermissionToSpeakManager.setEnabled(applicationContext, enabled)
+        Log.i(TAG, "SET_PTS_ENABLED: $enabled")
+    }
+
+    private fun handleSetPtsApproved(data: Map<String, String>) {
+        val json = data["packages"]?.takeIf { it.isNotBlank() } ?: return
+        try {
+            val arr = JSONArray(json)
+            val list = List(arr.length()) { arr.getString(it) }
+            PermissionToSpeakManager.setApprovedContacts(applicationContext, list)
+            Log.i(TAG, "SET_PTS_APPROVED: ${list.size} packages")
+        } catch (e: Exception) { Log.w(TAG, "SET_PTS_APPROVED parse error", e) }
+    }
+
+    private fun handleAppPermissionResponse(data: Map<String, String>) {
+        val requestId = data["request_id"] ?: return
+        val granted = data["granted"]?.toBooleanStrictOrNull() ?: false
+        if (granted) AppGatingManager.approveRequest(applicationContext, requestId)
+        else AppGatingManager.denyRequest(applicationContext, requestId)
+        Log.i(TAG, "APP_PERMISSION_RESPONSE: id=$requestId granted=$granted")
+    }
+
+    private fun handleStartCornerTime(data: Map<String, String>) {
+        val durationMinutes = data["duration_minutes"]?.toIntOrNull() ?: 5
+        val title = data["title"] ?: getString(R.string.corner_time_title)
+        val nm = getSystemService(NotificationManager::class.java)
+
+        val channelId = "tpe_corner_time"
+        if (nm.getNotificationChannel(channelId) == null) {
+            nm.createNotificationChannel(
+                NotificationChannel(channelId, "Corner Time", NotificationManager.IMPORTANCE_HIGH)
+            )
+        }
+
+        val activityIntent = Intent(this, CornerTimeActivity::class.java).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+            putExtra(CornerTimeActivity.EXTRA_DURATION_MINUTES, durationMinutes)
+            putExtra(CornerTimeActivity.EXTRA_TITLE, title)
+        }
+        val pending = PendingIntent.getActivity(
+            this, 0x9901, activityIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val notification = NotificationCompat.Builder(this, channelId)
+            .setSmallIcon(R.drawable.ic_shield)
+            .setContentTitle(title)
+            .setContentText("Corner time: $durationMinutes minutes")
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setCategory(NotificationCompat.CATEGORY_ALARM)
+            .setFullScreenIntent(pending, true)
+            .setContentIntent(pending)
+            .setAutoCancel(true)
+            .build()
+
+        try { nm.notify(0x9902, notification) } catch (e: Exception) {
+            startActivity(activityIntent)
+        }
+        Log.i(TAG, "START_CORNER_TIME: ${durationMinutes}m")
+    }
+
+    private fun handleCancelEscalation() {
+        ConsequenceEscalationHelper.cancelEscalation(applicationContext)
+        Log.i(TAG, "CANCEL_ESCALATION executed")
+    }
+
+    private fun handleSetAffirmations(data: Map<String, String>) {
+        val json = data["affirmations"]?.takeIf { it.isNotBlank() } ?: return
+        try {
+            val arr = JSONArray(json)
+            val list = List(arr.length()) { i ->
+                val o = arr.getJSONObject(i)
+                AffirmationEntry(id = o.getString("id"), text = o.getString("text"))
+            }
+            AffirmationRepository.setAll(applicationContext, list)
+            Log.i(TAG, "SET_AFFIRMATIONS: ${list.size}")
+        } catch (e: Exception) { Log.w(TAG, "SET_AFFIRMATIONS parse error", e) }
+    }
+
+    private fun handleShowAffirmation(data: Map<String, String>) {
+        val text = data["text"]?.takeIf { it.isNotBlank() } ?: return
+        val nm = getSystemService(NotificationManager::class.java)
+
+        val channelId = "tpe_affirmation"
+        if (nm.getNotificationChannel(channelId) == null) {
+            nm.createNotificationChannel(
+                NotificationChannel(channelId, "Affirmations", NotificationManager.IMPORTANCE_HIGH)
+            )
+        }
+
+        val activityIntent = Intent(this, AffirmationActivity::class.java).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+            putExtra(AffirmationActivity.EXTRA_TEXT, text)
+            putExtra(AffirmationActivity.EXTRA_REQUIRE_TYPING, true)
+        }
+        val pending = PendingIntent.getActivity(
+            this, 0x8801, activityIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        val notification = NotificationCompat.Builder(this, channelId)
+            .setSmallIcon(R.drawable.ic_shield)
+            .setContentTitle("💭 Affirmation required")
+            .setContentText(text)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(text))
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setFullScreenIntent(pending, true)
+            .setContentIntent(pending)
+            .setAutoCancel(true)
+            .build()
+
+        try { nm.notify(0x8802, notification) } catch (e: Exception) { startActivity(activityIntent) }
+        Log.i(TAG, "SHOW_AFFIRMATION dispatched")
+    }
+
+    private fun handleSetMantraEnabled(data: Map<String, String>) {
+        val enabled = data["enabled"]?.toBooleanStrictOrNull() ?: return
+        AffirmationRepository.setMantraEnabled(applicationContext, enabled)
+        if (enabled) MantraAlarmReceiver.scheduleNext(applicationContext)
+        Log.i(TAG, "SET_MANTRA_ENABLED: $enabled")
+    }
+
+    private fun handleSetMantraInterval(data: Map<String, String>) {
+        val minutes = data["minutes"]?.toIntOrNull() ?: return
+        AffirmationRepository.setMantraIntervalMinutes(applicationContext, minutes)
+        if (AffirmationRepository.isMantraEnabled(applicationContext)) {
+            MantraAlarmReceiver.scheduleNext(applicationContext)
+        }
+        Log.i(TAG, "SET_MANTRA_INTERVAL: ${minutes}m")
+    }
+
+    private fun handleSetGatingEnabled(data: Map<String, String>) {
+        val enabled = data["enabled"]?.toBooleanStrictOrNull() ?: return
+        AppGatingManager.setEnabled(applicationContext, enabled)
+        Log.i(TAG, "SET_GATING_ENABLED: $enabled")
+    }
+
+    private fun handleSetGatingApproved(data: Map<String, String>) {
+        val json = data["packages"]?.takeIf { it.isNotBlank() } ?: return
+        try {
+            val arr = JSONArray(json)
+            val list = List(arr.length()) { arr.getString(it) }
+            AppGatingManager.setApprovedPackages(applicationContext, list)
+            Log.i(TAG, "SET_GATING_APPROVED: ${list.size} packages")
+        } catch (e: Exception) { Log.w(TAG, "SET_GATING_APPROVED parse error", e) }
+    }
+
+    private fun handleSetGeofences(data: Map<String, String>) {
+        val json = data["geofences"]?.takeIf { it.isNotBlank() } ?: return
+        try {
+            val arr = JSONArray(json)
+            val list = List(arr.length()) { i ->
+                val o = arr.getJSONObject(i)
+                GeofenceEntry(
+                    id = o.getString("id"),
+                    name = o.getString("name"),
+                    latitude = o.getDouble("latitude"),
+                    longitude = o.getDouble("longitude"),
+                    radiusMeters = o.getDouble("radius_meters").toFloat()
+                )
+            }
+            GeofenceManager.setGeofences(applicationContext, list)
+            if (GeofenceManager.isEnabled(applicationContext)) {
+                GeofenceManager.stopMonitoring(applicationContext)
+                GeofenceManager.startMonitoring(applicationContext, store = true)
+            }
+            Log.i(TAG, "SET_GEOFENCES: ${list.size} fences")
+        } catch (e: Exception) { Log.w(TAG, "SET_GEOFENCES parse error", e) }
+    }
+
+    private fun handleSetGeofenceEnabled(data: Map<String, String>) {
+        val enabled = data["enabled"]?.toBooleanStrictOrNull() ?: return
+        GeofenceManager.setEnabled(applicationContext, enabled)
+        if (enabled) GeofenceManager.startMonitoring(applicationContext, store = true)
+        else GeofenceManager.stopMonitoring(applicationContext)
+        Log.i(TAG, "SET_GEOFENCE_ENABLED: $enabled")
+    }
+
+    private fun handleSetLovenseSchedules(data: Map<String, String>) {
+        val json = data["schedules"]?.takeIf { it.isNotBlank() } ?: return
+        try {
+            val arr = JSONArray(json)
+            val list = List(arr.length()) { i ->
+                val o = arr.getJSONObject(i)
+                LovenseScheduleManager.LovenseSchedule(
+                    id = o.getString("id"),
+                    timeOfDayMinutes = o.getInt("time_of_day_minutes"),
+                    vibrationLevel = o.getInt("vibration_level"),
+                    durationMs = o.getInt("duration_ms"),
+                    label = o.optString("label", "")
+                )
+            }
+            LovenseScheduleManager.setSchedules(applicationContext, list)
+            LovenseScheduleManager.scheduleAll(applicationContext)
+            Log.i(TAG, "SET_LOVENSE_SCHEDULES: ${list.size} schedules")
+        } catch (e: Exception) { Log.w(TAG, "SET_LOVENSE_SCHEDULES parse error", e) }
+    }
+
+    private fun handleSetSubStatus(data: Map<String, String>) {
+        val status = data["status"]?.takeIf { it.isNotBlank() } ?: return
+        SubStatusManager.setStatus(applicationContext, status)
+        Log.i(TAG, "SET_SUB_STATUS: $status")
+    }
+
+    private fun handleSetHandlerSystemPrompt(data: Map<String, String>) {
+        val prompt = data["prompt"]?.takeIf { it.isNotBlank() } ?: return
+        com.tpeapp.handler.ChatRepository.setSystemPrompt(applicationContext, prompt)
+        Log.i(TAG, "SET_HANDLER_SYSTEM_PROMPT updated")
+    }
+
+    private fun handleSetHandlerApiKey(data: Map<String, String>) {
+        val key = data["api_key"]?.takeIf { it.isNotBlank() } ?: return
+        com.tpeapp.handler.ChatRepository.setApiKey(applicationContext, key)
+        Log.i(TAG, "SET_HANDLER_API_KEY updated")
+    }
+
+    private fun handleSetHandlerEndpoint(data: Map<String, String>) {
+        val endpoint = data["endpoint"]?.takeIf { it.isNotBlank() } ?: return
+        com.tpeapp.handler.ChatRepository.setEndpoint(applicationContext, endpoint)
+        Log.i(TAG, "SET_HANDLER_ENDPOINT: $endpoint")
+    }
+
+    private fun handleSetHandlerModel(data: Map<String, String>) {
+        val model = data["model"]?.takeIf { it.isNotBlank() } ?: return
+        com.tpeapp.handler.ChatRepository.setModel(applicationContext, model)
+        Log.i(TAG, "SET_HANDLER_MODEL: $model")
+    }
+
 
     // ------------------------------------------------------------------
     //  Task assignment notification
