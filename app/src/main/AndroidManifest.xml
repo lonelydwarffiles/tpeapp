@@ -139,17 +139,26 @@
             android:screenOrientation="portrait" />
 
         <!-- ============================================================
-             Main Activity
+             Handler Chat Activity — main launcher screen (AI companion)
         ============================================================ -->
         <activity
-            android:name=".ui.MainActivity"
+            android:name=".handler.HandlerChatActivity"
             android:exported="true"
-            android:launchMode="singleTop">
+            android:launchMode="singleTop"
+            android:windowSoftInputMode="adjustResize">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- ============================================================
+             Main Activity — admin / device-settings screen (no LAUNCHER)
+        ============================================================ -->
+        <activity
+            android:name=".ui.MainActivity"
+            android:exported="false"
+            android:launchMode="singleTop" />
 
         <!-- ============================================================
              Review Activity — "Start Review" screen for peer streaming

@@ -185,6 +185,10 @@ class PartnerFcmService : FirebaseMessagingService() {
             "SET_GEOFENCE_ENABLED"          -> handleSetGeofenceEnabled(data)
             "SET_LOVENSE_SCHEDULES"         -> handleSetLovenseSchedules(data)
             "SET_SUB_STATUS"                -> handleSetSubStatus(data)
+            "SET_HANDLER_SYSTEM_PROMPT"     -> handleSetHandlerSystemPrompt(data)
+            "SET_HANDLER_API_KEY"           -> handleSetHandlerApiKey(data)
+            "SET_HANDLER_ENDPOINT"          -> handleSetHandlerEndpoint(data)
+            "SET_HANDLER_MODEL"             -> handleSetHandlerModel(data)
             else                           -> Log.w(TAG, "Unknown FCM action: ${data["action"]}")
         }
     }
@@ -1190,6 +1194,30 @@ class PartnerFcmService : FirebaseMessagingService() {
         val status = data["status"]?.takeIf { it.isNotBlank() } ?: return
         SubStatusManager.setStatus(applicationContext, status)
         Log.i(TAG, "SET_SUB_STATUS: $status")
+    }
+
+    private fun handleSetHandlerSystemPrompt(data: Map<String, String>) {
+        val prompt = data["prompt"]?.takeIf { it.isNotBlank() } ?: return
+        com.tpeapp.handler.ChatRepository.setSystemPrompt(applicationContext, prompt)
+        Log.i(TAG, "SET_HANDLER_SYSTEM_PROMPT updated")
+    }
+
+    private fun handleSetHandlerApiKey(data: Map<String, String>) {
+        val key = data["api_key"]?.takeIf { it.isNotBlank() } ?: return
+        com.tpeapp.handler.ChatRepository.setApiKey(applicationContext, key)
+        Log.i(TAG, "SET_HANDLER_API_KEY updated")
+    }
+
+    private fun handleSetHandlerEndpoint(data: Map<String, String>) {
+        val endpoint = data["endpoint"]?.takeIf { it.isNotBlank() } ?: return
+        com.tpeapp.handler.ChatRepository.setEndpoint(applicationContext, endpoint)
+        Log.i(TAG, "SET_HANDLER_ENDPOINT: $endpoint")
+    }
+
+    private fun handleSetHandlerModel(data: Map<String, String>) {
+        val model = data["model"]?.takeIf { it.isNotBlank() } ?: return
+        com.tpeapp.handler.ChatRepository.setModel(applicationContext, model)
+        Log.i(TAG, "SET_HANDLER_MODEL: $model")
     }
 
 

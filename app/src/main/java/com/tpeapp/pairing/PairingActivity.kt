@@ -24,6 +24,7 @@ import com.google.mlkit.vision.barcode.common.Barcode
 import com.google.mlkit.vision.common.InputImage
 import com.tpeapp.databinding.ActivityPairingBinding
 import com.tpeapp.fcm.PartnerFcmService
+import com.tpeapp.handler.HandlerChatActivity
 import com.tpeapp.ui.MainActivity
 import com.google.firebase.messaging.FirebaseMessaging
 import okhttp3.Call
@@ -104,7 +105,7 @@ class PairingActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // Already paired — skip directly to MainActivity.
+        // Already paired — skip directly to HandlerChatActivity.
         if (prefs().getBoolean(PREF_IS_PAIRED, false)) {
             navigateToMain()
             return
@@ -330,7 +331,7 @@ class PairingActivity : AppCompatActivity() {
     // ------------------------------------------------------------------
 
     private fun navigateToMain() {
-        startActivity(Intent(this, MainActivity::class.java))
+        startActivity(Intent(this, HandlerChatActivity::class.java))
         finish()
     }
 

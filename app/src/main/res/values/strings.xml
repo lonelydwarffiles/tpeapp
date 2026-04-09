@@ -151,4 +151,13 @@
     <string name="status_task_active">🔵 Task Active</string>
     <string name="status_restricted">🔴 Restricted</string>
     <string name="status_punished">🟣 Punished</string>
+
+    <!-- Handler AI Chat -->
+    <string name="handler_name">Handler</string>
+    <string name="handler_input_hint">Message Handler…</string>
+    <string name="handler_btn_send">Send</string>
+    <string name="handler_typing">Handler is thinking…</string>
+    <string name="handler_error">Handler could not reply: %1$s</string>
+    <string name="menu_settings">Settings</string>
+    <string name="menu_clear_chat">Clear conversation</string>
 </resources>
