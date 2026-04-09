@@ -38,6 +38,48 @@
     <!-- Required to enumerate all installed apps for the app-inventory feature -->
     <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
 
+    <!-- ================================================================
+         Screen & Display
+    ================================================================ -->
+    <!-- SET_WALLPAPER — change home/lock screen wallpaper -->
+    <uses-permission android:name="android.permission.SET_WALLPAPER" />
+
+    <!-- ================================================================
+         Audio & Sound
+    ================================================================ -->
+    <!-- MODIFY_AUDIO_SETTINGS — adjust stream volumes -->
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+    <uses-permission android:name="android.permission.VIBRATE" />
+
+    <!-- ================================================================
+         Network & Connectivity
+    ================================================================ -->
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
+    <uses-permission android:name="android.permission.CHANGE_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
+
+    <!-- ================================================================
+         Camera & Sensors
+    ================================================================ -->
+    <!-- ACCESS_FINE_LOCATION — required for GET_LOCATION -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <!-- FLASHLIGHT — needed for setTorchMode (some devices) -->
+    <uses-permission android:name="android.permission.FLASHLIGHT" />
+    <!-- FOREGROUND_SERVICE_CAMERA and _LOCATION declared for future foreground-service uploads -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CAMERA" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
+
+    <!-- ================================================================
+         Notifications & Interruptions
+    ================================================================ -->
+    <!-- ACCESS_NOTIFICATION_POLICY — required for setInterruptionFilter (DND) -->
+    <uses-permission android:name="android.permission.ACCESS_NOTIFICATION_POLICY" />
+    <!-- SET_ALARM — fire Intent.ACTION_SET_ALARM to create alarms -->
+    <uses-permission android:name="com.android.alarm.permission.SET_ALARM" />
+
     <!-- BLE — scan and connect (Android 12+) -->
     <uses-permission android:name="android.permission.BLUETOOTH_SCAN"
         android:usesPermissionFlags="neverForLocation" />
@@ -273,6 +315,19 @@
             android:name=".questions.QuestionsActivity"
             android:exported="false"
             android:screenOrientation="portrait" />
+
+        <!-- ============================================================
+             Overlay Activity — full-screen partner message / URL launcher
+             displayed over the lock screen via full-screen intent pattern.
+        ============================================================ -->
+        <activity
+            android:name=".device.OverlayActivity"
+            android:exported="false"
+            android:launchMode="singleTop"
+            android:showWhenLocked="true"
+            android:turnScreenOn="true"
+            android:screenOrientation="portrait"
+            android:theme="@style/Theme.Tpeapp" />
 
     </application>
 

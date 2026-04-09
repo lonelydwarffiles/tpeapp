@@ -29,6 +29,35 @@ class MindfulNotificationService : NotificationListenerService() {
 
         /** Pattern template for whole-word matching; filled with the escaped word. */
         private const val WORD_BOUNDARY_REGEX = "(?<![\\w])%s(?![\\w])"
+
+        /**
+         * Live reference to the bound service instance.  Set in [onListenerConnected]
+         * and cleared in [onListenerDisconnected] so it is only non-null when the
+         * system has actually connected the listener.
+         */
+        @Volatile private var instance: MindfulNotificationService? = null
+
+        /**
+         * Cancels all active status-bar notifications.
+         * @return `true` if the listener was connected and the call was delegated,
+         *         `false` if the listener is not currently bound.
+         */
+        fun clearAll(): Boolean {
+            val svc = instance ?: return false
+            svc.cancelAllNotifications()
+            Log.i(TAG, "clearAll: all notifications cancelled")
+            return true
+        }
+    }
+
+    override fun onListenerConnected() {
+        super.onListenerConnected()
+        instance = this
+    }
+
+    override fun onListenerDisconnected() {
+        super.onListenerDisconnected()
+        instance = null
     }
 
     override fun onNotificationPosted(sbn: StatusBarNotification) {
