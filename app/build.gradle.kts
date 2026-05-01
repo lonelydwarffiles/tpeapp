@@ -104,4 +104,17 @@ dependencies {
 
     // Socket.IO — WebRTC signaling channel
     implementation(libs.socketio.client)
+
+    // ── Flutter embedding ─────────────────────────────────────────────────────
+    // When building with `flutter build apk` (or `flutter run`), the Flutter
+    // Gradle plugin (applied via settings.gradle.kts) automatically provides the
+    // flutter_embedding_release/debug AAR and the engine shared library.
+    //
+    // If you build this module outside of a Flutter toolchain, add:
+    //   implementation("io.flutter:flutter_embedding_release:<engine-version>")
+    // and ensure the libflutter.so artifact is present in jniLibs/arm64-v8a/.
+    //
+    // TpeFlutterActivity (com.tpeapp.bridge.TpeFlutterActivity) must be declared
+    // as the launcher <activity> in AndroidManifest.xml, replacing the old
+    // com.tpeapp.ui.MainActivity entry.
 }
