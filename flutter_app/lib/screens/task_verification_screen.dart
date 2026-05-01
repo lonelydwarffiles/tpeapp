@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
@@ -80,8 +82,8 @@ class _TaskVerificationScreenState extends State<TaskVerificationScreen> {
             if (_photoPath != null)
               ClipRRect(
                 borderRadius: BorderRadius.circular(8),
-                child: Image.network(
-                  _photoPath!,
+                child: Image.file(
+                  File(_photoPath!),
                   height: 200,
                   fit: BoxFit.cover,
                   errorBuilder: (_, __, ___) =>

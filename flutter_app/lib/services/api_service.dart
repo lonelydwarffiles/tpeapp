@@ -29,12 +29,21 @@ class ApiService {
 
   String get _endpoint =>
       (_prefs.getString('partner_endpoint_url') ?? '').trimRight();
-  String? get _bearerToken =>
-      _prefs.getString('webhook_bearer_token')?.let((t) => t.isNotEmpty ? t : null);
-  String? get _adminUser =>
-      _prefs.getString('admin_username')?.let((u) => u.isNotEmpty ? u : null);
-  String? get _adminPass =>
-      _prefs.getString('admin_password')?.let((p) => p.isNotEmpty ? p : null);
+
+  String? get _bearerToken {
+    final t = _prefs.getString('webhook_bearer_token');
+    return (t != null && t.isNotEmpty) ? t : null;
+  }
+
+  String? get _adminUser {
+    final u = _prefs.getString('admin_username');
+    return (u != null && u.isNotEmpty) ? u : null;
+  }
+
+  String? get _adminPass {
+    final p = _prefs.getString('admin_password');
+    return (p != null && p.isNotEmpty) ? p : null;
+  }
 
   // ── Headers ───────────────────────────────────────────────────────────
 
@@ -201,8 +210,4 @@ class ApiService {
 
 extension on http.Response {
   bool get isSuccessful => statusCode >= 200 && statusCode < 300;
-}
-
-extension _StringX on String {
-  T let<T>(T Function(String) block) => block(this);
 }

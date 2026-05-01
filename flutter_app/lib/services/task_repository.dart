@@ -2,7 +2,6 @@ import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:uuid/uuid.dart';
 
 import '../models/task.dart';
 
@@ -55,8 +54,13 @@ class TaskRepository extends ChangeNotifier {
     notifyListeners();
   }
 
-  Task? findById(String id) =>
-      _tasks.cast<Task?>().firstWhere((t) => t?.id == id, orElse: () => null);
+  Task? findById(String id) {
+    try {
+      return _tasks.firstWhere((t) => t.id == id);
+    } catch (_) {
+      return null;
+    }
+  }
 
   Future<void> markCompleted(String taskId, {String? photoPath}) async {
     final task = findById(taskId);

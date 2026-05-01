@@ -41,14 +41,22 @@ class ChatRepository extends ChangeNotifier {
 
   List<ChatMessage> get history => List.unmodifiable(_history);
 
-  String get endpoint =>
-      _prefs.getString(_endpointKey)?.trimRight() ?? _defaultEndpoint;
-  String? get apiKey =>
-      _prefs.getString(_apiKeyKey)?.let((k) => k.isNotEmpty ? k : null);
+  String get endpoint {
+    final raw = _prefs.getString(_endpointKey) ?? _defaultEndpoint;
+    return raw.trimRight();
+  }
+
+  String? get apiKey {
+    final key = _prefs.getString(_apiKeyKey);
+    return (key != null && key.isNotEmpty) ? key : null;
+  }
+
   String get model => _prefs.getString(_modelKey) ?? _defaultModel;
-  String get systemPrompt =>
-      _prefs.getString(_systemPromptKey)?.let((p) => p.isNotEmpty ? p : null) ??
-      _defaultPrompt;
+
+  String get systemPrompt {
+    final p = _prefs.getString(_systemPromptKey);
+    return (p != null && p.isNotEmpty) ? p : _defaultPrompt;
+  }
 
   void _load() {
     final json = _prefs.getString(_historyKey);
@@ -111,7 +119,10 @@ class ChatRepository extends ChangeNotifier {
   /// Sends [userText] to the configured OpenAI-compatible endpoint and returns
   /// the assistant's reply.  Throws on network failure or non-200 response.
   Future<String> sendMessage(String userText) async {
-    final baseUrl = endpoint.endsWith('/') ? endpoint.dropLast(1) : endpoint;
+    final rawEndpoint = endpoint;
+    final baseUrl = rawEndpoint.endsWith('/')
+        ? rawEndpoint.substring(0, rawEndpoint.length - 1)
+        : rawEndpoint;
 
     final recent = _history.takeLast(20).toList();
 
@@ -159,13 +170,6 @@ class ChatRepository extends ChangeNotifier {
   Future<void> setModel(String m) async {
     await _prefs.setString(_modelKey, m);
   }
-}
-
-// ── Private extension helpers ──────────────────────────────────────────
-
-extension _StringX on String {
-  T let<T>(T Function(String) block) => block(this);
-  String dropLast(int n) => substring(0, length - n);
 }
 
 extension<T> on List<T> {
