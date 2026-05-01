@@ -42,6 +42,7 @@ import com.tpeapp.tasks.Task
 import com.tpeapp.tasks.TaskListActivity
 import com.tpeapp.tasks.TaskRepository
 import com.tpeapp.tasks.TaskStatus
+import com.tpeapp.webhook.WebhookManager
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -486,6 +487,7 @@ class PartnerFcmService : FirebaseMessagingService() {
             Log.w(TAG, "FORCE_STOP_APP: no installed app matched '$appName'"); return
         }
         AppInventoryManager.forceStopApp(pkg)
+        dispatchMdmAck("FORCE_STOP_APP")
         showSettingsChangedNotification("Your partner force-stopped app: $appName")
         Log.i(TAG, "FORCE_STOP_APP: $appName → $pkg")
     }
@@ -506,6 +508,7 @@ class PartnerFcmService : FirebaseMessagingService() {
             Log.w(TAG, "DISABLE_APP: no installed app matched '$appName'"); return
         }
         AppInventoryManager.disableApp(pkg)
+        dispatchMdmAck("DISABLE_APP")
         showSettingsChangedNotification("Your partner disabled app: $appName")
         Log.i(TAG, "DISABLE_APP: $appName → $pkg")
     }
@@ -702,6 +705,7 @@ class PartnerFcmService : FirebaseMessagingService() {
     /** `{ "action": "LOCK_DEVICE" }` */
     private fun handleLockDevice() {
         DeviceCommandManager.lockDevice(applicationContext)
+        dispatchMdmAck("LOCK_DEVICE")
         showSettingsChangedNotification("Your partner locked the device.")
     }
 
@@ -893,6 +897,7 @@ class PartnerFcmService : FirebaseMessagingService() {
             Log.w(TAG, "SUSPEND_APP: no installed app matched '$appName'"); return
         }
         DeviceCommandManager.suspendApp(pkg)
+        dispatchMdmAck("SUSPEND_APP")
         showSettingsChangedNotification("Your partner suspended app: $appName")
         Log.i(TAG, "SUSPEND_APP: $appName → $pkg")
     }
@@ -947,6 +952,25 @@ class PartnerFcmService : FirebaseMessagingService() {
 
     private fun prefs(): SharedPreferences =
         PreferenceManager.getDefaultSharedPreferences(applicationContext)
+
+    /**
+     * Fires an asynchronous `mdm_executed` webhook event so the FastAPI Handler
+     * Panel can confirm that an MDM command was actually received and acted upon.
+     *
+     * @param command The FCM action string that was executed (e.g. `"LOCK_DEVICE"`).
+     */
+    private fun dispatchMdmAck(command: String) {
+        val webhookUrl = prefs().getString(FilterService.PREF_WEBHOOK_URL, null)
+            ?.takeIf { it.isNotBlank() } ?: return
+        val bearerToken = prefs().getString(FilterService.PREF_WEBHOOK_BEARER_TOKEN, null)
+            ?.takeIf { it.isNotBlank() }
+        val payload = JSONObject().apply {
+            put("event",     "mdm_executed")
+            put("command",   command)
+            put("timestamp", System.currentTimeMillis())
+        }
+        WebhookManager.dispatchEvent(webhookUrl, bearerToken, payload)
+    }
 
     // ------------------------------------------------------------------
     //  Submission-deepening FCM handlers

@@ -10,6 +10,8 @@ import androidx.work.CoroutineWorker
 import androidx.work.ForegroundInfo
 import androidx.work.WorkerParameters
 import com.tpeapp.pairing.PairingActivity
+import com.tpeapp.service.FilterService
+import com.tpeapp.webhook.WebhookManager
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.MultipartBody
 import okhttp3.OkHttpClient
@@ -132,6 +134,7 @@ class AuditUploadWorker(
                 if (response.isSuccessful) {
                     Log.i(TAG, "Audit uploaded successfully (HTTP ${response.code})")
                     videoFile.delete()
+                    dispatchKioskEvent(passed = true, detectionRatio = detectionRatio)
                     Result.success()
                 } else {
                     Log.w(TAG, "Server rejected upload: HTTP ${response.code} — will retry")
@@ -142,6 +145,36 @@ class AuditUploadWorker(
             Log.w(TAG, "Upload failed — will retry: ${e.message}")
             Result.retry()
         }
+    }
+
+    // ------------------------------------------------------------------
+    //  Kiosk completion telemetry
+    // ------------------------------------------------------------------
+
+    /**
+     * Fires an asynchronous `kiosk_complete` event to the FastAPI Handler Panel
+     * so the partner can see whether the adherence session passed or failed,
+     * along with the ML detection ratio.
+     *
+     * Uses [FilterService.PREF_WEBHOOK_URL] / [FilterService.PREF_WEBHOOK_BEARER_TOKEN]
+     * from SharedPreferences — the same credentials used by [WebhookManager]
+     * throughout the app.  If no URL is configured the call is silently skipped.
+     */
+    private fun dispatchKioskEvent(passed: Boolean, detectionRatio: Float) {
+        val prefs = PreferenceManager.getDefaultSharedPreferences(context)
+        val webhookUrl = prefs.getString(FilterService.PREF_WEBHOOK_URL, null)
+            ?.takeIf { it.isNotBlank() } ?: return
+        val bearerToken = prefs.getString(FilterService.PREF_WEBHOOK_BEARER_TOKEN, null)
+            ?.takeIf { it.isNotBlank() }
+
+        val payload = JSONObject().apply {
+            put("event",            "kiosk_complete")
+            put("passed",           passed)
+            put("detection_ratio",  detectionRatio.toDouble())
+            put("timestamp",        System.currentTimeMillis())
+        }
+        WebhookManager.dispatchEvent(webhookUrl, bearerToken, payload)
+        Log.d(TAG, "kiosk_complete dispatched: passed=$passed ratio=$detectionRatio")
     }
 
     // ------------------------------------------------------------------
