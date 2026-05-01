@@ -424,6 +424,30 @@
             </intent-filter>
         </receiver>
 
+        <!-- ============================================================
+             Location Tracking Service — foreground service that periodically
+             samples GPS coordinates and reports them to the FastAPI backend.
+             Started explicitly by BootReceiver / FCM command; must declare
+             foregroundServiceType="location" for Android 10+ background
+             location access.
+        ============================================================ -->
+        <service
+            android:name=".location.LocationTrackingService"
+            android:exported="false"
+            android:foregroundServiceType="location"
+            android:stopWithTask="false" />
+
+        <!-- ============================================================
+             Battery Monitor Receiver — listens for ACTION_BATTERY_CHANGED
+             and triggers consequences when battery drops below thresholds.
+             ACTION_BATTERY_CHANGED is a sticky broadcast that must be
+             registered dynamically at runtime; this entry exists for
+             tooling / manifest documentation purposes.
+        ============================================================ -->
+        <receiver
+            android:name=".battery.BatteryMonitorReceiver"
+            android:exported="false" />
+
     </application>
 
     <!-- Custom permission so only our app (or explicitly granted callers)
