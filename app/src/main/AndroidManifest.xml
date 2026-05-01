@@ -16,8 +16,11 @@
         android:name="android.hardware.camera"
         android:required="true" />
 
-    <!-- Microphone — required by AdherenceKioskActivity to record the audit video -->
+    <!-- Microphone — required by AdherenceKioskActivity to record the audit video
+         and by the Flutter WebSocketService for the Live Hot Mic feature -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <!-- Required on Android 14+ for foreground services that capture audio -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
 
     <!-- AlarmManager exact alarms — required to schedule daily adherence checks -->
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />

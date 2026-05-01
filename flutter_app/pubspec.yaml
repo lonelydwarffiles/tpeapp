@@ -47,6 +47,9 @@ dependencies:
   # WorkManager — schedules periodic background vitals-sync tasks
   workmanager: ^0.5.2
 
+  # Audio recording — used by WebSocketService for the Live Hot Mic feature
+  record: ^5.1.2
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
