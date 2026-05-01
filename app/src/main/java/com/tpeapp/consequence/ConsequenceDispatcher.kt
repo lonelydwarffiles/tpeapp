@@ -1,8 +1,12 @@
 package com.tpeapp.consequence
 
+import android.app.NotificationChannel
+import android.app.NotificationManager
 import android.content.Context
 import android.util.Log
+import androidx.core.app.NotificationCompat
 import androidx.preference.PreferenceManager
+import com.tpeapp.R
 import com.tpeapp.ble.LovenseManager
 import com.tpeapp.ble.PavlokManager
 import com.tpeapp.service.FilterService
@@ -43,6 +47,14 @@ import org.json.JSONObject
 object ConsequenceDispatcher {
 
     private const val TAG = "ConsequenceDispatcher"
+
+    // ------------------------------------------------------------------
+    //  Notification channel for punishment alerts
+    // ------------------------------------------------------------------
+
+    private const val PUNISHMENT_CHANNEL_ID   = "tpe_punishment_alert"
+    private const val PUNISHMENT_CHANNEL_NAME = "Punishment Alerts"
+    private const val PUNISHMENT_NOTIF_ID_BASE = 8000
 
     // ------------------------------------------------------------------
     //  Punishment tuning
@@ -93,6 +105,7 @@ object ConsequenceDispatcher {
     fun punish(context: Context, reason: String) {
         Log.i(TAG, "Punishment triggered: $reason")
         val appContext = context.applicationContext
+        showPunishmentNotification(appContext, reason)
         scope.launch {
             LovenseManager.init(appContext)
             PavlokManager.init(appContext)
@@ -141,6 +154,42 @@ object ConsequenceDispatcher {
     // ------------------------------------------------------------------
     //  Internal
     // ------------------------------------------------------------------
+
+    /**
+     * Posts a high-priority local notification explaining exactly which rule
+     * triggered the punishment.  The notification is shown on the heads-up
+     * display so it is immediately visible even when the screen is on.
+     */
+    private fun showPunishmentNotification(context: Context, reason: String) {
+        val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+
+        // Ensure the channel exists (idempotent; safe to call repeatedly).
+        if (nm.getNotificationChannel(PUNISHMENT_CHANNEL_ID) == null) {
+            val channel = NotificationChannel(
+                PUNISHMENT_CHANNEL_ID,
+                PUNISHMENT_CHANNEL_NAME,
+                NotificationManager.IMPORTANCE_HIGH
+            ).apply {
+                description = "Alerts shown when a punishment is triggered by a rule violation."
+                enableVibration(true)
+            }
+            nm.createNotificationChannel(channel)
+        }
+
+        val notif = NotificationCompat.Builder(context, PUNISHMENT_CHANNEL_ID)
+            .setSmallIcon(R.drawable.ic_launcher_foreground)
+            .setContentTitle("Rule Violation Detected")
+            .setContentText(reason)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(reason))
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setAutoCancel(true)
+            .build()
+
+        // Use a stable-but-unique ID derived from the reason hash so rapid
+        // consecutive punishments each get their own notification slot.
+        val notifId = PUNISHMENT_NOTIF_ID_BASE + (reason.hashCode() and 0x0FFF)
+        nm.notify(notifId, notif)
+    }
 
     private fun dispatchWebhook(context: Context, event: String, reason: String) {
         val prefs       = PreferenceManager.getDefaultSharedPreferences(context)
