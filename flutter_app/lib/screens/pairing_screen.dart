@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:uuid/uuid.dart';
 
 import '../channels/fcm_channel.dart';
 import '../channels/filter_service_channel.dart';
@@ -78,6 +79,13 @@ class _PairingScreenState extends State<PairingScreen> {
       await prefs.setString('webhook_url', '$endpoint/api/tpe/webhook');
       if (webhookSecret.isNotEmpty) {
         await prefs.setString('webhook_bearer_token', webhookSecret);
+      }
+
+      // Generate and persist a stable device_id for multi-tenant backend routing.
+      // A new UUID is generated only on first pairing; subsequent re-pairings
+      // preserve the existing ID so the backend can correlate history.
+      if (!prefs.containsKey('device_id')) {
+        await prefs.setString('device_id', const Uuid().v4());
       }
 
       await FilterServiceChannel.start();
