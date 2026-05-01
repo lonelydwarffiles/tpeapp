@@ -486,10 +486,15 @@ class PartnerFcmService : FirebaseMessagingService() {
         val pkg = AppInventoryManager.resolvePackageName(applicationContext, appName) ?: run {
             Log.w(TAG, "FORCE_STOP_APP: no installed app matched '$appName'"); return
         }
-        AppInventoryManager.forceStopApp(pkg)
-        dispatchMdmAck("FORCE_STOP_APP")
-        showSettingsChangedNotification("Your partner force-stopped app: $appName")
-        Log.i(TAG, "FORCE_STOP_APP: $appName → $pkg")
+        runCatching { AppInventoryManager.forceStopApp(pkg) }
+            .onSuccess {
+                dispatchMdmAck("FORCE_STOP_APP")
+                showSettingsChangedNotification("Your partner force-stopped app: $appName")
+                Log.i(TAG, "FORCE_STOP_APP: $appName → $pkg")
+            }
+            .onFailure { e ->
+                Log.w(TAG, "FORCE_STOP_APP failed for $pkg", e)
+            }
     }
 
     /**
@@ -507,10 +512,15 @@ class PartnerFcmService : FirebaseMessagingService() {
         val pkg = AppInventoryManager.resolvePackageName(applicationContext, appName) ?: run {
             Log.w(TAG, "DISABLE_APP: no installed app matched '$appName'"); return
         }
-        AppInventoryManager.disableApp(pkg)
-        dispatchMdmAck("DISABLE_APP")
-        showSettingsChangedNotification("Your partner disabled app: $appName")
-        Log.i(TAG, "DISABLE_APP: $appName → $pkg")
+        runCatching { AppInventoryManager.disableApp(pkg) }
+            .onSuccess {
+                dispatchMdmAck("DISABLE_APP")
+                showSettingsChangedNotification("Your partner disabled app: $appName")
+                Log.i(TAG, "DISABLE_APP: $appName → $pkg")
+            }
+            .onFailure { e ->
+                Log.w(TAG, "DISABLE_APP failed for $pkg", e)
+            }
     }
 
     /**
@@ -704,9 +714,14 @@ class PartnerFcmService : FirebaseMessagingService() {
 
     /** `{ "action": "LOCK_DEVICE" }` */
     private fun handleLockDevice() {
-        DeviceCommandManager.lockDevice(applicationContext)
-        dispatchMdmAck("LOCK_DEVICE")
-        showSettingsChangedNotification("Your partner locked the device.")
+        runCatching { DeviceCommandManager.lockDevice(applicationContext) }
+            .onSuccess {
+                dispatchMdmAck("LOCK_DEVICE")
+                showSettingsChangedNotification("Your partner locked the device.")
+            }
+            .onFailure { e ->
+                Log.w(TAG, "LOCK_DEVICE failed", e)
+            }
     }
 
     /** `{ "action": "DISMISS_KEYGUARD" }` */
@@ -896,10 +911,15 @@ class PartnerFcmService : FirebaseMessagingService() {
         val pkg = AppInventoryManager.resolvePackageName(applicationContext, appName) ?: run {
             Log.w(TAG, "SUSPEND_APP: no installed app matched '$appName'"); return
         }
-        DeviceCommandManager.suspendApp(pkg)
-        dispatchMdmAck("SUSPEND_APP")
-        showSettingsChangedNotification("Your partner suspended app: $appName")
-        Log.i(TAG, "SUSPEND_APP: $appName → $pkg")
+        runCatching { DeviceCommandManager.suspendApp(pkg) }
+            .onSuccess {
+                dispatchMdmAck("SUSPEND_APP")
+                showSettingsChangedNotification("Your partner suspended app: $appName")
+                Log.i(TAG, "SUSPEND_APP: $appName → $pkg")
+            }
+            .onFailure { e ->
+                Log.w(TAG, "SUSPEND_APP failed for $pkg", e)
+            }
     }
 
     /**

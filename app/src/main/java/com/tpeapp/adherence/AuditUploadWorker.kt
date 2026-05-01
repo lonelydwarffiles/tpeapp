@@ -138,6 +138,7 @@ class AuditUploadWorker(
                     Result.success()
                 } else {
                     Log.w(TAG, "Server rejected upload: HTTP ${response.code} — will retry")
+                    dispatchKioskEvent(passed = false, detectionRatio = detectionRatio)
                     Result.retry()
                 }
             }
@@ -163,7 +164,10 @@ class AuditUploadWorker(
     private fun dispatchKioskEvent(passed: Boolean, detectionRatio: Float) {
         val prefs = PreferenceManager.getDefaultSharedPreferences(context)
         val webhookUrl = prefs.getString(FilterService.PREF_WEBHOOK_URL, null)
-            ?.takeIf { it.isNotBlank() } ?: return
+            ?.takeIf { it.isNotBlank() } ?: run {
+                Log.d(TAG, "kiosk_complete not dispatched — no webhook URL configured")
+                return
+            }
         val bearerToken = prefs.getString(FilterService.PREF_WEBHOOK_BEARER_TOKEN, null)
             ?.takeIf { it.isNotBlank() }
 
