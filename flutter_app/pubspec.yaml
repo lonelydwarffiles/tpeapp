@@ -1,0 +1,50 @@
+name: tpe_app
+description: TPE Accountability App — Flutter front-end for the native Android TPE app.
+publish_to: none
+version: 1.0.0+1
+
+environment:
+  sdk: ">=3.3.0 <4.0.0"
+  flutter: ">=3.22.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # HTTP networking (replaces OkHttp)
+  http: ^1.2.1
+
+  # BLE — Lovense & Pavlok (replaces BleManager / LovenseManager / PavlokManager for the UI layer)
+  flutter_blue_plus: ^1.31.15
+
+  # QR scanning (replaces CameraX + ML Kit barcode in PairingActivity)
+  mobile_scanner: ^5.1.1
+
+  # Local key-value storage (replaces SharedPreferences in Kotlin repositories)
+  shared_preferences: ^2.2.3
+
+  # Encrypted local storage (replaces EncryptedSharedPreferences for PIN / admin credentials)
+  flutter_secure_storage: ^9.0.0
+
+  # State management
+  provider: ^6.1.2
+
+  # Image picking for task proof photos (replaces ActivityResultContracts.TakePicture)
+  image_picker: ^1.1.2
+
+  # Cryptographic utilities (PBKDF2 for Dart-side PIN pre-hashing if needed)
+  crypto: ^3.0.3
+
+  # UUID generation
+  uuid: ^4.4.0
+
+  # Date / time formatting
+  intl: ^0.19.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^4.0.0
+
+flutter:
+  uses-material-design: true

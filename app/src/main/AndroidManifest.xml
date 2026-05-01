@@ -106,6 +106,12 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.Tpeapp">
 
+        <!-- Flutter engine: Dart entrypoint and initial route -->
+        <meta-data android:name="io.flutter.embedding.android.NormalTheme"
+            android:resource="@style/Theme.Tpeapp" />
+        <meta-data android:name="io.flutter.embedding.android.SplashScreenDrawable"
+            android:resource="@drawable/ic_launcher_foreground" />
+
         <!-- ============================================================
              Adherence Kiosk Activity — full-screen mandatory health check
              Launched by AdherenceAlarmReceiver via full-screen intent.
@@ -139,18 +145,32 @@
             android:screenOrientation="portrait" />
 
         <!-- ============================================================
-             Handler Chat Activity — main launcher screen (AI companion)
+             TpeFlutterActivity — Flutter UI host (replaces HandlerChatActivity
+             and MainActivity as the primary user-facing entry-point).
+             The Flutter engine renders all screens; native services are
+             accessed via MethodChannels registered in TpeFlutterActivity.
         ============================================================ -->
         <activity
-            android:name=".handler.HandlerChatActivity"
+            android:name=".bridge.TpeFlutterActivity"
             android:exported="true"
             android:launchMode="singleTop"
-            android:windowSoftInputMode="adjustResize">
+            android:windowSoftInputMode="adjustResize"
+            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- ============================================================
+             Handler Chat Activity — kept for backward compatibility with
+             existing FCM deep-links; no longer the primary launcher.
+        ============================================================ -->
+        <activity
+            android:name=".handler.HandlerChatActivity"
+            android:exported="false"
+            android:launchMode="singleTop"
+            android:windowSoftInputMode="adjustResize" />
 
         <!-- ============================================================
              Main Activity — admin / device-settings screen (no LAUNCHER)
