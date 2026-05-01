@@ -3,6 +3,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../channels/device_admin_channel.dart';
 import '../channels/filter_service_channel.dart';
+import '../services/health_service.dart';
+import '../services/vitals_sync_service.dart';
 
 // SharedPreferences keys shared with ChatRepository
 const _kHandlerEndpoint     = 'handler_endpoint';
@@ -41,6 +43,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
   String _handlerModel = 'gpt-4o';
   String _handlerPrompt = '';
 
+  // Health Connect
+  bool _healthConnectEnabled = false;
+  bool _healthConnectPermitted = false;
+  bool _loadingHealth = true;
+
   late SharedPreferences _prefs;
 
   @override
@@ -54,6 +61,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final active = await DeviceAdminChannel.isAdminActive();
     final webhookUrl = await FilterServiceChannel.getWebhookUrl();
     final webhookToken = await FilterServiceChannel.getWebhookToken();
+    final healthEnabled = await VitalsSyncService.instance.isEnabled();
+    final healthPermitted = await HealthService.instance.hasPermissions();
     setState(() {
       _adminActive = active;
       _loadingAdmin = false;
@@ -66,6 +75,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _handlerApiKey = _prefs.getString(_kHandlerApiKey) ?? '';
       _handlerModel = _prefs.getString(_kHandlerModel) ?? 'gpt-4o';
       _handlerPrompt = _prefs.getString(_kHandlerSystemPrompt) ?? '';
+      _healthConnectEnabled = healthEnabled;
+      _healthConnectPermitted = healthPermitted;
+      _loadingHealth = false;
     });
   }
 
@@ -108,6 +120,34 @@ class _SettingsScreenState extends State<SettingsScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Handler settings saved.')));
     }
+  }
+
+  // ── Health Connect ────────────────────────────────────────────────────
+
+  /// Requests Health Connect permissions, then enables or disables the
+  /// periodic background vitals-sync task based on the toggle value.
+  Future<void> _toggleHealthConnect(bool enable) async {
+    if (enable) {
+      final granted = await HealthService.instance.requestPermissions();
+      if (!granted) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text(
+                'Health Connect permissions were not granted. '
+                'Please enable them in the Health Connect app.'),
+          ));
+        }
+        return;
+      }
+      await VitalsSyncService.instance.enable();
+    } else {
+      await VitalsSyncService.instance.disable();
+    }
+    final permitted = await HealthService.instance.hasPermissions();
+    setState(() {
+      _healthConnectEnabled = enable ? permitted : false;
+      _healthConnectPermitted = permitted;
+    });
   }
 
   Future<String?> _showPinDialog(String title) async {
@@ -234,6 +274,34 @@ class _SettingsScreenState extends State<SettingsScreen> {
           FilledButton(
               onPressed: _applyHandlerSettings,
               child: const Text('Save Handler Settings')),
+
+          const Divider(height: 32),
+
+          // ── Health Connect ──────────────────────────────────────────
+          Text('Health Connect', style: Theme.of(context).textTheme.titleMedium),
+          const SizedBox(height: 8),
+          _loadingHealth
+              ? const LinearProgressIndicator()
+              : Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      _healthConnectPermitted
+                          ? '✅ Permissions granted'
+                          : '❌ Permissions not granted',
+                    ),
+                    const SizedBox(height: 4),
+                    SwitchListTile(
+                      title: const Text('Enable Vitals Sync'),
+                      subtitle: const Text(
+                          'Syncs HeartRate & Steps to your partner server '
+                          'every 15 minutes.'),
+                      value: _healthConnectEnabled,
+                      onChanged: _toggleHealthConnect,
+                      contentPadding: EdgeInsets.zero,
+                    ),
+                  ],
+                ),
         ],
       ),
     );

@@ -81,6 +81,14 @@
     <!-- SET_ALARM — fire Intent.ACTION_SET_ALARM to create alarms -->
     <uses-permission android:name="com.android.alarm.permission.SET_ALARM" />
 
+    <!-- ================================================================
+         Health Connect — biometric vitals (HeartRate, Steps)
+    ================================================================ -->
+    <!-- Read permission for heart-rate data via Health Connect -->
+    <uses-permission android:name="android.permission.health.READ_HEART_RATE" />
+    <!-- Read permission for step-count data via Health Connect -->
+    <uses-permission android:name="android.permission.health.READ_STEPS" />
+
     <!-- BLE — scan and connect (Android 12+) -->
     <uses-permission android:name="android.permission.BLUETOOTH_SCAN"
         android:usesPermissionFlags="neverForLocation" />
@@ -93,6 +101,18 @@
     <uses-feature
         android:name="android.hardware.bluetooth_le"
         android:required="false" />
+
+    <!-- ================================================================
+         Health Connect app discovery (Android 13 and below).
+         Required so the system allows explicit queries to the Health
+         Connect store app and the intent-based permission flow.
+    ================================================================ -->
+    <queries>
+        <package android:name="com.google.android.apps.healthdata" />
+        <intent>
+            <action android:name="androidx.health.ACTION_SHOW_PERMISSIONS_RATIONALE" />
+        </intent>
+    </queries>
 
     <!-- ================================================================
          Application
@@ -159,6 +179,10 @@
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+            <!-- Health Connect permission rationale screen (required by Health Connect) -->
+            <intent-filter>
+                <action android:name="androidx.health.ACTION_SHOW_PERMISSIONS_RATIONALE" />
             </intent-filter>
         </activity>
 

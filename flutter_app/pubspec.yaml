@@ -41,6 +41,12 @@ dependencies:
   # Date / time formatting
   intl: ^0.19.0
 
+  # Health Connect — reads HeartRate and Steps biometric data
+  health: ^10.2.0
+
+  # WorkManager — schedules periodic background vitals-sync tasks
+  workmanager: ^0.5.2
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
