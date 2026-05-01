@@ -95,6 +95,10 @@ class TpeCapabilityService : AccessibilityService() {
 
     // ------------------------------------------------------------------
     //  Duplicate-detection state for screen-text telemetry
+    //
+    //  Note: AccessibilityService callbacks (onAccessibilityEvent, etc.) are
+    //  always dispatched on the service's main thread, so these plain
+    //  LinkedHashMaps are safe without additional synchronization.
     // ------------------------------------------------------------------
 
     /**

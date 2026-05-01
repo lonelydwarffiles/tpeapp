@@ -350,9 +350,21 @@ class FilterService : Service() {
     private fun effectiveThreshold(base: Float): Float =
         if (strictModeEnabled) minOf(base, STRICT_THRESHOLD) else base
 
+    /**
+     * Waits (with yields) for the classifier to be initialised and returns a
+     * stable local reference.  Also monitors [nudeNetEnabled] — if the flag is
+     * cleared while waiting, an [IllegalStateException] is thrown so that the
+     * caller's `runCatching` block handles it cleanly and reports a safe result
+     * rather than looping forever.
+     *
+     * The returned local val is used for all subsequent calls so a concurrent
+     * null assignment (during service destruction or flag toggle) cannot cause a
+     * NullPointerException after the null check.
+     */
     private suspend fun awaitClassifier(): NudeNetClassifier {
         var local: NudeNetClassifier?
         do {
+            if (!nudeNetEnabled) throw IllegalStateException("NudeNet disabled during await")
             local = classifier
             if (local == null) kotlinx.coroutines.delay(50)
         } while (local == null)
