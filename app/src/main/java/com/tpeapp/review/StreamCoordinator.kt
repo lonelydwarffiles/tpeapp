@@ -6,12 +6,15 @@ import android.media.projection.MediaProjection
 import android.util.Log
 import android.view.WindowManager
 import com.tpeapp.ble.LovenseManager
-import io.socket.client.IO
-import io.socket.client.Socket
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.Response
+import okhttp3.WebSocket
+import okhttp3.WebSocketListener
 import org.json.JSONObject
 import org.webrtc.AudioSource
 import org.webrtc.AudioTrack
@@ -30,6 +33,7 @@ import org.webrtc.SurfaceTextureHelper
 import org.webrtc.VideoSource
 import org.webrtc.VideoTrack
 import java.nio.charset.Charset
+import java.util.concurrent.TimeUnit
 
 /**
  * StreamCoordinator — coordinates the full WebRTC streaming pipeline.
@@ -75,6 +79,12 @@ object StreamCoordinator {
 
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
+    private val wsClient: OkHttpClient = OkHttpClient.Builder()
+        .connectTimeout(15, TimeUnit.SECONDS)
+        .readTimeout(0, TimeUnit.SECONDS)    // no read timeout for persistent WS connection
+        .writeTimeout(15, TimeUnit.SECONDS)
+        .build()
+
     @Volatile private var eglBase: EglBase?                  = null
     @Volatile private var factory: PeerConnectionFactory?    = null
     @Volatile private var peerConnection: PeerConnection?    = null
@@ -84,7 +94,7 @@ object StreamCoordinator {
     @Volatile private var audioSource: AudioSource?          = null
     @Volatile private var audioTrack: AudioTrack?            = null
     @Volatile private var surfaceHelper: SurfaceTextureHelper? = null
-    @Volatile private var socket: Socket?                    = null
+    @Volatile private var wsSocket: WebSocket?               = null
     @Volatile private var sessionId: String                  = ""
     @Volatile private var signalingUrl: String               = ""
     @Volatile private var appContext: Context?               = null

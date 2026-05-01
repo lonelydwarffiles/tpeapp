@@ -11,6 +11,7 @@ import androidx.core.app.NotificationCompat
 import androidx.preference.PreferenceManager
 import com.tpeapp.R
 import com.tpeapp.consequence.ConsequenceDispatcher
+import com.tpeapp.pairing.PairingActivity
 import com.tpeapp.service.FilterService
 import okhttp3.Call
 import okhttp3.Callback
@@ -59,8 +60,8 @@ class BatteryMonitorReceiver : BroadcastReceiver() {
         private const val SEVERITY_WARNING  = "warning"
         private const val SEVERITY_CRITICAL = "critical"
 
-        /** Path on the FastAPI backend that receives battery events. */
-        const val BATTERY_ENDPOINT_PATH = "/api/tpe/battery"
+        /** Path on the FastAPI backend that receives device status (battery, GPS, AI). */
+        const val DEVICE_STATUS_PATH = "/api/handler/device-status"
 
         private val httpClient: OkHttpClient = OkHttpClient.Builder()
             .connectTimeout(15, TimeUnit.SECONDS)
@@ -168,7 +169,7 @@ class BatteryMonitorReceiver : BroadcastReceiver() {
 
     private fun reportBatteryEvent(context: Context, percent: Int, severity: String) {
         val prefs   = PreferenceManager.getDefaultSharedPreferences(context)
-        val baseUrl = prefs.getString(FilterService.PREF_WEBHOOK_URL, null)
+        val endpoint = prefs.getString(PairingActivity.PREF_PARTNER_ENDPOINT, null)
             ?.takeIf { it.isNotBlank() }
             ?.trimEnd('/')
             ?: run {
@@ -177,16 +178,20 @@ class BatteryMonitorReceiver : BroadcastReceiver() {
             }
         val bearerToken = prefs.getString(FilterService.PREF_WEBHOOK_BEARER_TOKEN, null)
             ?.takeIf { it.isNotBlank() }
+        val deviceId = prefs.getString("device_id", null)?.takeIf { it.isNotBlank() }
+            ?: run {
+                Log.d(TAG, "No device_id configured — skipping battery report")
+                return
+            }
 
         val payload = JSONObject().apply {
-            put("percent",   percent)
-            put("severity",  severity)
-            put("timestamp", System.currentTimeMillis())
+            put("device_id",   deviceId)
+            put("battery_pct", percent)
         }
 
         val body    = payload.toString().toRequestBody(JSON_TYPE)
         val builder = Request.Builder()
-            .url("$baseUrl$BATTERY_ENDPOINT_PATH")
+            .url("$endpoint$DEVICE_STATUS_PATH")
             .post(body)
         if (!bearerToken.isNullOrBlank()) {
             builder.addHeader("Authorization", "Bearer $bearerToken")

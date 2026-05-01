@@ -162,10 +162,10 @@ class SilentSelfieWorker(
     // ------------------------------------------------------------------
 
     private fun uploadPhoto(file: File, endpoint: String, token: String?) {
-        val url = "$endpoint/api/tpe/selfie"
+        val url = "$endpoint/api/tpe/upload"
         val body = MultipartBody.Builder()
             .setType(MultipartBody.FORM)
-            .addFormDataPart("photo", file.name, file.asRequestBody("image/jpeg".toMediaType()))
+            .addFormDataPart("file", file.name, file.asRequestBody("image/jpeg".toMediaType()))
             .build()
 
         val reqBuilder = Request.Builder().url(url).post(body)

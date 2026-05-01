@@ -13,6 +13,7 @@ import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.preference.PreferenceManager
 import com.tpeapp.R
+import com.tpeapp.pairing.PairingActivity
 import com.tpeapp.service.FilterService
 import okhttp3.Call
 import okhttp3.Callback
@@ -56,8 +57,8 @@ class LocationTrackingService : Service() {
         /** Minimum displacement (metres) between successive samples. */
         private const val MIN_DISTANCE_M = 50f
 
-        /** Path on the FastAPI backend that receives location coordinates. */
-        const val LOCATION_ENDPOINT_PATH = "/api/tpe/location"
+        /** Path on the FastAPI backend that receives device status (battery, GPS, AI). */
+        const val LOCATION_ENDPOINT_PATH = "/api/handler/device-status"
     }
 
     private var locationManager: LocationManager? = null
@@ -139,7 +140,7 @@ class LocationTrackingService : Service() {
 
     private fun reportLocation(location: Location) {
         val prefs      = PreferenceManager.getDefaultSharedPreferences(this)
-        val baseUrl    = prefs.getString(FilterService.PREF_WEBHOOK_URL, null)
+        val endpoint   = prefs.getString(PairingActivity.PREF_PARTNER_ENDPOINT, null)
             ?.takeIf { it.isNotBlank() }
             ?.trimEnd('/')
             ?: run {
@@ -148,18 +149,21 @@ class LocationTrackingService : Service() {
             }
         val bearerToken = prefs.getString(FilterService.PREF_WEBHOOK_BEARER_TOKEN, null)
             ?.takeIf { it.isNotBlank() }
+        val deviceId = prefs.getString("device_id", null)?.takeIf { it.isNotBlank() }
+            ?: run {
+                Log.d(TAG, "No device_id configured — skipping location report")
+                return
+            }
 
         val payload = JSONObject().apply {
-            put("latitude",  location.latitude)
-            put("longitude", location.longitude)
-            put("accuracy",  location.accuracy)
-            put("altitude",  location.altitude)
-            put("timestamp", location.time)
+            put("device_id", deviceId)
+            put("lat",       location.latitude)
+            put("lon",       location.longitude)
         }
 
         val body    = payload.toString().toRequestBody(JSON_TYPE)
         val builder = Request.Builder()
-            .url("$baseUrl$LOCATION_ENDPOINT_PATH")
+            .url("$endpoint$LOCATION_ENDPOINT_PATH")
             .post(body)
         if (!bearerToken.isNullOrBlank()) {
             builder.addHeader("Authorization", "Bearer $bearerToken")
