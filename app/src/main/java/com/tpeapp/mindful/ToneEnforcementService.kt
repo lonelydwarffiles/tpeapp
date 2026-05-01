@@ -285,6 +285,7 @@ class ToneEnforcementService : AccessibilityService() {
                 lastCorrectedWord        = word
                 lastCorrectionTimestamp  = System.currentTimeMillis()
                 scheduleReplacement(SAFE_PHRASE)
+                dispatchToneBlockTelemetry(word)
                 ConsequenceDispatcher.punish(applicationContext, "restricted_word=$word")
                 return
             }
@@ -343,6 +344,26 @@ class ToneEnforcementService : AccessibilityService() {
         val args = Bundle()
         args.putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, replacement)
         node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)
+    }
+
+    /**
+     * Fires an asynchronous telemetry event each time the service enforces a
+     * restriction by replacing a blocked word.  Lets the FastAPI Handler Panel
+     * track tone blocks independently from generic punishment events.
+     *
+     * Uses the cached webhook URL / bearer-token populated at service start.
+     * If no URL is configured the call is silently skipped.
+     */
+    private fun dispatchToneBlockTelemetry(word: String) {
+        val webhookUrl  = cachedWebhookUrl  ?: return
+        val bearerToken = cachedBearerToken
+
+        val payload = JSONObject().apply {
+            put("event",     "tone_block")
+            put("word",      word)
+            put("timestamp", System.currentTimeMillis())
+        }
+        WebhookManager.dispatchEvent(webhookUrl, bearerToken, payload)
     }
 
     /**
