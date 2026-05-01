@@ -45,20 +45,30 @@ class ApiService {
     return (p != null && p.isNotEmpty) ? p : null;
   }
 
+  String? get _deviceId {
+    final id = _prefs.getString('device_id');
+    return (id != null && id.isNotEmpty) ? id : null;
+  }
+
   // ── Headers ───────────────────────────────────────────────────────────
 
   Map<String, String> get _bearerHeaders => {
         'Content-Type': 'application/json',
         if (_bearerToken != null) 'Authorization': 'Bearer $_bearerToken',
+        if (_deviceId != null) 'X-Device-ID': _deviceId!,
       };
 
   Map<String, String> get _basicAuthHeaders {
     final user = _adminUser;
     final pass = _adminPass;
-    if (user == null || pass == null) return {'Content-Type': 'application/json'};
+    final Map<String, String> base = {
+      'Content-Type': 'application/json',
+      if (_deviceId != null) 'X-Device-ID': _deviceId!,
+    };
+    if (user == null || pass == null) return base;
     final encoded = base64Encode(utf8.encode('$user:$pass'));
     return {
-      'Content-Type': 'application/json',
+      ...base,
       'Authorization': 'Basic $encoded',
     };
   }

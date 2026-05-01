@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Metadata for TpeCapabilityService — the comprehensive AccessibilityService
+    that acts as a fallback for the LSPosed module on non-rooted / lower-end devices.
+
+    accessibilityEventTypes:
+      typeViewTextChanged    — screen-text reading for Tone Enforcement fallback.
+      typeWindowStateChanged — app-launch blocking and uninstall prevention.
+
+    accessibilityFeedbackType: feedbackGeneric — no audio/haptic feedback.
+    notificationTimeout: 100 ms — debounce rapid keystrokes.
+    canRetrieveWindowContent: true — required to read node text for tone enforcement.
+-->
+<accessibility-service
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    android:accessibilityEventTypes="typeViewTextChanged|typeWindowStateChanged"
+    android:accessibilityFeedbackType="feedbackGeneric"
+    android:notificationTimeout="100"
+    android:canRetrieveWindowContent="true"
+    android:description="@string/tpe_capability_service_description" />

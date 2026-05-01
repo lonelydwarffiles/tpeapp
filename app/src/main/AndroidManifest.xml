@@ -253,6 +253,27 @@
         </service>
 
         <!-- ============================================================
+             Capabilities Service — comprehensive AccessibilityService that
+             acts as a fallback for the LSPosed module on non-rooted and
+             lower-end devices.  Provides:
+               • Screen-text reading for Tone Enforcement
+               • Unauthorized app-launch blocking
+               • Uninstall prevention
+             Requires the user to grant Accessibility access in Settings.
+        ============================================================ -->
+        <service
+            android:name=".capability.TpeCapabilityService"
+            android:exported="false"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/tpe_capability_service" />
+        </service>
+
+        <!-- ============================================================
              Package Change Receiver — monitors app installs/uninstalls
              to keep the partner dashboard's app list current.
              ACTION_PACKAGE_ADDED and ACTION_PACKAGE_REMOVED are on the

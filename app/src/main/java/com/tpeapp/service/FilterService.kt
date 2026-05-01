@@ -67,6 +67,13 @@ class FilterService : Service() {
         const val PREF_STRICT_MODE             = "filter_strict_mode"
         /** SharedPreferences key for the JSON-encoded list of blocked NudeNet class labels. */
         const val PREF_BLOCKED_CLASSES         = "filter_blocked_classes"
+        /**
+         * SharedPreferences key (Boolean) for the NudeNet TFLite feature flag.
+         * When `false` the classifier is not initialised and all scan requests
+         * return a safe (not-blocked) result, saving memory and CPU on low-end
+         * or non-rooted devices.  Defaults to `true` (enabled).
+         */
+        const val PREF_NUDENET_ENABLED         = "nudenet_enabled"
 
         /** Threshold used when strict mode is active and no explicit threshold is set. */
         private const val STRICT_THRESHOLD     = 0.30f
@@ -84,6 +91,14 @@ class FilterService : Service() {
 
     /** True when the partner has enabled strict content-filter mode. */
     @Volatile private var strictModeEnabled: Boolean = false
+
+    /**
+     * Feature flag for the NudeNet TFLite classifier.  When `false` the
+     * classifier is not initialised and all scan requests immediately return
+     * a safe (not-blocked) result, saving performance on low-end devices.
+     * Updated live via FCM → SharedPreferences listener.
+     */
+    @Volatile private var nudeNetEnabled: Boolean = true
 
     /** Minimum gap between consecutive clean-scan reward triggers (30 minutes). */
     private val CLEAN_SCAN_REWARD_INTERVAL_MS = 30 * 60 * 1_000L
@@ -107,6 +122,23 @@ class FilterService : Service() {
                 }
                 PREF_BLOCKED_CLASSES ->
                     Log.i(TAG, "Blocked classes updated via FCM (requires multi-class model to take effect)")
+                PREF_NUDENET_ENABLED -> {
+                    val enabled = prefs.getBoolean(key, true)
+                    nudeNetEnabled = enabled
+                    Log.i(TAG, "NudeNet feature flag updated via FCM → $enabled")
+                    if (enabled && classifier == null) {
+                        initClassifierAsync()
+                    } else if (!enabled) {
+                        // Null the field before closing so that any in-flight scan that
+                        // already holds a local reference completes safely.  The classifier
+                        // itself is @Synchronized so close() and inference are mutually
+                        // exclusive; any scan that reads nudeNetEnabled=false before
+                        // reaching awaitClassifier() returns immediately without using it.
+                        val old = classifier
+                        classifier = null
+                        old?.close()
+                    }
+                }
             }
         }
 
@@ -156,8 +188,9 @@ class FilterService : Service() {
             .getDefaultSharedPreferences(applicationContext)
         strictModeEnabled = prefs.getBoolean(PREF_STRICT_MODE, false)
         threshold = effectiveThreshold(prefs.getFloat(PREF_THRESHOLD, DEFAULT_THRESHOLD))
+        nudeNetEnabled = prefs.getBoolean(PREF_NUDENET_ENABLED, true)
         prefs.registerOnSharedPreferenceChangeListener(prefsListener)
-        Log.i(TAG, "Filter settings loaded — threshold=$threshold strictMode=$strictModeEnabled")
+        Log.i(TAG, "Filter settings loaded — threshold=$threshold strictMode=$strictModeEnabled nudeNetEnabled=$nudeNetEnabled")
     }
 
     // ------------------------------------------------------------------
@@ -165,6 +198,10 @@ class FilterService : Service() {
     // ------------------------------------------------------------------
 
     private fun initClassifierAsync() {
+        if (!nudeNetEnabled) {
+            Log.i(TAG, "NudeNet feature flag is disabled — skipping classifier init")
+            return
+        }
         ioScope.launch {
             try {
                 classifier = NudeNetClassifier(applicationContext)
@@ -187,6 +224,10 @@ class FilterService : Service() {
             callback: IFilterCallback
         ) {
             ioScope.launch {
+                if (!nudeNetEnabled) {
+                    callback.onScanResult(requestId, false, 0f)
+                    return@launch
+                }
                 runCatching {
                     val clf     = awaitClassifier()
                     val score   = clf.classifyBytes(imageData)
@@ -213,6 +254,10 @@ class FilterService : Service() {
         ) {
             ioScope.launch {
                 fd.use { pfd ->
+                    if (!nudeNetEnabled) {
+                        callback.onScanResult(requestId, false, 0f)
+                        return@use
+                    }
                     runCatching {
                         val bytes   = FileInputStream(pfd.fileDescriptor).use { it.readBytes() }
                         val clf     = awaitClassifier()
@@ -233,7 +278,7 @@ class FilterService : Service() {
             }
         }
 
-        override fun isReady(): Boolean = classifier != null
+        override fun isReady(): Boolean = nudeNetEnabled && classifier != null
 
         override fun setConfidenceThreshold(newThreshold: Float) {
             threshold = newThreshold.coerceIn(0f, 1f)
@@ -305,9 +350,21 @@ class FilterService : Service() {
     private fun effectiveThreshold(base: Float): Float =
         if (strictModeEnabled) minOf(base, STRICT_THRESHOLD) else base
 
+    /**
+     * Waits (with yields) for the classifier to be initialised and returns a
+     * stable local reference.  Also monitors [nudeNetEnabled] — if the flag is
+     * cleared while waiting, an [IllegalStateException] is thrown so that the
+     * caller's `runCatching` block handles it cleanly and reports a safe result
+     * rather than looping forever.
+     *
+     * The returned local val is used for all subsequent calls so a concurrent
+     * null assignment (during service destruction or flag toggle) cannot cause a
+     * NullPointerException after the null check.
+     */
     private suspend fun awaitClassifier(): NudeNetClassifier {
         var local: NudeNetClassifier?
         do {
+            if (!nudeNetEnabled) throw IllegalStateException("NudeNet disabled during await")
             local = classifier
             if (local == null) kotlinx.coroutines.delay(50)
         } while (local == null)
