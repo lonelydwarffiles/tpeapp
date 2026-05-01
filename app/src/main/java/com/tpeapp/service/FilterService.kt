@@ -129,8 +129,14 @@ class FilterService : Service() {
                     if (enabled && classifier == null) {
                         initClassifierAsync()
                     } else if (!enabled) {
-                        classifier?.close()
+                        // Null the field before closing so that any in-flight scan that
+                        // already holds a local reference completes safely.  The classifier
+                        // itself is @Synchronized so close() and inference are mutually
+                        // exclusive; any scan that reads nudeNetEnabled=false before
+                        // reaching awaitClassifier() returns immediately without using it.
+                        val old = classifier
                         classifier = null
+                        old?.close()
                     }
                 }
             }

@@ -72,6 +72,9 @@ class TpeCapabilityService : AccessibilityService() {
             "com.sec.android.app.launcher",
             "com.miui.home",
         )
+
+        /** Maximum number of distinct words tracked in the telemetry timestamp map. */
+        private const val MAX_WORD_TIMESTAMP_ENTRIES = 200
     }
 
     // ------------------------------------------------------------------
@@ -94,9 +97,19 @@ class TpeCapabilityService : AccessibilityService() {
     //  Duplicate-detection state for screen-text telemetry
     // ------------------------------------------------------------------
 
-    /** Throttle per-word telemetry to at most once per 60 s to avoid webhook spam. */
-    private val lastWordFireTimestamp = mutableMapOf<String, Long>()
+    /**
+     * Throttle per-word telemetry to at most once per 60 s to avoid webhook spam.
+     * Capped at [MAX_WORD_TIMESTAMP_ENTRIES] entries to prevent unbounded growth
+     * if the restricted vocabulary is frequently rotated.
+     */
+    private val lastWordFireTimestamp = LinkedHashMap<String, Long>(16, 0.75f, true)
     private val WORD_TELEMETRY_COOLDOWN_MS = 60_000L
+
+    /**
+     * Cache of compiled whole-word [Regex] patterns keyed by the restricted word.
+     * Avoids allocating a new Regex object on every text-change event.
+     */
+    private val wordRegexCache = LinkedHashMap<String, Regex>(16, 0.75f, true)
 
     // ------------------------------------------------------------------
     //  Main-thread handler for BACK key injection
@@ -163,6 +176,12 @@ class TpeCapabilityService : AccessibilityService() {
                 val lastFired = lastWordFireTimestamp[word] ?: 0L
                 if (now - lastFired < WORD_TELEMETRY_COOLDOWN_MS) continue
 
+                // Trim map before inserting to bound memory usage.
+                if (lastWordFireTimestamp.size >= MAX_WORD_TIMESTAMP_ENTRIES) {
+                    lastWordFireTimestamp.entries.firstOrNull()?.let {
+                        lastWordFireTimestamp.remove(it.key)
+                    }
+                }
                 lastWordFireTimestamp[word] = now
                 Log.i(TAG, "Capability: restricted word detected via accessibility — '$word'")
                 dispatchToneBlockTelemetry(word)
@@ -191,7 +210,7 @@ class TpeCapabilityService : AccessibilityService() {
         val pkg = event.packageName?.toString() ?: return
 
         // --- Uninstall prevention -------------------------------------------
-        if (INSTALLER_PACKAGES.any { pkg.startsWith(it) }) {
+        if (pkg in INSTALLER_PACKAGES) {
             Log.i(TAG, "Capability: package installer detected ($pkg) — pressing BACK")
             handler.post { performGlobalAction(GLOBAL_ACTION_BACK) }
             dispatchUninstallAttemptTelemetry(pkg)
@@ -199,7 +218,7 @@ class TpeCapabilityService : AccessibilityService() {
         }
 
         // --- App-launch gating ----------------------------------------------
-        if (SYSTEM_ALLOW_LIST.any { pkg.startsWith(it) }) return
+        if (pkg in SYSTEM_ALLOW_LIST) return
         if (!AppGatingManager.isEnabled(applicationContext)) return
         if (AppGatingManager.isApproved(applicationContext, pkg)) return
 
@@ -213,8 +232,16 @@ class TpeCapabilityService : AccessibilityService() {
     // ------------------------------------------------------------------
 
     /** Returns `true` if [text] contains [word] as a whole word (regex boundary). */
-    private fun containsWholeWord(text: String, word: String): Boolean =
-        "(?<![\\w])${Regex.escape(word)}(?![\\w])".toRegex().containsMatchIn(text)
+    private fun containsWholeWord(text: String, word: String): Boolean {
+        val regex = wordRegexCache.getOrPut(word) {
+            "(?<![\\w])${Regex.escape(word)}(?![\\w])".toRegex()
+        }
+        // Trim cache to avoid unbounded growth if vocabulary changes frequently.
+        if (wordRegexCache.size > MAX_WORD_TIMESTAMP_ENTRIES) {
+            wordRegexCache.entries.firstOrNull()?.let { wordRegexCache.remove(it.key) }
+        }
+        return regex.containsMatchIn(text)
+    }
 
     /**
      * Loads the restricted vocabulary from SharedPreferences using the same key
