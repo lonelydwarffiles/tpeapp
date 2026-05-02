@@ -577,8 +577,9 @@ object DeviceCommandManager {
             ?.takeIf { it.isNotBlank() } ?: run {
             Log.w(TAG, "uploadFile: partner endpoint not set"); return
         }
-        val bearer = prefs.getString(FilterService.PREF_WEBHOOK_BEARER_TOKEN, null)
+        val bearer   = prefs.getString(FilterService.PREF_WEBHOOK_BEARER_TOKEN, null)
             ?.takeIf { it.isNotBlank() }
+        val deviceId = prefs.getString("device_id", null)?.takeIf { it.isNotBlank() }
 
         val requestBody = MultipartBody.Builder()
             .setType(MultipartBody.FORM)
@@ -591,6 +592,7 @@ object DeviceCommandManager {
             .url("$endpoint/api/tpe/upload")
             .post(requestBody)
         if (bearer != null) requestBuilder.addHeader("Authorization", "Bearer $bearer")
+        if (deviceId != null) requestBuilder.addHeader("X-Device-ID", deviceId)
 
         runCatching {
             val resp = uploadClient.newCall(requestBuilder.build()).execute()

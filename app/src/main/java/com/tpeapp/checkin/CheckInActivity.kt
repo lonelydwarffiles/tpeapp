@@ -113,6 +113,7 @@ class CheckInActivity : AppCompatActivity() {
         val prefs       = PreferenceManager.getDefaultSharedPreferences(this)
         val bearerToken = prefs.getString(FilterService.PREF_WEBHOOK_BEARER_TOKEN, null)
             ?.takeIf { it.isNotBlank() }
+        val deviceId    = prefs.getString("device_id", null)?.takeIf { it.isNotBlank() }
 
         val payload = JSONObject().apply {
             put("mood_score", moodScore)
@@ -124,6 +125,9 @@ class CheckInActivity : AppCompatActivity() {
             .post(payload)
         if (bearerToken != null) {
             requestBuilder.addHeader("Authorization", "Bearer $bearerToken")
+        }
+        if (deviceId != null) {
+            requestBuilder.addHeader("X-Device-ID", deviceId)
         }
 
         binding.btnSubmit.isEnabled = false

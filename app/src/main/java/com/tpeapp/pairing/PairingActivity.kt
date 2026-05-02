@@ -37,6 +37,7 @@ import okhttp3.Response
 import org.json.JSONException
 import org.json.JSONObject
 import java.io.IOException
+import java.util.UUID
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
@@ -260,6 +261,11 @@ class PairingActivity : AppCompatActivity() {
     /**
      * POSTs the device's FCM token to the partner's `/api/pair` endpoint to
      * complete the pairing process.
+     *
+     * A stable `device_id` UUID is generated and persisted on first pairing if one
+     * doesn't already exist.  It is sent in the request body so the Camera-Site can
+     * register the device for multi-device routing from either the Kotlin or Flutter
+     * pairing path.
      */
     private fun sendPairingRequest(
         endpoint: String,
@@ -269,14 +275,23 @@ class PairingActivity : AppCompatActivity() {
     ) {
         showStatus("Pairing with accountability partner…")
 
+        // Generate and persist a stable device_id UUID on first pairing.
+        val p = prefs()
+        val deviceId = p.getString("device_id", null)?.takeIf { it.isNotBlank() }
+            ?: UUID.randomUUID().toString().also { newId ->
+                p.edit().putString("device_id", newId).apply()
+            }
+
         val body = JSONObject().run {
             put("fcm_token",     fcmToken)
             put("pairing_token", pairingToken)
+            put("device_id",     deviceId)
             toString()
         }.toRequestBody(JSON_TYPE)
 
         val request = Request.Builder()
             .url("$endpoint/api/pair")
+            .addHeader("X-Device-ID", deviceId)
             .post(body)
             .build()
 

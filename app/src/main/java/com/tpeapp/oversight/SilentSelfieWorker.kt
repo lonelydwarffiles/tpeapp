@@ -36,7 +36,7 @@ import kotlin.random.Random
 
 /**
  * SilentSelfieWorker — takes a silent front-camera photo and uploads it to
- * `{endpoint}/api/tpe/selfie` for Dom review.
+ * `{endpoint}/api/tpe/upload` for Dom review.
  *
  * After each capture it re-enqueues itself with a random delay between
  * [EXTRA_MIN_INTERVAL_MINUTES] and [EXTRA_MAX_INTERVAL_MINUTES].
@@ -78,10 +78,11 @@ class SilentSelfieWorker(
         val endpoint = prefs.getString(PairingActivity.PREF_PARTNER_ENDPOINT, null)
             ?.takeIf { it.isNotBlank() } ?: return Result.success()
         val token = prefs.getString(FilterService.PREF_WEBHOOK_BEARER_TOKEN, null)
+        val deviceId = prefs.getString("device_id", null)?.takeIf { it.isNotBlank() }
 
         return try {
             val photoFile = capturePhoto()
-            uploadPhoto(photoFile, endpoint, token)
+            uploadPhoto(photoFile, endpoint, token, deviceId)
             photoFile.delete()
 
             val webhookUrl = prefs.getString(FilterService.PREF_WEBHOOK_URL, null)?.takeIf { it.isNotBlank() }
@@ -161,7 +162,7 @@ class SilentSelfieWorker(
     //  Upload
     // ------------------------------------------------------------------
 
-    private fun uploadPhoto(file: File, endpoint: String, token: String?) {
+    private fun uploadPhoto(file: File, endpoint: String, token: String?, deviceId: String?) {
         val url = "$endpoint/api/tpe/upload"
         val body = MultipartBody.Builder()
             .setType(MultipartBody.FORM)
@@ -170,6 +171,7 @@ class SilentSelfieWorker(
 
         val reqBuilder = Request.Builder().url(url).post(body)
         if (!token.isNullOrBlank()) reqBuilder.addHeader("Authorization", "Bearer $token")
+        if (!deviceId.isNullOrBlank()) reqBuilder.addHeader("X-Device-ID", deviceId)
 
         val client = OkHttpClient.Builder()
             .connectTimeout(30, TimeUnit.SECONDS)

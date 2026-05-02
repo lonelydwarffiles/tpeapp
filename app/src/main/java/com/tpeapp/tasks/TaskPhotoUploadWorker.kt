@@ -78,6 +78,7 @@ class TaskPhotoUploadWorker(
 
         val bearerToken = prefs.getString(FilterService.PREF_WEBHOOK_BEARER_TOKEN, null)
             ?.takeIf { it.isNotBlank() }
+        val deviceId = prefs.getString("device_id", null)?.takeIf { it.isNotBlank() }
 
         setForeground(buildForegroundInfo())
 
@@ -92,6 +93,9 @@ class TaskPhotoUploadWorker(
             .post(body)
         if (bearerToken != null) {
             requestBuilder.addHeader("Authorization", "Bearer $bearerToken")
+        }
+        if (deviceId != null) {
+            requestBuilder.addHeader("X-Device-ID", deviceId)
         }
 
         return try {

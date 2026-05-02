@@ -93,14 +93,17 @@ class AuditUploadWorker(
             return Result.failure()
         }
 
-        val endpoint = PreferenceManager
-            .getDefaultSharedPreferences(context)
-            .getString(PairingActivity.PREF_PARTNER_ENDPOINT, null)
+        val prefs = PreferenceManager.getDefaultSharedPreferences(context)
+        val endpoint = prefs.getString(PairingActivity.PREF_PARTNER_ENDPOINT, null)
 
         if (endpoint.isNullOrBlank()) {
             Log.e(TAG, "Partner endpoint not set — cannot upload audit")
             return Result.failure()
         }
+
+        val bearerToken = prefs.getString(FilterService.PREF_WEBHOOK_BEARER_TOKEN, null)
+            ?.takeIf { it.isNotBlank() }
+        val deviceId = prefs.getString("device_id", null)?.takeIf { it.isNotBlank() }
 
         // Promote to foreground so the OS does not kill the upload on Android 12+.
         setForeground(buildForegroundInfo())
@@ -124,13 +127,14 @@ class AuditUploadWorker(
             .addFormDataPart("scores", scoresJson)
             .build()
 
-        val request = Request.Builder()
+        val requestBuilder = Request.Builder()
             .url("$endpoint/api/audit/upload")
             .post(requestBody)
-            .build()
+        if (bearerToken != null) requestBuilder.addHeader("Authorization", "Bearer $bearerToken")
+        if (deviceId != null) requestBuilder.addHeader("X-Device-ID", deviceId)
 
         return try {
-            httpClient.newCall(request).execute().use { response ->
+            httpClient.newCall(requestBuilder.build()).execute().use { response ->
                 if (response.isSuccessful) {
                     Log.i(TAG, "Audit uploaded successfully (HTTP ${response.code})")
                     videoFile.delete()

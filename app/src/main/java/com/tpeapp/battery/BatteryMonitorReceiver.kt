@@ -180,7 +180,7 @@ class BatteryMonitorReceiver : BroadcastReceiver() {
             ?.takeIf { it.isNotBlank() }
         val deviceId = prefs.getString("device_id", null)?.takeIf { it.isNotBlank() }
             ?: run {
-                Log.d(TAG, "No device_id configured — skipping battery report")
+                Log.w(TAG, "No device_id configured — skipping battery report")
                 return
             }
 
