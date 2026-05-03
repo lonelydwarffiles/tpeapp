@@ -22,6 +22,7 @@ import io.flutter.embedding.engine.FlutterEngine
  *  | com.tpeapp/fcm                   | [FcmChannel]                  |
  *  | com.tpeapp/device_commands       | [DeviceCommandChannel]        |
  *  | com.tpeapp/screen_share          | [ScreenShareChannel]          |
+ *  | com.tpeapp/remote_control        | [RemoteControlChannel]        |
  *
  * The Xposed module, FilterService, AppDeviceAdminReceiver, PartnerFcmService,
  * and all background workers remain purely native and are NOT changed.
@@ -45,5 +46,6 @@ class TpeFlutterActivity : FlutterActivity() {
         FcmChannel.register(messenger, applicationContext)
         DeviceCommandChannel.register(messenger, applicationContext)
         ScreenShareChannel.register(messenger, applicationContext)
+        RemoteControlChannel.register(messenger, applicationContext)
     }
 }
