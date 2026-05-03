@@ -330,10 +330,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
               : Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      _rootAvailable == true
-                          ? '✅ Root available'
-                          : '❌ Root unavailable',
+                    Semantics(
+                      label: _rootAvailable == true
+                          ? 'Root available'
+                          : 'Root unavailable',
+                      child: Text(
+                        _rootAvailable == true
+                            ? '✅ Root available'
+                            : '❌ Root unavailable',
+                      ),
                     ),
                     const SizedBox(height: 8),
                     const Text('Gesture injection method:'),

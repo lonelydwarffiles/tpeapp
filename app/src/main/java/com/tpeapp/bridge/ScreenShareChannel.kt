@@ -102,10 +102,22 @@ object ScreenShareChannel {
             }
             else -> {
                 // Auto: prefer root when available, fall back to AccessibilityService.
-                if (RootChecker.isRootAvailable()) {
+                // Use the cached result only to avoid blocking the platform thread.
+                // If the root check has never been run (cache is null), skip root and
+                // let AccessibilityService handle the tap; the cache will be populated
+                // by the first explicit isRootAvailable() call from the settings screen.
+                val rootKnownAvailable = RootChecker.cachedAvailable == true
+                if (rootKnownAvailable) {
                     dispatchViaRoot(ctx, normX, normY)
-                } else if (!RemoteControlService.injectTap(normX, normY)) {
-                    Log.w(TAG, "injectTap: AccessibilityService not running and root unavailable")
+                } else {
+                    val injected = RemoteControlService.injectTap(normX, normY)
+                    if (!injected) {
+                        if (RootChecker.cachedAvailable == null) {
+                            Log.w(TAG, "injectTap: AccessibilityService not running and root availability unknown (check not yet performed)")
+                        } else {
+                            Log.w(TAG, "injectTap: AccessibilityService not running and root is unavailable")
+                        }
+                    }
                 }
             }
         }

@@ -34,6 +34,15 @@ object RootChecker {
     @Volatile private var cachedResult: Boolean? = null
 
     /**
+     * The cached result of the last [isRootAvailable] call, or `null` if no
+     * check has been performed yet.  Callers on the platform thread can read
+     * this without blocking; it will be `null` until the first explicit
+     * [isRootAvailable] call completes on a background thread.
+     */
+    val cachedAvailable: Boolean?
+        get() = cachedResult
+
+    /**
      * Returns `true` if root is available *and* the superuser manager has granted
      * execution rights to this process.
      *

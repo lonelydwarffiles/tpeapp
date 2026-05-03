@@ -30,7 +30,8 @@ class RemoteControlChannel {
   /// Force root: always attempt `su -c input tap X Y`.
   static const modeRoot = 'root';
 
-  /// Force accessibility: always use [RemoteControlService.dispatchGesture].
+  /// Force accessibility: always use the RemoteControlService Accessibility
+  /// Service (no root required).
   static const modeAccessibility = 'accessibility';
 
   // ── API ──────────────────────────────────────────────────────────────────
@@ -55,7 +56,7 @@ class RemoteControlChannel {
   /// granted execution rights to this process.
   ///
   /// The first call may block briefly while the native layer waits for a
-  /// superuser-prompt response (up to ~2 s).  Subsequent calls return the
+  /// superuser-prompt response (up to ~2 seconds).  Subsequent calls return the
   /// cached result immediately.
   static Future<bool> isRootAvailable() async {
     final available = await _channel.invokeMethod<bool>('isRootAvailable');

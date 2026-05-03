@@ -23,8 +23,7 @@ import kotlinx.coroutines.launch
  * |-----------------|------------------------------------------------------------------|
  * | `auto`          | Try root first (if available), fall back to AccessibilityService |
  * | `root`          | Always use `su -c input tap X Y`; fail silently if not rooted   |
- * | `accessibility` | Always use [RemoteControlService.dispatchGesture]; fail silently |
- *                    if the service is not enabled                                   |
+ * | `accessibility` | Always use [RemoteControlService.dispatchGesture]; fail silently if not enabled |
  *
  * The selected mode is persisted in default SharedPreferences under
  * [PREF_INJECTION_MODE] and read by [ScreenShareChannel] on every `injectTap`
@@ -79,10 +78,14 @@ object RemoteControlChannel {
                     }
 
                     "isRootAvailable" -> {
-                        // Run on the IO dispatcher to avoid blocking the platform thread.
+                        // Run on the IO dispatcher to avoid blocking the platform thread,
+                        // then switch back to Main before invoking the result callback
+                        // (Flutter MethodChannel result must be called on the main thread).
                         scope.launch {
                             val available = RootChecker.isRootAvailable()
-                            result.success(available)
+                            kotlinx.coroutines.withContext(Dispatchers.Main) {
+                                result.success(available)
+                            }
                         }
                     }
 
