@@ -11,7 +11,13 @@ import org.json.JSONObject
 
 /**
  * RemoteInputDispatcher — receives normalized input events forwarded over the WebRTC DataChannel
- * from the accountability partner and injects them into the device using `su -c "input ..."`.
+ * from the accountability partner and injects them into the device.
+ *
+ * Dispatch strategy (applied per event type):
+ *  1. **[RemoteControlService]** — if the AccessibilityService is running, tap events are
+ *     injected via [dispatchGesture] (non-root, no special permissions beyond Accessibility).
+ *  2. **Root shell** (`su -c "input ..."`) — fallback used when [RemoteControlService] is not
+ *     available (service not enabled) and the device is rooted.
  *
  * Events are JSON objects with the following shape:
  * ```json
@@ -55,9 +61,15 @@ object RemoteInputDispatcher {
 
                 when (type) {
                     "tap" -> {
-                        val px = (json.getDouble("x") * screenW).toInt()
-                        val py = (json.getDouble("y") * screenH).toInt()
-                        exec("input tap $px $py")
+                        val normX = json.getDouble("x").toFloat()
+                        val normY = json.getDouble("y").toFloat()
+                        // Prefer AccessibilityService dispatchGesture; fall back
+                        // to root shell on rooted devices.
+                        if (!RemoteControlService.injectTap(normX, normY)) {
+                            val px = (normX * screenW).toInt()
+                            val py = (normY * screenH).toInt()
+                            exec("input tap $px $py")
+                        }
                     }
                     "swipe" -> {
                         val x1 = (json.getDouble("x")  * screenW).toInt()

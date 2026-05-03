@@ -99,9 +99,6 @@ dependencies {
     // ML Kit Barcode Scanning — reads accountability-partner QR codes
     implementation(libs.mlkit.barcode.scanning)
 
-    // WebRTC — peer-review screen-sharing
-    implementation(libs.webrtc)
-
     // ── Flutter embedding ─────────────────────────────────────────────────────
     // When building with `flutter build apk` (or `flutter run`), the Flutter
     // Gradle plugin (applied via settings.gradle.kts) automatically provides the
