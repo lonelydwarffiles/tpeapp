@@ -182,7 +182,9 @@ class ScreenShareService {
       case 'answer':
         final sdp =
             RTCSessionDescription(msg['sdp'] as String, 'answer');
-        _peerConnection?.setRemoteDescription(sdp);
+        _peerConnection?.setRemoteDescription(sdp).catchError((Object e) {
+          debugPrint('[ScreenShareService] setRemoteDescription error: $e');
+        });
         break;
 
       case 'ice-candidate':
@@ -191,7 +193,9 @@ class ScreenShareService {
           msg['sdpMid'] as String?,
           msg['sdpMLineIndex'] as int?,
         );
-        _peerConnection?.addCandidate(candidate);
+        _peerConnection?.addCandidate(candidate).catchError((Object e) {
+          debugPrint('[ScreenShareService] addCandidate error: $e');
+        });
         break;
 
       default:

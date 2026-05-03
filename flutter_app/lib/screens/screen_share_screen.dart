@@ -46,9 +46,11 @@ class _ScreenShareScreenState extends State<ScreenShareScreen> {
       // Derive default signaling URL from partner endpoint.
       // Session ID is left blank for the user to fill in.
       setState(() {
-        _signalingController.text =
-            '${endpoint.replaceFirst(RegExp(r'^http'), 'ws')}'
-            '/api/tpe/signal/';
+        // Convert http(s) scheme to ws(s) for WebSocket URL.
+        final wsEndpoint = endpoint
+            .replaceFirst('https://', 'wss://')
+            .replaceFirst('http://', 'ws://');
+        _signalingController.text = '$wsEndpoint/api/tpe/signal/';
       });
     }
   }

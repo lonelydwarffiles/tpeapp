@@ -3,12 +3,12 @@ package com.tpeapp.bridge
 import android.content.Context
 import android.content.Intent
 import android.util.Log
-import android.view.WindowManager
 import com.tpeapp.review.RemoteControlService
 import com.tpeapp.review.RemoteInputDispatcher
 import com.tpeapp.review.ScreencastService
 import io.flutter.plugin.common.BinaryMessenger
 import io.flutter.plugin.common.MethodChannel
+import org.json.JSONObject
 
 /**
  * ScreenShareChannel — MethodChannel bridge between the Flutter-side
@@ -53,7 +53,11 @@ object ScreenShareChannel {
                         if (!RemoteControlService.injectTap(normX, normY)) {
                             // Fallback: su -c input tap X Y (rooted devices)
                             // RemoteInputDispatcher accepts normalised coords in [0,1].
-                            val json = """{"type":"tap","x":$normX,"y":$normY}"""
+                            val json = JSONObject().apply {
+                                put("type", "tap")
+                                put("x", normX.toDouble())
+                                put("y", normY.toDouble())
+                            }.toString()
                             RemoteInputDispatcher.dispatch(ctx, json)
                         }
                         result.success(null)

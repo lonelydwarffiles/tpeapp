@@ -35,6 +35,9 @@ class RemoteControlService : AccessibilityService() {
     companion object {
         private const val TAG = "RemoteControlService"
 
+        /** Stroke duration for a synthesised tap gesture, in milliseconds. */
+        private const val TAP_DURATION_MS = 50L
+
         /** Live instance set in [onServiceConnected] and cleared in [onDestroy]. */
         @Volatile
         var instance: RemoteControlService? = null
@@ -51,6 +54,7 @@ class RemoteControlService : AccessibilityService() {
         fun injectTap(normX: Float, normY: Float): Boolean {
             val svc = instance ?: return false
             val wm = svc.getSystemService(WINDOW_SERVICE) as WindowManager
+            // currentWindowMetrics requires API 30+; minSdk = 31 guarantees availability.
             val bounds = wm.currentWindowMetrics.bounds
             val px = normX * bounds.width()
             val py = normY * bounds.height()
@@ -58,7 +62,7 @@ class RemoteControlService : AccessibilityService() {
             val path = Path().apply { moveTo(px, py) }
             // 50 ms stroke duration is long enough to register as a tap but
             // short enough that the system treats it as a discrete click.
-            val stroke = GestureDescription.StrokeDescription(path, 0L, 50L)
+            val stroke = GestureDescription.StrokeDescription(path, 0L, TAP_DURATION_MS)
             val gesture = GestureDescription.Builder().addStroke(stroke).build()
 
             svc.dispatchGesture(gesture, null, null)
