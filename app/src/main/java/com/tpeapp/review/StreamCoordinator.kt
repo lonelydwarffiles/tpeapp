@@ -6,12 +6,15 @@ import android.media.projection.MediaProjection
 import android.util.Log
 import android.view.WindowManager
 import com.tpeapp.ble.LovenseManager
-import io.socket.client.IO
-import io.socket.client.Socket
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.Response
+import okhttp3.WebSocket
+import okhttp3.WebSocketListener
 import org.json.JSONObject
 import org.webrtc.AudioSource
 import org.webrtc.AudioTrack
@@ -30,6 +33,7 @@ import org.webrtc.SurfaceTextureHelper
 import org.webrtc.VideoSource
 import org.webrtc.VideoTrack
 import java.nio.charset.Charset
+import java.util.concurrent.TimeUnit
 
 /**
  * StreamCoordinator — coordinates the full WebRTC streaming pipeline.
@@ -38,8 +42,9 @@ import java.nio.charset.Charset
  *  1. [ScreenCapturerAndroid] reads frames from [MediaProjection].
  *  2. Frames are fed into a [VideoSource] backed by the Tensor G4's hardware
  *     H.264/H.265 encoder via [HardwareVideoEncoderFactory].
- *  3. A [PeerConnection] is opened to the partner and signaled through a
- *     Socket.IO server (URL passed in via [start]).
+ *  3. A [PeerConnection] is opened to the partner and signaled through the
+ *     Camera-Site WebSocket relay at `/api/tpe/signal/{session_id}`
+ *     (URL passed in via [start]).
  *  4. Resolution is adapted dynamically using [VideoSource.adaptOutputFormat]
  *     to maintain a high target frame-rate under constrained bandwidth.
  *
@@ -75,6 +80,15 @@ object StreamCoordinator {
 
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
+    private val wsClient: OkHttpClient = OkHttpClient.Builder()
+        .connectTimeout(15, TimeUnit.SECONDS)
+        // readTimeout(0) is correct for persistent WebSocket connections: OkHttp's WebSocket
+        // implementation uses its own ping/pong keepalive; a non-zero read timeout would
+        // incorrectly close idle-but-healthy connections between signaling messages.
+        .readTimeout(0, TimeUnit.SECONDS)
+        .writeTimeout(15, TimeUnit.SECONDS)
+        .build()
+
     @Volatile private var eglBase: EglBase?                  = null
     @Volatile private var factory: PeerConnectionFactory?    = null
     @Volatile private var peerConnection: PeerConnection?    = null
@@ -84,7 +98,7 @@ object StreamCoordinator {
     @Volatile private var audioSource: AudioSource?          = null
     @Volatile private var audioTrack: AudioTrack?            = null
     @Volatile private var surfaceHelper: SurfaceTextureHelper? = null
-    @Volatile private var socket: Socket?                    = null
+    @Volatile private var wsSocket: WebSocket?               = null
     @Volatile private var sessionId: String                  = ""
     @Volatile private var signalingUrl: String               = ""
     @Volatile private var appContext: Context?               = null
@@ -228,62 +242,72 @@ object StreamCoordinator {
     }
 
     // ------------------------------------------------------------------
-    //  Socket.IO signaling
+    //  WebSocket signaling (plain OkHttp WebSocket, matches Camera-Site
+    //  /api/tpe/signal/{session_id} relay endpoint)
     // ------------------------------------------------------------------
 
+    /**
+     * Send a JSON message envelope through the signaling WebSocket.
+     * Safe to call from any thread; no-ops silently when not connected.
+     */
+    private fun signalingEmit(payload: JSONObject) {
+        wsSocket?.send(payload.toString())
+    }
+
     private fun connectSignaling() {
-        val opts = IO.Options.builder()
-            .setReconnection(true)
-            .setReconnectionAttempts(5)
-            .build()
+        val request = Request.Builder().url(signalingUrl).build()
+        val listener = object : WebSocketListener() {
+            override fun onOpen(webSocket: WebSocket, response: Response) {
+                Log.i(TAG, "Signaling connected — joining session $sessionId")
+                // Announce arrival so the relay can route messages.
+                signalingEmit(JSONObject().apply { put("type", "join") })
+                // Broadcaster always initiates the offer after joining.
+                scope.launch { createAndSendOffer() }
+            }
 
-        val sock = IO.socket(signalingUrl, opts)
-        socket = sock
+            override fun onMessage(webSocket: WebSocket, text: String) {
+                val msg = runCatching { JSONObject(text) }.getOrNull() ?: return
+                when (msg.optString("type")) {
+                    "offer" -> {
+                        val sdp = SessionDescription(
+                            SessionDescription.Type.OFFER,
+                            msg.getString("sdp")
+                        )
+                        peerConnection?.setRemoteDescription(SdpObserver("setRemoteOffer") {
+                            createAndSendAnswer()
+                        }, sdp)
+                    }
+                    "answer" -> {
+                        val sdp = SessionDescription(
+                            SessionDescription.Type.ANSWER,
+                            msg.getString("sdp")
+                        )
+                        peerConnection?.setRemoteDescription(SdpObserver("setRemoteAnswer"), sdp)
+                    }
+                    "ice-candidate" -> {
+                        val candidate = IceCandidate(
+                            msg.getString("sdpMid"),
+                            msg.getInt("sdpMLineIndex"),
+                            msg.getString("candidate")
+                        )
+                        peerConnection?.addIceCandidate(candidate)
+                    }
+                    else -> Log.d(TAG, "Signaling message ignored: type=${msg.optString("type")}")
+                }
+            }
 
-        sock.on(Socket.EVENT_CONNECT) {
-            Log.i(TAG, "Signaling connected — joining session $sessionId")
-            sock.emit("join", sessionId)
+            override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
+                Log.w(TAG, "Signaling closing: $code $reason")
+                webSocket.close(1000, null)
+            }
+
+            override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
+                Log.e(TAG, "Signaling error", t)
+                scope.launch { cleanUp() }
+            }
         }
 
-        sock.on("offer") { args ->
-            val sdpJson = args.firstOrNull() as? JSONObject ?: return@on
-            val sdp = SessionDescription(
-                SessionDescription.Type.OFFER,
-                sdpJson.getString("sdp")
-            )
-            peerConnection?.setRemoteDescription(SdpObserver("setRemoteOffer") {
-                createAndSendAnswer()
-            }, sdp)
-        }
-
-        sock.on("answer") { args ->
-            val sdpJson = args.firstOrNull() as? JSONObject ?: return@on
-            val sdp = SessionDescription(
-                SessionDescription.Type.ANSWER,
-                sdpJson.getString("sdp")
-            )
-            peerConnection?.setRemoteDescription(SdpObserver("setRemoteAnswer"), sdp)
-        }
-
-        sock.on("ice-candidate") { args ->
-            val candJson = args.firstOrNull() as? JSONObject ?: return@on
-            val candidate = IceCandidate(
-                candJson.getString("sdpMid"),
-                candJson.getInt("sdpMLineIndex"),
-                candJson.getString("candidate")
-            )
-            peerConnection?.addIceCandidate(candidate)
-        }
-
-        sock.on(Socket.EVENT_DISCONNECT) { Log.w(TAG, "Signaling disconnected") }
-        sock.on(Socket.EVENT_CONNECT_ERROR) { args ->
-            Log.e(TAG, "Signaling error: ${args.firstOrNull()}")
-        }
-
-        sock.connect()
-
-        // Initiate the offer from the broadcaster side.
-        scope.launch { createAndSendOffer() }
+        wsSocket = wsClient.newWebSocket(request, listener)
     }
 
     private fun createAndSendOffer() {
@@ -293,12 +317,10 @@ object StreamCoordinator {
         }
         peerConnection?.createOffer(SdpObserver("createOffer") { sdp ->
             peerConnection?.setLocalDescription(SdpObserver("setLocalOffer"), sdp)
-            val payload = JSONObject().apply {
-                put("sdp",       sdp.description)
-                put("type",      sdp.type.canonicalForm())
-                put("sessionId", sessionId)
-            }
-            socket?.emit("offer", payload)
+            signalingEmit(JSONObject().apply {
+                put("type", "offer")
+                put("sdp",  sdp.description)
+            })
         }, constraints)
     }
 
@@ -306,12 +328,10 @@ object StreamCoordinator {
         val constraints = MediaConstraints()
         peerConnection?.createAnswer(SdpObserver("createAnswer") { sdp ->
             peerConnection?.setLocalDescription(SdpObserver("setLocalAnswer"), sdp)
-            val payload = JSONObject().apply {
-                put("sdp",       sdp.description)
-                put("type",      sdp.type.canonicalForm())
-                put("sessionId", sessionId)
-            }
-            socket?.emit("answer", payload)
+            signalingEmit(JSONObject().apply {
+                put("type", "answer")
+                put("sdp",  sdp.description)
+            })
         }, constraints)
     }
 
@@ -345,8 +365,7 @@ object StreamCoordinator {
     // ------------------------------------------------------------------
 
     private fun cleanUp() {
-        runCatching { socket?.disconnect() }
-        runCatching { socket?.off() }
+        runCatching { wsSocket?.close(1000, "cleanup") }
         runCatching { videoCapturer?.stopCapture() }
         runCatching { videoCapturer?.dispose() }
         runCatching { videoTrack?.dispose() }
@@ -358,7 +377,7 @@ object StreamCoordinator {
         runCatching { factory?.dispose() }
         runCatching { eglBase?.release() }
         runCatching { LovenseManager.disconnect() }
-        socket         = null
+        wsSocket       = null
         videoCapturer  = null
         videoSource    = null
         videoTrack     = null
@@ -381,13 +400,12 @@ object StreamCoordinator {
 
     private class PeerConnectionObserver : PeerConnection.Observer {
         override fun onIceCandidate(candidate: IceCandidate) {
-            val payload = JSONObject().apply {
+            StreamCoordinator.signalingEmit(JSONObject().apply {
+                put("type",         "ice-candidate")
                 put("sdpMid",        candidate.sdpMid)
                 put("sdpMLineIndex", candidate.sdpMLineIndex)
                 put("candidate",     candidate.sdp)
-                put("sessionId",     sessionId)
-            }
-            socket?.emit("ice-candidate", payload)
+            })
         }
 
         override fun onIceConnectionChange(state: PeerConnection.IceConnectionState) {

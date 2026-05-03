@@ -102,9 +102,6 @@ dependencies {
     // WebRTC — peer-review screen-sharing
     implementation(libs.webrtc)
 
-    // Socket.IO — WebRTC signaling channel
-    implementation(libs.socketio.client)
-
     // ── Flutter embedding ─────────────────────────────────────────────────────
     // When building with `flutter build apk` (or `flutter run`), the Flutter
     // Gradle plugin (applied via settings.gradle.kts) automatically provides the
