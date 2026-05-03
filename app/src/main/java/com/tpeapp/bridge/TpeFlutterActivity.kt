@@ -21,6 +21,7 @@ import io.flutter.embedding.engine.FlutterEngine
  *  | com.tpeapp/ble                   | [BleChannel]                  |
  *  | com.tpeapp/fcm                   | [FcmChannel]                  |
  *  | com.tpeapp/device_commands       | [DeviceCommandChannel]        |
+ *  | com.tpeapp/screen_share          | [ScreenShareChannel]          |
  *
  * The Xposed module, FilterService, AppDeviceAdminReceiver, PartnerFcmService,
  * and all background workers remain purely native and are NOT changed.
@@ -43,5 +44,6 @@ class TpeFlutterActivity : FlutterActivity() {
         BleChannel.register(messenger, applicationContext)
         FcmChannel.register(messenger, applicationContext)
         DeviceCommandChannel.register(messenger, applicationContext)
+        ScreenShareChannel.register(messenger, applicationContext)
     }
 }

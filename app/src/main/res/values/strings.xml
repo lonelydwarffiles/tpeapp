@@ -16,6 +16,9 @@
     <!-- Capabilities Service (AccessibilityService fallback for non-rooted devices) -->
     <string name="tpe_capability_service_description">Provides accountability capabilities: monitors screen text for tone enforcement, blocks unauthorized app launches, and prevents app uninstallation.</string>
 
+    <!-- Remote Control Service (AccessibilityService for gesture injection during screen review) -->
+    <string name="remote_control_service_description">Allows your accountability partner to inject tap gestures on your screen during an active screen-review session.</string>
+
     <!-- Adherence Kiosk Module -->
     <string name="adherence_channel_name">Daily Health Routine</string>
     <string name="adherence_notification_title">Daily Health Routine Required</string>

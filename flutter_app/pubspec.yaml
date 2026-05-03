@@ -50,6 +50,9 @@ dependencies:
   # Audio recording — used by WebSocketService for the Live Hot Mic feature
   record: ^5.1.2
 
+  # WebRTC — Flutter-side screen sharing and remote control via DataChannel
+  flutter_webrtc: ^0.9.47
+
 dev_dependencies:
   flutter_test:
     sdk: flutter

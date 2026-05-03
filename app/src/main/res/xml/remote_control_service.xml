@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Metadata for RemoteControlService — an AccessibilityService whose sole
+    purpose is to inject gestures onto the device screen at the direction of
+    the remote accountability partner.
+
+    canPerformGestures: true — required to call dispatchGesture().
+    accessibilityEventTypes: typeWindowStateChanged — minimal subscription so
+      the framework keeps the service alive; the service does not inspect events.
+    accessibilityFeedbackType: feedbackGeneric — no audio/haptic feedback.
+-->
+<accessibility-service
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    android:accessibilityEventTypes="typeWindowStateChanged"
+    android:accessibilityFeedbackType="feedbackGeneric"
+    android:canPerformGestures="true"
+    android:notificationTimeout="0"
+    android:description="@string/remote_control_service_description" />

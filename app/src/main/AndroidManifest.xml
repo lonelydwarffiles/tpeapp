@@ -301,6 +301,26 @@
         </service>
 
         <!-- ============================================================
+             Remote Control Service — AccessibilityService that injects
+             gestures (dispatchGesture) on behalf of the remote partner
+             during an active screen-review session.  The Flutter-side
+             ScreenShareService receives tap coordinates via the WebRTC
+             DataChannel and forwards them here through ScreenShareChannel.
+             Requires the user to grant Accessibility access in Settings.
+        ============================================================ -->
+        <service
+            android:name=".review.RemoteControlService"
+            android:exported="false"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/remote_control_service" />
+        </service>
+
+        <!-- ============================================================
              Package Change Receiver — monitors app installs/uninstalls
              to keep the partner dashboard's app list current.
              ACTION_PACKAGE_ADDED and ACTION_PACKAGE_REMOVED are on the
