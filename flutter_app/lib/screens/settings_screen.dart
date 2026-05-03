@@ -3,6 +3,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../channels/device_admin_channel.dart';
 import '../channels/filter_service_channel.dart';
+import '../channels/remote_control_channel.dart';
 import '../services/health_service.dart';
 import '../services/vitals_sync_service.dart';
 
@@ -48,6 +49,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _healthConnectPermitted = false;
   bool _loadingHealth = true;
 
+  // Remote Control injection mode
+  String _injectionMode = RemoteControlChannel.modeAuto;
+  bool? _rootAvailable;
+  bool _loadingRemoteControl = true;
+
   late SharedPreferences _prefs;
 
   @override
@@ -63,6 +69,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final webhookToken = await FilterServiceChannel.getWebhookToken();
     final healthEnabled = await VitalsSyncService.instance.isEnabled();
     final healthPermitted = await HealthService.instance.hasPermissions();
+    final injectionMode = await RemoteControlChannel.getInjectionMode();
+    final rootAvailable = await RemoteControlChannel.isRootAvailable();
     setState(() {
       _adminActive = active;
       _loadingAdmin = false;
@@ -78,6 +86,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _healthConnectEnabled = healthEnabled;
       _healthConnectPermitted = healthPermitted;
       _loadingHealth = false;
+      _injectionMode = injectionMode;
+      _rootAvailable = rootAvailable;
+      _loadingRemoteControl = false;
     });
   }
 
@@ -148,6 +159,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _healthConnectEnabled = enable ? permitted : false;
       _healthConnectPermitted = permitted;
     });
+  }
+
+  Future<void> _setInjectionMode(String? mode) async {
+    if (mode == null) return;
+    await RemoteControlChannel.setInjectionMode(mode);
+    setState(() => _injectionMode = mode);
   }
 
   Future<String?> _showPinDialog(String title) async {
@@ -298,6 +315,60 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           'every 15 minutes.'),
                       value: _healthConnectEnabled,
                       onChanged: _toggleHealthConnect,
+                      contentPadding: EdgeInsets.zero,
+                    ),
+                  ],
+                ),
+
+          const Divider(height: 32),
+
+          // ── Remote Control injection mode ───────────────────────────
+          Text('Remote Control', style: Theme.of(context).textTheme.titleMedium),
+          const SizedBox(height: 8),
+          _loadingRemoteControl
+              ? const LinearProgressIndicator()
+              : Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Semantics(
+                      label: _rootAvailable == true
+                          ? 'Root available'
+                          : 'Root unavailable',
+                      child: Text(
+                        _rootAvailable == true
+                            ? '✅ Root available'
+                            : '❌ Root unavailable',
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    const Text('Gesture injection method:'),
+                    RadioListTile<String>(
+                      title: const Text('Auto-detect'),
+                      subtitle: const Text(
+                          'Use root when available, otherwise fall back to '
+                          'Accessibility Service.'),
+                      value: RemoteControlChannel.modeAuto,
+                      groupValue: _injectionMode,
+                      onChanged: _setInjectionMode,
+                      contentPadding: EdgeInsets.zero,
+                    ),
+                    RadioListTile<String>(
+                      title: const Text('Force Root'),
+                      subtitle: const Text(
+                          'Always use su -c input tap (rooted devices only).'),
+                      value: RemoteControlChannel.modeRoot,
+                      groupValue: _injectionMode,
+                      onChanged: _setInjectionMode,
+                      contentPadding: EdgeInsets.zero,
+                    ),
+                    RadioListTile<String>(
+                      title: const Text('Force Accessibility'),
+                      subtitle: const Text(
+                          'Always use the RemoteControlService Accessibility '
+                          'Service (no root required).'),
+                      value: RemoteControlChannel.modeAccessibility,
+                      groupValue: _injectionMode,
+                      onChanged: _setInjectionMode,
                       contentPadding: EdgeInsets.zero,
                     ),
                   ],
