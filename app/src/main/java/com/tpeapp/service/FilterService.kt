@@ -101,6 +101,20 @@ class FilterService : Service() {
     @Volatile private var textReplacementDictJson: String = ""
 
     /**
+     * Cached restricted-vocabulary JSON array (empty string = no vocabulary).
+     * Written by PartnerFcmService; read by the Xposed tone-enforcement hook
+     * via [IFilterService.getRestrictedVocabulary].
+     */
+    @Volatile private var restrictedVocabularyJson: String = ""
+
+    /**
+     * Whether the partner has enabled strict tone-enforcement mode.
+     * Mirrors [com.tpeapp.mindful.ComplianceManager.PREF_STRICT_TONE_MODE]
+     * and is re-cached whenever the SharedPreferences value changes.
+     */
+    @Volatile private var strictToneModeEnabled: Boolean = false
+
+    /**
      * Feature flag for the NudeNet TFLite classifier.  When `false` the
      * classifier is not initialised and all scan requests immediately return
      * a safe (not-blocked) result, saving performance on low-end devices.
@@ -150,6 +164,14 @@ class FilterService : Service() {
                         classifier = null
                         old?.close()
                     }
+                }
+                com.tpeapp.mindful.ToneEnforcementService.PREF_RESTRICTED_VOCABULARY -> {
+                    restrictedVocabularyJson = prefs.getString(key, "") ?: ""
+                    Log.i(TAG, "Restricted vocabulary updated via FCM")
+                }
+                com.tpeapp.mindful.ComplianceManager.PREF_STRICT_TONE_MODE -> {
+                    strictToneModeEnabled = prefs.getBoolean(key, false)
+                    Log.i(TAG, "Tone strict mode updated via FCM → $strictToneModeEnabled")
                 }
             }
         }
@@ -202,8 +224,12 @@ class FilterService : Service() {
         threshold = effectiveThreshold(prefs.getFloat(PREF_THRESHOLD, DEFAULT_THRESHOLD))
         nudeNetEnabled = prefs.getBoolean(PREF_NUDENET_ENABLED, true)
         textReplacementDictJson = prefs.getString(PREF_TEXT_REPLACEMENT_DICT, "") ?: ""
+        restrictedVocabularyJson = prefs.getString(
+            com.tpeapp.mindful.ToneEnforcementService.PREF_RESTRICTED_VOCABULARY, "") ?: ""
+        strictToneModeEnabled = prefs.getBoolean(
+            com.tpeapp.mindful.ComplianceManager.PREF_STRICT_TONE_MODE, false)
         prefs.registerOnSharedPreferenceChangeListener(prefsListener)
-        Log.i(TAG, "Filter settings loaded — threshold=$threshold strictMode=$strictModeEnabled nudeNetEnabled=$nudeNetEnabled")
+        Log.i(TAG, "Filter settings loaded — threshold=$threshold strictMode=$strictModeEnabled nudeNetEnabled=$nudeNetEnabled strictToneMode=$strictToneModeEnabled")
     }
 
     // ------------------------------------------------------------------
@@ -299,6 +325,10 @@ class FilterService : Service() {
         }
 
         override fun getTextReplacementDict(): String = textReplacementDictJson
+
+        override fun getRestrictedVocabulary(): String = restrictedVocabularyJson
+
+        override fun getToneMode(): String = if (strictToneModeEnabled) "Strict" else "Soft"
     }
 
     // ------------------------------------------------------------------

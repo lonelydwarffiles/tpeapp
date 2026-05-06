@@ -39,6 +39,23 @@ class MainHook : IXposedHookLoadPackage {
         private var serviceContext: Context? = null
 
         /**
+         * Returns the application [Context] of the currently hooked process.
+         * Obtained from the first [ensureServiceBound] call or, as a fallback,
+         * via reflection on [android.app.ActivityThread].  Returns `null` if
+         * no context has been captured yet and reflection fails.
+         */
+        fun getContext(): Context? {
+            serviceContext?.let { return it }
+            return try {
+                val atClass = Class.forName("android.app.ActivityThread")
+                val method  = atClass.getMethod("currentApplication")
+                (method.invoke(null) as? android.app.Application)?.applicationContext
+            } catch (_: Throwable) {
+                null
+            }
+        }
+
+        /**
          * Lazily bind to FilterService from within the hooked process.
          * Safe to call from any thread; the service binding is asynchronous.
          */
@@ -91,5 +108,6 @@ class MainHook : IXposedHookLoadPackage {
         CoilHook.install(loader)
         OkHttpHook.install(loader)
         TextViewHook.install(loader)
+        InputConnectionHook.install(loader)
     }
 }

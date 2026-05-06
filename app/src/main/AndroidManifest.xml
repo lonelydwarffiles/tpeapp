@@ -280,6 +280,22 @@
         </service>
 
         <!-- ============================================================
+             Xposed Tone Receiver — catches soft-mode infraction broadcasts
+             fired by the Xposed InputConnectionHook (which runs inside
+             third-party apps and must never make network calls directly).
+             exported="true" is required because the sender lives in a
+             different process; the broadcast is explicit (setPackage) so
+             only this receiver can receive it.
+        ============================================================ -->
+        <receiver
+            android:name=".mindful.XposedToneReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="com.tpeapp.ACTION_XPOSED_TONE_INFRACTION" />
+            </intent-filter>
+        </receiver>
+
+        <!-- ============================================================
              Capabilities Service — comprehensive AccessibilityService that
              acts as a fallback for the LSPosed module on non-rooted and
              lower-end devices.  Provides:
