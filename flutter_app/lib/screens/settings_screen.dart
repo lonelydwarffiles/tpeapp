@@ -4,6 +4,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../channels/device_admin_channel.dart';
 import '../channels/filter_service_channel.dart';
 import '../channels/remote_control_channel.dart';
+import '../channels/text_replacement_channel.dart';
 import '../services/health_service.dart';
 import '../services/vitals_sync_service.dart';
 
@@ -54,6 +55,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool? _rootAvailable;
   bool _loadingRemoteControl = true;
 
+  // Text replacement dictionary
+  Map<String, String> _textReplacementDict = {};
+  bool _loadingDict = true;
+
   late SharedPreferences _prefs;
 
   @override
@@ -71,6 +76,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final healthPermitted = await HealthService.instance.hasPermissions();
     final injectionMode = await RemoteControlChannel.getInjectionMode();
     final rootAvailable = await RemoteControlChannel.isRootAvailable();
+    final textReplacementDict = await TextReplacementChannel.getDict();
     setState(() {
       _adminActive = active;
       _loadingAdmin = false;
@@ -89,6 +95,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _injectionMode = injectionMode;
       _rootAvailable = rootAvailable;
       _loadingRemoteControl = false;
+      _textReplacementDict = textReplacementDict;
+      _loadingDict = false;
     });
   }
 
@@ -165,6 +173,70 @@ class _SettingsScreenState extends State<SettingsScreen> {
     if (mode == null) return;
     await RemoteControlChannel.setInjectionMode(mode);
     setState(() => _injectionMode = mode);
+  }
+
+  // ── Text Replacement Dictionary ──────────────────────────────────────
+
+  Future<void> _addDictEntry() async {
+    final patternCtrl     = TextEditingController();
+    final replacementCtrl = TextEditingController();
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Add Replacement Rule'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: patternCtrl,
+              decoration: const InputDecoration(
+                labelText: 'Regex pattern',
+                hintText: r'(?i)\b(good)\s+(boy|girl)\b',
+                border: OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: replacementCtrl,
+              decoration: const InputDecoration(
+                labelText: 'Replacement (use \$1, \$2 … for groups)',
+                hintText: r'$1 pup',
+                border: OutlineInputBorder(),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Add')),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+    final pattern     = patternCtrl.text.trim();
+    final replacement = replacementCtrl.text;
+    if (pattern.isEmpty) return;
+    // Validate the regex before saving to avoid silent failures in the hook.
+    try {
+      RegExp(pattern);
+    } on FormatException {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Invalid regex pattern — rule not saved.')));
+      }
+      return;
+    }
+    final updated = Map<String, String>.from(_textReplacementDict)..[pattern] = replacement;
+    await TextReplacementChannel.setDict(updated);
+    setState(() => _textReplacementDict = updated);
+  }
+
+  Future<void> _removeDictEntry(String pattern) async {
+    final updated = Map<String, String>.from(_textReplacementDict)..remove(pattern);
+    await TextReplacementChannel.setDict(updated);
+    setState(() => _textReplacementDict = updated);
   }
 
   Future<String?> _showPinDialog(String title) async {
@@ -373,6 +445,47 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     ),
                   ],
                 ),
+
+          const Divider(height: 32),
+
+          // ── Text Replacement Dictionary ─────────────────────────────
+          Row(
+            children: [
+              Expanded(
+                child: Text('Text Replacement',
+                    style: Theme.of(context).textTheme.titleMedium),
+              ),
+              IconButton(
+                icon: const Icon(Icons.add),
+                tooltip: 'Add rule',
+                onPressed: _addDictEntry,
+              ),
+            ],
+          ),
+          _loadingDict
+              ? const LinearProgressIndicator()
+              : _textReplacementDict.isEmpty
+                  ? const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 8),
+                      child: Text('No replacement rules configured.'),
+                    )
+                  : Column(
+                      children: _textReplacementDict.entries.map((e) {
+                        return ListTile(
+                          contentPadding: EdgeInsets.zero,
+                          title: Text(
+                            e.key,
+                            style: const TextStyle(fontFamily: 'monospace'),
+                          ),
+                          subtitle: Text('→ ${e.value}'),
+                          trailing: IconButton(
+                            icon: const Icon(Icons.delete_outline),
+                            tooltip: 'Remove rule',
+                            onPressed: () => _removeDictEntry(e.key),
+                          ),
+                        );
+                      }).toList(),
+                    ),
         ],
       ),
     );

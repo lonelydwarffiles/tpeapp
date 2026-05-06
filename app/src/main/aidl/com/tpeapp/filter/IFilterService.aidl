@@ -38,4 +38,13 @@ interface IFilterService {
 
     /** Live-reload the active confidence threshold (0.0–1.0). */
     void setConfidenceThreshold(float threshold);
+
+    /**
+     * Returns the text-replacement dictionary as a JSON string.
+     *
+     * The JSON object maps Regex pattern strings to replacement template strings
+     * (e.g. {"(?i)\\b(good)\\s+(boy|girl)\\b": "$1 pup"}).  Returns an empty
+     * string when no dictionary has been configured.
+     */
+    String getTextReplacementDict();
 }
