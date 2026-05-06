@@ -335,7 +335,7 @@ class TpeCapabilityService : AccessibilityService() {
 
         // Check window title first (cheapest).
         val title = event.text.joinToString(" ").lowercase()
-        val hint  = PASSWORD_CHANGE_HINTS.firstOrNull { title.contains(it) }
+        val detectedHint = PASSWORD_CHANGE_HINTS.firstOrNull { title.contains(it) }
             ?: run {
                 // Fall back to scanning top-level node text.
                 val root = event.source ?: return
@@ -353,7 +353,7 @@ class TpeCapabilityService : AccessibilityService() {
         if (now - last < PASSWORD_CHANGE_COOLDOWN_MS) return
 
         lastPasswordChangeFire[pkg] = now
-        Log.i(TAG, "Capability: password-change screen detected ($pkg) — hint='$hint'")
+        Log.i(TAG, "Capability: password-change screen detected ($pkg) — hint='$detectedHint'")
         dispatchPasswordChangeAttemptTelemetry(pkg)
 
         if (blockEnabled) {

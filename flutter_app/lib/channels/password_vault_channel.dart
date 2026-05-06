@@ -104,7 +104,7 @@ class VaultEntry {
   final String site;
   final String username;
 
-  /// Always `''` — passwords are redacted in list responses.
+  /// Optional free-text notes associated with this credential.
   final String notes;
 
   /// Epoch milliseconds until which this entry is locked; 0 means unlocked.

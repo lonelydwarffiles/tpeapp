@@ -488,7 +488,7 @@ class _EntryTile extends StatelessWidget {
             ),
             if (countdown != null)
               Text(
-                'Hides in ${countdown}s',
+                'Hidden in ${countdown}s',
                 style: const TextStyle(fontSize: 11, color: Colors.grey),
               ),
           ] else if (!locked)
