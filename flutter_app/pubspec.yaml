@@ -53,6 +53,12 @@ dependencies:
   # WebRTC — Flutter-side screen sharing and remote control via DataChannel
   flutter_webrtc: ^0.9.47
 
+  # Text-to-Speech synthesis
+  flutter_tts: ^4.2.5
+
+  # Audio session / hardware output-route detection (Bluetooth / wired headset)
+  audio_session: ^0.2.3
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
