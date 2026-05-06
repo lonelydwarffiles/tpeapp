@@ -292,6 +292,7 @@
             android:exported="true">
             <intent-filter>
                 <action android:name="com.tpeapp.ACTION_XPOSED_TONE_INFRACTION" />
+                <action android:name="com.tpeapp.ACTION_XPOSED_TONE_BLOCK" />
             </intent-filter>
         </receiver>
 

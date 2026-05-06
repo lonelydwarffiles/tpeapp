@@ -11,33 +11,48 @@ import com.tpeapp.webhook.WebhookManager
 import org.json.JSONObject
 
 /**
- * XposedToneReceiver — catches soft-mode infraction events fired by
- * [com.tpeapp.xposed.InputConnectionHook] and executes the punishment webhook.
+ * XposedToneReceiver — catches tone-enforcement events fired by
+ * [com.tpeapp.xposed.InputConnectionHook] and executes webhook telemetry and
+ * punishment logic inside the main TPE app process.
  *
  * ### Why this receiver exists
  * The Xposed module runs inside third-party apps' processes and must never
  * make direct network calls (to avoid declaring INTERNET in every hooked
  * process and to keep network logic centralised).  Instead, the module sends
- * an explicit broadcast with action [ACTION_XPOSED_TONE_INFRACTION]
- * directed at this package, and this receiver handles the network side.
+ * explicit broadcasts directed at this package, and this receiver handles the
+ * network side.
+ *
+ * ### Handled broadcasts
+ * | Action                          | Fired when                                     |
+ * |---------------------------------|------------------------------------------------|
+ * | [ACTION_XPOSED_TONE_BLOCK]      | A restricted word was redacted (every block)   |
+ * | [ACTION_XPOSED_TONE_INFRACTION] | A soft-mode bypass override was accepted       |
  *
  * ### Security
- * The broadcast is sent with [Intent.setPackage] pointing exclusively at
- * `com.tpeapp`, so no other app can intercept it.  The receiver is
- * `exported="true"` only because the broadcast originates from outside this
+ * Both broadcasts are sent with [Intent.setPackage] pointing exclusively at
+ * `com.tpeapp`, so no other app can intercept them.  The receiver is
+ * `exported="true"` only because the broadcasts originate from outside this
  * process (the Xposed hook runs inside the hooked app).
  *
- * ### Extras
- * | Key              | Type   | Description                              |
- * |------------------|--------|------------------------------------------|
- * | `word`           | String | The restricted word that was overridden  |
- * | `timestamp`      | Long   | Epoch-ms when the bypass was triggered   |
- * | `source_package` | String | Package name of the app where it happened|
+ * ### Extras (both actions)
+ * | Key              | Type   | Description                               |
+ * |------------------|--------|-------------------------------------------|
+ * | `word`           | String | The restricted word that was affected     |
+ * | `timestamp`      | Long   | Epoch-ms when the event occurred          |
+ * | `source_package` | String | Package name of the app where it happened |
  */
 class XposedToneReceiver : BroadcastReceiver() {
 
     companion object {
         private const val TAG = "XposedToneReceiver"
+
+        /**
+         * Broadcast action fired by [com.tpeapp.xposed.InputConnectionHook]
+         * every time a restricted word is redacted (replaced with "[Redacted]").
+         * Triggers a `tone_block` telemetry webhook so the partner dashboard
+         * receives live blocking events.
+         */
+        const val ACTION_XPOSED_TONE_BLOCK = "com.tpeapp.ACTION_XPOSED_TONE_BLOCK"
 
         /**
          * Broadcast action fired by [com.tpeapp.xposed.InputConnectionHook]
@@ -51,8 +66,47 @@ class XposedToneReceiver : BroadcastReceiver() {
     }
 
     override fun onReceive(context: Context, intent: Intent) {
-        if (intent.action != ACTION_XPOSED_TONE_INFRACTION) return
+        // goAsync() extends the broadcast deadline and prevents premature
+        // process death when the main thread is busy, even though both
+        // ConsequenceDispatcher and WebhookManager dispatch work asynchronously.
+        val pendingResult = goAsync()
 
+        try {
+            when (intent.action) {
+                ACTION_XPOSED_TONE_BLOCK      -> handleToneBlock(context, intent)
+                ACTION_XPOSED_TONE_INFRACTION -> handleToneInfraction(context, intent)
+                else -> return
+            }
+        } finally {
+            pendingResult.finish()
+        }
+    }
+
+    // ── Handlers ──────────────────────────────────────────────────────────────
+
+    private fun handleToneBlock(context: Context, intent: Intent) {
+        val word          = intent.getStringExtra("word")           ?: return
+        val timestamp     = intent.getLongExtra("timestamp", 0L)
+        val sourcePackage = intent.getStringExtra("source_package") ?: "unknown"
+
+        Log.i(TAG, "Tone block received — word='$word' from=$sourcePackage")
+
+        val prefs       = PreferenceManager.getDefaultSharedPreferences(context)
+        val webhookUrl  = prefs.getString(FilterService.PREF_WEBHOOK_URL, null)
+            ?.takeIf { it.isNotBlank() } ?: return
+        val bearerToken = prefs.getString(FilterService.PREF_WEBHOOK_BEARER_TOKEN, null)
+            ?.takeIf { it.isNotBlank() }
+
+        val payload = JSONObject().apply {
+            put("event",          "tone_block")
+            put("word",           word)
+            put("source_package", sourcePackage)
+            put("timestamp",      timestamp)
+        }
+        WebhookManager.dispatchEvent(webhookUrl, bearerToken, payload)
+    }
+
+    private fun handleToneInfraction(context: Context, intent: Intent) {
         val word          = intent.getStringExtra("word")           ?: return
         val timestamp     = intent.getLongExtra("timestamp", 0L)
         val sourcePackage = intent.getStringExtra("source_package") ?: "unknown"
