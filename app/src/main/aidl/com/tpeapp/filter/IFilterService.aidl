@@ -47,4 +47,22 @@ interface IFilterService {
      * string when no dictionary has been configured.
      */
     String getTextReplacementDict();
+
+    /**
+     * Returns the restricted vocabulary as a JSON array of lower-case strings.
+     *
+     * These are the words managed by the Accountability Partner via FCM that
+     * the Xposed tone-enforcement hook should redact in any committed text.
+     * Returns an empty string when no vocabulary has been configured.
+     */
+    String getRestrictedVocabulary();
+
+    /**
+     * Returns the current tone-enforcement mode: "Strict" or "Soft".
+     *
+     * In Strict mode the Xposed hook redacts unconditionally.  In Soft mode
+     * the hook allows a 3-second bypass window after the user deletes the
+     * [Redacted] substitution.  Returns "Soft" when no mode has been set.
+     */
+    String getToneMode();
 }
