@@ -24,6 +24,7 @@ import io.flutter.embedding.engine.FlutterEngine
  *  | com.tpeapp/screen_share          | [ScreenShareChannel]          |
  *  | com.tpeapp/remote_control        | [RemoteControlChannel]        |
  *  | com.tpeapp/text_replacement      | [TextReplacementChannel]      |
+ *  | com.tpeapp/password_vault        | [PasswordVaultChannel]        |
  *
  * The Xposed module, FilterService, AppDeviceAdminReceiver, PartnerFcmService,
  * and all background workers remain purely native and are NOT changed.
@@ -49,5 +50,6 @@ class TpeFlutterActivity : FlutterActivity() {
         ScreenShareChannel.register(messenger, applicationContext)
         RemoteControlChannel.register(messenger, applicationContext)
         TextReplacementChannel.register(messenger, applicationContext)
+        PasswordVaultChannel.register(messenger, applicationContext)
     }
 }

@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Metadata for VaultAutofillService.
+    Declares that this service can fill username and password fields.
+-->
+<autofill-service xmlns:android="http://schemas.android.com/apk/res/android"
+    android:settingsActivity=".bridge.TpeFlutterActivity" />

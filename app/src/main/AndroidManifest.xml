@@ -318,6 +318,25 @@
         </service>
 
         <!-- ============================================================
+             Vault Autofill Service — serves managed credentials via the
+             Android Autofill Framework.  The user must select "TpeApp" as
+             their system autofill provider in Settings → Passwords &amp;
+             accounts → Autofill service (or equivalent for their launcher).
+        ============================================================ -->
+        <service
+            android:name=".vault.VaultAutofillService"
+            android:exported="true"
+            android:label="@string/app_name"
+            android:permission="android.permission.BIND_AUTOFILL_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.autofill.AutofillService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.autofill"
+                android:resource="@xml/vault_autofill_service" />
+        </service>
+
+        <!-- ============================================================
              Remote Control Service — AccessibilityService that injects
              gestures (dispatchGesture) on behalf of the remote partner
              during an active screen-review session.  The Flutter-side

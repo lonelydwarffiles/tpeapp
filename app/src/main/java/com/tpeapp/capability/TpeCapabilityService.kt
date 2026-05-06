@@ -11,6 +11,7 @@ import com.tpeapp.consequence.ConsequenceDispatcher
 import com.tpeapp.gating.AppGatingManager
 import com.tpeapp.mindful.ToneEnforcementService
 import com.tpeapp.service.FilterService
+import com.tpeapp.vault.PasswordVaultManager
 import com.tpeapp.webhook.WebhookManager
 import org.json.JSONArray
 import org.json.JSONObject
@@ -75,6 +76,22 @@ class TpeCapabilityService : AccessibilityService() {
 
         /** Maximum number of distinct words tracked in the telemetry timestamp map. */
         private const val MAX_WORD_TIMESTAMP_ENTRIES = 200
+
+        /**
+         * Lowercase substrings matched (via [String.contains]) against window titles and
+         * top-level accessibility node text to detect a password-change screen.  All
+         * strings must be lowercase because the matching code calls [String.lowercase] on
+         * the target text before comparing.
+         */
+        private val PASSWORD_CHANGE_HINTS = setOf(
+            "new password",
+            "confirm password",
+            "change password",
+            "create password",
+            "reset password",
+            "update password",
+            "enter new password",
+        )
     }
 
     // ------------------------------------------------------------------
@@ -108,6 +125,13 @@ class TpeCapabilityService : AccessibilityService() {
      */
     private val lastWordFireTimestamp = LinkedHashMap<String, Long>(16, 0.75f, true)
     private val WORD_TELEMETRY_COOLDOWN_MS = 60_000L
+
+    /**
+     * Per-package throttle for password-change attempt telemetry (max once per 60 s)
+     * to avoid webhook spam when the user stays on a password-change screen.
+     */
+    private val lastPasswordChangeFire = LinkedHashMap<String, Long>(8, 0.75f, true)
+    private val PASSWORD_CHANGE_COOLDOWN_MS = 60_000L
 
     /**
      * Cache of compiled whole-word [Regex] patterns keyed by the restricted word.
@@ -147,8 +171,12 @@ class TpeCapabilityService : AccessibilityService() {
 
     override fun onAccessibilityEvent(event: AccessibilityEvent) {
         when (event.eventType) {
-            AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED  -> handleTextChanged(event)
-            AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED -> handleWindowStateChanged(event)
+            AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED    -> handleTextChanged(event)
+            AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED -> {
+                handleWindowStateChanged(event)
+                handlePasswordChangeDetection(event)
+            }
+            AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED -> handlePasswordChangeDetection(event)
         }
     }
 
@@ -282,6 +310,79 @@ class TpeCapabilityService : AccessibilityService() {
             put("event",         "uninstall_attempt_blocked")
             put("installer_pkg", installerPkg)
             put("timestamp",     System.currentTimeMillis())
+        }
+        WebhookManager.dispatchEvent(url, token, payload)
+    }
+
+    // ------------------------------------------------------------------
+    //  Capability 4: Password-change detection
+    // ------------------------------------------------------------------
+
+    /**
+     * Scans window titles and top-level node text for known password-change
+     * screen hints.  When detected:
+     *  - Fires a `password_change_attempt` webhook.
+     *  - If [PasswordVaultManager.PREF_BLOCK_PASSWORD_CHANGES] is enabled,
+     *    presses BACK and fires an additional `password_change_blocked` webhook.
+     *
+     * Throttled to at most once per 60 s per package to avoid webhook spam.
+     */
+    private fun handlePasswordChangeDetection(event: AccessibilityEvent) {
+        val pkg = event.packageName?.toString() ?: return
+        // Never intercept our own app or system UI.
+        if (pkg in SYSTEM_ALLOW_LIST) return
+
+        val prefs        = PreferenceManager.getDefaultSharedPreferences(applicationContext)
+        val blockEnabled = prefs.getBoolean(PasswordVaultManager.PREF_BLOCK_PASSWORD_CHANGES, false)
+
+        // Check window title first (cheapest).
+        val title = event.text.joinToString(" ").lowercase()
+        val detectedHint = PASSWORD_CHANGE_HINTS.firstOrNull { title.contains(it) }
+            ?: run {
+                // Fall back to scanning top-level node text.
+                val root = event.source ?: return
+                try {
+                    val rootText = root.text?.toString()?.lowercase() ?: ""
+                    PASSWORD_CHANGE_HINTS.firstOrNull { rootText.contains(it) }
+                        ?: return
+                } finally {
+                    root.recycle()
+                }
+            }
+
+        val now = System.currentTimeMillis()
+        val last = lastPasswordChangeFire[pkg] ?: 0L
+        if (now - last < PASSWORD_CHANGE_COOLDOWN_MS) return
+
+        lastPasswordChangeFire[pkg] = now
+        Log.i(TAG, "Capability: password-change screen detected ($pkg) — hint='$detectedHint'")
+        dispatchPasswordChangeAttemptTelemetry(pkg)
+
+        if (blockEnabled) {
+            handler.post { performGlobalAction(GLOBAL_ACTION_BACK) }
+            Log.i(TAG, "Capability: password-change blocked for $pkg")
+            dispatchPasswordChangeBlockedTelemetry(pkg)
+        }
+    }
+
+    private fun dispatchPasswordChangeAttemptTelemetry(pkg: String) {
+        val url   = cachedWebhookUrl  ?: return
+        val token = cachedBearerToken
+        val payload = JSONObject().apply {
+            put("event",     "password_change_attempt")
+            put("package",   pkg)
+            put("timestamp", System.currentTimeMillis())
+        }
+        WebhookManager.dispatchEvent(url, token, payload)
+    }
+
+    private fun dispatchPasswordChangeBlockedTelemetry(pkg: String) {
+        val url   = cachedWebhookUrl  ?: return
+        val token = cachedBearerToken
+        val payload = JSONObject().apply {
+            put("event",     "password_change_blocked")
+            put("package",   pkg)
+            put("timestamp", System.currentTimeMillis())
         }
         WebhookManager.dispatchEvent(url, token, payload)
     }
