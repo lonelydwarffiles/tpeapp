@@ -99,7 +99,11 @@ object TextViewHook {
             while (keys.hasNext()) {
                 val pattern = keys.next()
                 val replacement = obj.getString(pattern)
-                map[Regex(pattern)] = replacement
+                try {
+                    map[Regex(pattern)] = replacement
+                } catch (e: java.util.regex.PatternSyntaxException) {
+                    Log.w(TAG, "Skipping invalid regex pattern \"$pattern\": ${e.message}")
+                }
             }
             map as Map<Regex, String>
         }.getOrElse { e ->
@@ -133,7 +137,7 @@ object TextViewHook {
             var result: String = text.toString()
             for ((regex, replacement) in dict) {
                 val next = regex.replace(result) { expandReplacement(it, replacement) }
-                if (next !== result) result = next
+                if (next != result) result = next
             }
             if (result == text.toString()) text else result
         }
@@ -165,21 +169,23 @@ object TextViewHook {
             val end    = match.range.last + 1
             val newStr = expandReplacement(match, replacement)
 
-            // Snapshot spans that overlap [start, end) before the replacement.
-            val overlapping = ssb.getSpans(start, end, Any::class.java).map { span ->
-                SpanRecord(span, ssb.getSpanStart(span), ssb.getSpanEnd(span), ssb.getSpanFlags(span))
-            }
+            // Snapshot only spans fully enclosed within [start, end): these are
+            // the ones SpannableStringBuilder.replace() will remove.  Spans that
+            // straddle the boundaries are auto-adjusted by SSB and don't need
+            // special handling.
+            val enclosed = ssb.getSpans(start, end, Any::class.java)
+                .filter { span -> ssb.getSpanStart(span) >= start && ssb.getSpanEnd(span) <= end }
+                .map { span ->
+                    SpanRecord(span, ssb.getSpanStart(span), ssb.getSpanEnd(span), ssb.getSpanFlags(span))
+                }
 
             ssb.replace(start, end, newStr)
 
             val newEnd = start + newStr.length
 
-            // Re-apply spans that SpannableStringBuilder removed (those that
-            // were fully enclosed within the replaced region).
-            for ((span, _, _, flags) in overlapping) {
-                if (ssb.getSpanStart(span) == -1) {
-                    ssb.setSpan(span, start, newEnd, flags)
-                }
+            // Re-apply the enclosed spans across the replacement range.
+            for ((span, _, _, flags) in enclosed) {
+                ssb.setSpan(span, start, newEnd, flags)
             }
         }
         return true
@@ -202,6 +208,9 @@ object TextViewHook {
                 var j = i + 1
                 while (j < template.length && template[j].isDigit()) j++
                 val groupIndex = template.substring(i + 1, j).toInt()
+                if (groupIndex >= match.groupValues.size) {
+                    Log.w(TAG, "Replacement references group \$$groupIndex but pattern only has ${match.groupValues.size - 1} group(s)")
+                }
                 sb.append(match.groupValues.getOrElse(groupIndex) { "" })
                 i = j
             } else {

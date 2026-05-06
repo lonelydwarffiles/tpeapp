@@ -218,6 +218,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final pattern     = patternCtrl.text.trim();
     final replacement = replacementCtrl.text;
     if (pattern.isEmpty) return;
+    // Validate the regex before saving to avoid silent failures in the hook.
+    try {
+      RegExp(pattern);
+    } on FormatException {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Invalid regex pattern — rule not saved.')));
+      }
+      return;
+    }
     final updated = Map<String, String>.from(_textReplacementDict)..[pattern] = replacement;
     await TextReplacementChannel.setDict(updated);
     setState(() => _textReplacementDict = updated);

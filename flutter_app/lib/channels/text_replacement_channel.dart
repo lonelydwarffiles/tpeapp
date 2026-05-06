@@ -25,12 +25,18 @@ class TextReplacementChannel {
 
   /// Fetches the currently stored dictionary from SharedPreferences.
   ///
-  /// Returns an empty map when no dictionary has been set.
+  /// Returns an empty map when no dictionary has been set or when the stored
+  /// value is malformed JSON.
   static Future<Map<String, String>> getDict() async {
     final json = await _channel.invokeMethod<String>('getDict') ?? '';
     if (json.isEmpty) return {};
-    final decoded = jsonDecode(json) as Map<String, dynamic>;
-    return decoded.map((k, v) => MapEntry(k, v as String));
+    try {
+      final decoded = jsonDecode(json) as Map<String, dynamic>;
+      return decoded.map((k, v) => MapEntry(k, v as String));
+    } on FormatException catch (_) {
+      // Stored value is corrupt; return empty so the UI stays usable.
+      return {};
+    }
   }
 
   /// Persists [dict] to SharedPreferences.
