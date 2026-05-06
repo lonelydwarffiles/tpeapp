@@ -5,17 +5,21 @@ import 'dart:io';
 import 'package:record/record.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'tts_service.dart';
+
 /// Manages a persistent WebSocket connection to the partner backend.
 ///
-/// Handles two command payloads for the Live Hot Mic feature:
+/// Handles three command payloads:
 ///
 /// - `{"command": "START_HOT_MIC"}` — begins streaming live PCM audio chunks
 ///   as binary WebSocket frames.
 /// - `{"command": "STOP_HOT_MIC"}` — stops the audio stream immediately.
-///
-/// Audio is captured at 16 kHz, mono, 16-bit PCM (lowest-latency format
-/// available via the `record` package) so each binary frame is raw PCM data
-/// ready for the server to decode without any container overhead.
+/// - `{"command": "TTS_COMMAND", "text": "<string>", "force_speaker": <bool>}`
+///   — conditionally speaks [text] via [TtsService]:
+///   - Always speaks when a Bluetooth or wired headset is connected.
+///   - Speaks through the device speaker only when `force_speaker` is `true`.
+///   - Emits a silent haptic pulse when no headset is connected and
+///     `force_speaker` is `false`.
 class WebSocketService {
   WebSocketService(this._prefs);
 
@@ -27,6 +31,8 @@ class WebSocketService {
   StreamSubscription<List<int>>? _audioSub;
   // Guards against concurrent _startHotMic() calls before _recorder is assigned.
   bool _startingHotMic = false;
+
+  final TtsService _tts = TtsService();
 
   // ── Connection management ────────────────────────────────────────────
 
@@ -52,9 +58,10 @@ class WebSocketService {
     );
   }
 
-  /// Stops any active recording and closes the WebSocket.
+  /// Stops any active recording, disposes TTS, and closes the WebSocket.
   Future<void> disconnect() async {
     await _stopHotMic();
+    await _tts.dispose();
     await _socketSub?.cancel();
     _socketSub = null;
     await _socket?.close();
@@ -77,6 +84,12 @@ class WebSocketService {
         _startHotMic();
       case 'STOP_HOT_MIC':
         _stopHotMic();
+      case 'TTS_COMMAND':
+        final text = payload['text'] as String?;
+        if (text != null && text.isNotEmpty) {
+          final forceSpeaker = (payload['force_speaker'] as bool?) ?? false;
+          _tts.handleCommand(text: text, forceSpeaker: forceSpeaker);
+        }
     }
   }
 
