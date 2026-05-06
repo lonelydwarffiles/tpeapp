@@ -238,6 +238,59 @@ class PasswordVaultManager(context: Context) {
         return false
     }
 
+    /**
+     * Bulk-imports a list of entries into the vault.
+     *
+     * [entries] is a list of maps with keys `site`, `username`, `password`, and optionally
+     * `notes`.  Duplicate pairs (same site + username) are **skipped** — the existing entry
+     * is kept so that partner-set passwords cannot be silently overwritten by an import.
+     *
+     * @return the number of new entries that were actually inserted.
+     */
+    fun importEntries(entries: List<Map<String, String>>): Int {
+        val arr      = loadArray()
+        var inserted = 0
+
+        // Build a set of existing (site, username) pairs for dedup.
+        val existing = mutableSetOf<String>()
+        for (i in 0 until arr.length()) {
+            val obj = arr.getJSONObject(i)
+            existing.add("${obj.optString("site")}|${obj.optString("username")}")
+        }
+
+        for (entry in entries) {
+            val site     = (entry["site"]     ?: "").trim()
+            val username = (entry["username"] ?: "").trim()
+            val password = (entry["password"] ?: "").trim()
+            if (password.isEmpty()) continue            // skip empty passwords
+
+            val key = "$site|$username"
+            if (key in existing) {
+                Log.d(TAG, "importEntries: skipping duplicate $key")
+                continue
+            }
+            existing.add(key)
+
+            val obj = JSONObject().apply {
+                put("id",          UUID.randomUUID().toString())
+                put("site",        site)
+                put("username",    username)
+                put("password",    password)
+                put("notes",       entry["notes"] ?: "")
+                put("lockedUntil", 0L)
+            }
+            arr.put(obj)
+            inserted++
+        }
+
+        if (inserted > 0) {
+            saveArray(arr)
+            Log.i(TAG, "importEntries: inserted $inserted entries")
+            dispatchVaultEvent("vault_entries_imported", mapOf("count" to inserted.toString()))
+        }
+        return inserted
+    }
+
     // ------------------------------------------------------------------
     //  Internal helpers
     // ------------------------------------------------------------------

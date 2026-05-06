@@ -85,6 +85,18 @@ class PasswordVaultChannel {
       _channel.invokeMethod('lockAll', {
         'durationMs': duration.inMilliseconds,
       });
+
+  /// Bulk-imports [entries] into the vault.
+  ///
+  /// Each map must contain `site`, `username`, `password`; `notes` is optional.
+  /// Duplicate site+username pairs are silently skipped.  Returns the number
+  /// of new entries actually inserted.
+  static Future<int> importEntries(List<Map<String, String>> entries) async {
+    final count = await _channel.invokeMethod<int>('importEntries', {
+      'entries': entries,
+    });
+    return count ?? 0;
+  }
 }
 
 /// Lightweight model for a vault entry returned by [PasswordVaultChannel.getEntries].

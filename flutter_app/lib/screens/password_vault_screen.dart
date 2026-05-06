@@ -1,10 +1,12 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../channels/partner_pin_channel.dart';
 import '../channels/password_vault_channel.dart';
+import '../utils/password_generator.dart';
 
 /// Partner-controlled password vault screen.
 ///
@@ -249,6 +251,211 @@ class _PasswordVaultScreenState extends State<PasswordVaultScreen> {
   }
 
   // ------------------------------------------------------------------
+  //  Import credentials (CSV / JSON)
+  // ------------------------------------------------------------------
+
+  /// PIN-gated credential import.
+  ///
+  /// Supports two text-based formats pasted into a text field:
+  ///  • **JSON array**: `[{"site":"…","username":"…","password":"…","notes":"…"},…]`
+  ///  • **CSV** (header row required): `site,username,password,notes`
+  ///
+  /// Duplicate site+username pairs are silently skipped on the Kotlin side.
+  Future<void> _importEntries() async {
+    final pin = await _showPinDialog('Partner PIN required to import');
+    if (pin == null) return;
+    final ok = await PartnerPinChannel.verifyPin(pin);
+    if (!ok) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(const SnackBar(content: Text('Incorrect PIN.')));
+      }
+      return;
+    }
+
+    final rawText = await _showImportDialog();
+    if (rawText == null || rawText.trim().isEmpty) return;
+
+    List<Map<String, String>>? entries;
+    String? parseError;
+    try {
+      entries = _parseImportText(rawText.trim());
+    } catch (e) {
+      parseError = e.toString();
+    }
+
+    if (parseError != null || entries == null || entries.isEmpty) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(parseError != null
+                ? 'Parse error: $parseError'
+                : 'No valid entries found in the pasted text.'),
+          ),
+        );
+      }
+      return;
+    }
+
+    // Show a preview and confirm before inserting.
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Confirm import'),
+        content: Text(
+          'Found ${entries!.length} credential(s) to import.\n'
+          'Duplicates (same site + username) will be skipped.\n\n'
+          'Proceed?'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancel')),
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Import')),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+
+    final count = await PasswordVaultChannel.importEntries(entries!);
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Imported $count new credential(s).')),
+      );
+    }
+    await _load();
+  }
+
+  Future<String?> _showImportDialog() async {
+    final ctrl = TextEditingController();
+    return showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Paste credentials'),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Paste a JSON array or CSV (with header: site,username,password,notes):',
+                style: TextStyle(fontSize: 12),
+              ),
+              const SizedBox(height: 8),
+              TextField(
+                controller: ctrl,
+                maxLines: 10,
+                style: const TextStyle(fontFamily: 'monospace', fontSize: 12),
+                decoration: const InputDecoration(
+                  border: OutlineInputBorder(),
+                  hintText: '[{"site":"example.com","username":"user","password":"pass"}]',
+                ),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Cancel')),
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, ctrl.text),
+              child: const Text('Parse')),
+        ],
+      ),
+    );
+  }
+
+  /// Parses a JSON array or CSV string into a list of entry maps.
+  List<Map<String, String>> _parseImportText(String text) {
+    if (text.startsWith('[')) {
+      // JSON array
+      final List<dynamic> arr = jsonDecode(text) as List<dynamic>;
+      return arr.map((e) {
+        final m = Map<String, dynamic>.from(e as Map);
+        return {
+          'site':     m['site']?.toString()     ?? '',
+          'username': m['username']?.toString() ?? m['login']?.toString() ?? '',
+          'password': m['password']?.toString() ?? '',
+          'notes':    m['notes']?.toString()    ?? m['note']?.toString() ?? '',
+        };
+      }).toList();
+    } else {
+      // CSV — first line is header
+      final lines = text.split('\n').map((l) => l.trim()).where((l) => l.isNotEmpty).toList();
+      if (lines.length < 2) return [];
+      final headers = _splitCsv(lines[0]).map((h) => h.toLowerCase()).toList();
+      int col(String name) => headers.indexOf(name);
+      final siteCol     = col('site') >= 0 ? col('site') : col('url');
+      final usernameCol = col('username') >= 0 ? col('username') : col('login');
+      final passwordCol = col('password');
+      final notesCol    = col('notes') >= 0 ? col('notes') : col('note');
+
+      if (passwordCol < 0) throw FormatException('CSV missing "password" column');
+
+      return lines.skip(1).map((line) {
+        final cols = _splitCsv(line);
+        String colVal(int idx) => idx >= 0 && idx < cols.length ? cols[idx] : '';
+        return {
+          'site':     colVal(siteCol),
+          'username': colVal(usernameCol),
+          'password': colVal(passwordCol),
+          'notes':    colVal(notesCol),
+        };
+      }).toList();
+    }
+  }
+
+  /// Splits a single CSV line respecting double-quoted fields.
+  List<String> _splitCsv(String line) {
+    final result  = <String>[];
+    final current = StringBuffer();
+    bool inQuotes = false;
+    for (var i = 0; i < line.length; i++) {
+      final ch = line[i];
+      if (ch == '"') {
+        if (inQuotes && i + 1 < line.length && line[i + 1] == '"') {
+          current.write('"');
+          i++;
+        } else {
+          inQuotes = !inQuotes;
+        }
+      } else if (ch == ',' && !inQuotes) {
+        result.add(current.toString());
+        current.clear();
+      } else {
+        current.write(ch);
+      }
+    }
+    result.add(current.toString());
+    return result;
+  }
+
+  // ------------------------------------------------------------------
+  //  Autofill settings
+  // ------------------------------------------------------------------
+
+  /// Opens the system autofill-provider settings page so the user can select
+  /// TpeApp as the device autofill service.
+  Future<void> _openAutofillSettings() async {
+    try {
+      await const MethodChannel('com.tpeapp/password_vault')
+          .invokeMethod('openAutofillSettings');
+    } on MissingPluginException {
+      // Fallback if Kotlin side doesn't handle it yet.
+    }
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Set "TpeApp" as your autofill service in the system screen that just opened.'),
+        ),
+      );
+    }
+  }
+
+  // ------------------------------------------------------------------
   //  Dialogs
   // ------------------------------------------------------------------
 
@@ -289,7 +496,8 @@ class _PasswordVaultScreenState extends State<PasswordVaultScreen> {
 
     return showDialog<Map<String, String>>(
       context: context,
-      builder: (ctx) => AlertDialog(
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDlgState) => AlertDialog(
         title: Text(title),
         content: SingleChildScrollView(
           child: Column(
@@ -308,15 +516,32 @@ class _PasswordVaultScreenState extends State<PasswordVaultScreen> {
                     border: OutlineInputBorder()),
               ),
               const SizedBox(height: 12),
-              TextField(
-                controller: passwordCtrl,
-                obscureText: true,
-                decoration: InputDecoration(
-                  labelText: site.isEmpty
-                      ? 'Password'
-                      : 'New Password (leave blank to keep)',
-                  border: const OutlineInputBorder(),
-                ),
+              Row(
+                children: [
+                  Expanded(
+                    child: TextField(
+                      controller: passwordCtrl,
+                      obscureText: true,
+                      decoration: InputDecoration(
+                        labelText: site.isEmpty
+                            ? 'Password'
+                            : 'New Password (leave blank to keep)',
+                        border: const OutlineInputBorder(),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Tooltip(
+                    message: 'Generate strong password',
+                    child: IconButton.filled(
+                      icon: const Icon(Icons.auto_awesome, size: 18),
+                      onPressed: () {
+                        final pwd = PasswordGenerator.generate();
+                        setDlgState(() => passwordCtrl.text = pwd);
+                      },
+                    ),
+                  ),
+                ],
               ),
               const SizedBox(height: 12),
               TextField(
@@ -343,6 +568,7 @@ class _PasswordVaultScreenState extends State<PasswordVaultScreen> {
               child: const Text('Save')),
         ],
       ),
+      ),
     );
   }
 
@@ -356,6 +582,16 @@ class _PasswordVaultScreenState extends State<PasswordVaultScreen> {
       appBar: AppBar(
         title: const Text('Password Vault'),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.upload_file),
+            tooltip: 'Import credentials',
+            onPressed: _importEntries,
+          ),
+          IconButton(
+            icon: const Icon(Icons.password),
+            tooltip: 'Autofill settings',
+            onPressed: _openAutofillSettings,
+          ),
           IconButton(
             icon: const Icon(Icons.refresh),
             tooltip: 'Refresh',

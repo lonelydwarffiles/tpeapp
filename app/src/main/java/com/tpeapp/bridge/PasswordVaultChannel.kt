@@ -1,6 +1,9 @@
 package com.tpeapp.bridge
 
 import android.content.Context
+import android.content.Intent
+import android.net.Uri
+import android.provider.Settings
 import android.util.Log
 import com.tpeapp.vault.PasswordVaultManager
 import io.flutter.plugin.common.BinaryMessenger
@@ -91,6 +94,42 @@ object PasswordVaultChannel {
                 "lockAll" -> {
                     val durationMs = call.argument<Long>("durationMs") ?: 0L
                     vault.lockAll(durationMs)
+                    result.success(null)
+                }
+
+                "importEntries" -> {
+                    // entries: List<Map<String, String>> — each map has site/username/password/notes
+                    @Suppress("UNCHECKED_CAST")
+                    val rawList = call.argument<List<Map<String, Any>>>("entries")
+                        ?: return@setMethodCallHandler result.error("INVALID", "entries required", null)
+                    val entries = rawList.map { m ->
+                        mapOf(
+                            "site"     to (m["site"]     as? String ?: ""),
+                            "username" to (m["username"] as? String ?: ""),
+                            "password" to (m["password"] as? String ?: ""),
+                            "notes"    to (m["notes"]    as? String ?: ""),
+                        )
+                    }
+                    val count = vault.importEntries(entries)
+                    Log.i(TAG, "importEntries via channel: $count inserted")
+                    result.success(count)
+                }
+
+                "openAutofillSettings" -> {
+                    // Opens system Settings so the user can select TpeApp as autofill provider.
+                    runCatching {
+                        val intent = Intent(Settings.ACTION_REQUEST_SET_AUTOFILL_SERVICE).apply {
+                            data = Uri.parse("package:${context.packageName}")
+                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        }
+                        context.startActivity(intent)
+                    }.onFailure { e ->
+                        Log.w(TAG, "openAutofillSettings failed, opening general settings", e)
+                        val fallback = Intent(Settings.ACTION_SETTINGS).apply {
+                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        }
+                        context.startActivity(fallback)
+                    }
                     result.success(null)
                 }
 
