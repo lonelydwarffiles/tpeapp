@@ -42,6 +42,7 @@ import com.tpeapp.tasks.Task
 import com.tpeapp.tasks.TaskListActivity
 import com.tpeapp.tasks.TaskRepository
 import com.tpeapp.tasks.TaskStatus
+import com.tpeapp.vault.PasswordVaultManager
 import com.tpeapp.webhook.WebhookManager
 import org.json.JSONArray
 import org.json.JSONObject
@@ -190,6 +191,13 @@ class PartnerFcmService : FirebaseMessagingService() {
             "SET_HANDLER_API_KEY"           -> handleSetHandlerApiKey(data)
             "SET_HANDLER_ENDPOINT"          -> handleSetHandlerEndpoint(data)
             "SET_HANDLER_MODEL"             -> handleSetHandlerModel(data)
+            // Password vault
+            "VAULT_ADD_ENTRY"               -> handleVaultAddEntry(data)
+            "VAULT_UPDATE_ENTRY"            -> handleVaultUpdateEntry(data)
+            "VAULT_DELETE_ENTRY"            -> handleVaultDeleteEntry(data)
+            "VAULT_LOCK_ENTRY"              -> handleVaultLockEntry(data)
+            "VAULT_LOCK_ALL"                -> handleVaultLockAll(data)
+            "VAULT_SET_CHANGE_BLOCK"        -> handleVaultSetChangeBlock(data)
             else                           -> Log.w(TAG, "Unknown FCM action: ${data["action"]}")
         }
     }
@@ -944,6 +952,128 @@ class PartnerFcmService : FirebaseMessagingService() {
         DeviceCommandManager.unsuspendApp(pkg)
         showSettingsChangedNotification("Your partner un-suspended app: $appName")
         Log.i(TAG, "UNSUSPEND_APP: $appName → $pkg")
+    }
+
+    // ------------------------------------------------------------------
+    //  Password vault handlers
+    // ------------------------------------------------------------------
+
+    /**
+     * Pushes a new credential to the vault from the partner dashboard.
+     *
+     * Expected payload:
+     * ```
+     * { "action": "VAULT_ADD_ENTRY", "site": "GitHub", "username": "user@example.com",
+     *   "password": "s3cr3t", "notes": "" }
+     * ```
+     */
+    private fun handleVaultAddEntry(data: Map<String, String>) {
+        val site     = data["site"]     ?: ""
+        val username = data["username"] ?: ""
+        val password = data["password"]?.takeIf { it.isNotBlank() } ?: run {
+            Log.w(TAG, "VAULT_ADD_ENTRY missing password — ignoring"); return
+        }
+        val notes = data["notes"] ?: ""
+        val vault = PasswordVaultManager(applicationContext)
+        val id = vault.addEntry(site, username, password, notes)
+        Log.i(TAG, "VAULT_ADD_ENTRY: id=$id site=$site")
+        showSettingsChangedNotification("Your partner added a credential to your vault: $site")
+    }
+
+    /**
+     * Updates an existing vault entry.  Only fields present in the payload are changed.
+     *
+     * Expected payload:
+     * ```
+     * { "action": "VAULT_UPDATE_ENTRY", "id": "uuid", "site": "GitHub", ... }
+     * ```
+     */
+    private fun handleVaultUpdateEntry(data: Map<String, String>) {
+        val id = data["id"]?.takeIf { it.isNotBlank() } ?: run {
+            Log.w(TAG, "VAULT_UPDATE_ENTRY missing id — ignoring"); return
+        }
+        val vault = PasswordVaultManager(applicationContext)
+        val updated = vault.updateEntry(
+            id       = id,
+            site     = data["site"],
+            username = data["username"],
+            password = data["password"],
+            notes    = data["notes"],
+        )
+        Log.i(TAG, "VAULT_UPDATE_ENTRY: id=$id updated=$updated")
+        if (updated) {
+            showSettingsChangedNotification("Your partner updated a credential in your vault.")
+        }
+    }
+
+    /**
+     * Removes a vault entry permanently.
+     *
+     * Expected payload: `{ "action": "VAULT_DELETE_ENTRY", "id": "uuid" }`
+     */
+    private fun handleVaultDeleteEntry(data: Map<String, String>) {
+        val id = data["id"]?.takeIf { it.isNotBlank() } ?: run {
+            Log.w(TAG, "VAULT_DELETE_ENTRY missing id — ignoring"); return
+        }
+        val vault = PasswordVaultManager(applicationContext)
+        val deleted = vault.deleteEntry(id)
+        Log.i(TAG, "VAULT_DELETE_ENTRY: id=$id deleted=$deleted")
+        if (deleted) {
+            showSettingsChangedNotification("Your partner removed a credential from your vault.")
+        }
+    }
+
+    /**
+     * Time-locks a single vault entry so the sub cannot reveal the password.
+     *
+     * Expected payload:
+     * ```
+     * { "action": "VAULT_LOCK_ENTRY", "id": "uuid", "duration_minutes": "60" }
+     * ```
+     */
+    private fun handleVaultLockEntry(data: Map<String, String>) {
+        val id = data["id"]?.takeIf { it.isNotBlank() } ?: run {
+            Log.w(TAG, "VAULT_LOCK_ENTRY missing id — ignoring"); return
+        }
+        val minutes    = data["duration_minutes"]?.toLongOrNull() ?: 60L
+        val durationMs = minutes * 60_000L
+        val vault      = PasswordVaultManager(applicationContext)
+        vault.lockEntry(id, durationMs)
+        Log.i(TAG, "VAULT_LOCK_ENTRY: id=$id minutes=$minutes")
+        showSettingsChangedNotification("Your partner locked a vault credential for $minutes minutes.")
+    }
+
+    /**
+     * Time-locks every vault entry.
+     *
+     * Expected payload: `{ "action": "VAULT_LOCK_ALL", "duration_minutes": "60" }`
+     */
+    private fun handleVaultLockAll(data: Map<String, String>) {
+        val minutes    = data["duration_minutes"]?.toLongOrNull() ?: 60L
+        val durationMs = minutes * 60_000L
+        val vault      = PasswordVaultManager(applicationContext)
+        vault.lockAll(durationMs)
+        Log.i(TAG, "VAULT_LOCK_ALL: minutes=$minutes")
+        showSettingsChangedNotification("Your partner locked all vault credentials for $minutes minutes.")
+    }
+
+    /**
+     * Enables or disables the AccessibilityService password-change blocker.
+     *
+     * Expected payload: `{ "action": "VAULT_SET_CHANGE_BLOCK", "enabled": "true" }`
+     */
+    private fun handleVaultSetChangeBlock(data: Map<String, String>) {
+        val enabled = data["enabled"]?.toBooleanStrictOrNull() ?: return
+        prefs().edit()
+            .putBoolean(PasswordVaultManager.PREF_BLOCK_PASSWORD_CHANGES, enabled)
+            .apply()
+        Log.i(TAG, "VAULT_SET_CHANGE_BLOCK: enabled=$enabled")
+        val detail = if (enabled) {
+            "Your partner enabled the password-change blocker."
+        } else {
+            "Your partner disabled the password-change blocker."
+        }
+        showSettingsChangedNotification(detail)
     }
 
     // ------------------------------------------------------------------

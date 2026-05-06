@@ -7,12 +7,17 @@ import '../channels/remote_control_channel.dart';
 import '../channels/text_replacement_channel.dart';
 import '../services/health_service.dart';
 import '../services/vitals_sync_service.dart';
+import 'password_vault_screen.dart';
 
 // SharedPreferences keys shared with ChatRepository
 const _kHandlerEndpoint     = 'handler_endpoint';
 const _kHandlerApiKey       = 'handler_api_key';
 const _kHandlerModel        = 'handler_model';
 const _kHandlerSystemPrompt = 'handler_system_prompt';
+
+// SharedPreferences keys for the password vault (mirror of Kotlin constants)
+const _kBlockPasswordChanges = 'vault_block_password_changes';
+const _kRevealTimeoutSeconds = 'vault_reveal_timeout_seconds';
 
 /// Settings / admin screen — partner-facing; PIN-protected in [HomeScreen].
 ///
@@ -59,6 +64,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Map<String, String> _textReplacementDict = {};
   bool _loadingDict = true;
 
+  // Password vault
+  bool _blockPasswordChanges = false;
+  int _revealTimeoutSeconds  = 10;
+
   late SharedPreferences _prefs;
 
   @override
@@ -97,6 +106,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _loadingRemoteControl = false;
       _textReplacementDict = textReplacementDict;
       _loadingDict = false;
+      _blockPasswordChanges = _prefs.getBool(_kBlockPasswordChanges) ?? false;
+      _revealTimeoutSeconds =
+          _prefs.getInt(_kRevealTimeoutSeconds) ?? 10;
     });
   }
 
@@ -237,6 +249,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final updated = Map<String, String>.from(_textReplacementDict)..remove(pattern);
     await TextReplacementChannel.setDict(updated);
     setState(() => _textReplacementDict = updated);
+  }
+
+  Future<void> _saveVaultSettings() async {
+    await _prefs.setBool(_kBlockPasswordChanges, _blockPasswordChanges);
+    await _prefs.setInt(_kRevealTimeoutSeconds, _revealTimeoutSeconds);
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Vault settings saved.')));
+    }
   }
 
   Future<String?> _showPinDialog(String title) async {
@@ -486,6 +507,54 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         );
                       }).toList(),
                     ),
+
+          const Divider(height: 32),
+
+          // ── Password Vault ──────────────────────────────────────────
+          Text('Password Vault', style: Theme.of(context).textTheme.titleMedium),
+          const SizedBox(height: 8),
+          SwitchListTile(
+            title: const Text('Block Password Changes'),
+            subtitle: const Text(
+                'Press BACK when any app shows a "change password" '
+                'screen, and notify your partner.'),
+            value: _blockPasswordChanges,
+            onChanged: (v) => setState(() => _blockPasswordChanges = v),
+            contentPadding: EdgeInsets.zero,
+          ),
+          const SizedBox(height: 4),
+          Row(children: [
+            const Text('Reveal timeout:'),
+            Expanded(
+              child: Slider(
+                value: _revealTimeoutSeconds.toDouble(),
+                min: 5,
+                max: 60,
+                divisions: 11,
+                label: '${_revealTimeoutSeconds}s',
+                onChanged: (v) =>
+                    setState(() => _revealTimeoutSeconds = v.round()),
+              ),
+            ),
+            Text('${_revealTimeoutSeconds}s'),
+          ]),
+          const SizedBox(height: 8),
+          FilledButton(
+              onPressed: _saveVaultSettings,
+              child: const Text('Save Vault Settings')),
+          const SizedBox(height: 8),
+          OutlinedButton.icon(
+            icon: const Icon(Icons.lock_outline),
+            label: const Text('Open Password Vault'),
+            onPressed: () => Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => PasswordVaultScreen(
+                  revealTimeoutSeconds: _revealTimeoutSeconds,
+                ),
+              ),
+            ),
+          ),
         ],
       ),
     );
