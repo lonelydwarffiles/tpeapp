@@ -386,13 +386,25 @@ class _PasswordVaultScreenState extends State<PasswordVaultScreen> {
       final lines = text.split('\n').map((l) => l.trim()).where((l) => l.isNotEmpty).toList();
       if (lines.length < 2) return [];
       final headers = _splitCsv(lines[0]).map((h) => h.toLowerCase()).toList();
-      int col(String name) => headers.indexOf(name);
-      final siteCol     = col('site') >= 0 ? col('site') : col('url');
-      final usernameCol = col('username') >= 0 ? col('username') : col('login');
-      final passwordCol = col('password');
-      final notesCol    = col('notes') >= 0 ? col('notes') : col('note');
 
-      if (passwordCol < 0) throw FormatException('CSV missing "password" column');
+      /// Returns the index of [name] or [fallback] in [headers], or -1.
+      int col(String name, [String? fallback]) {
+        final i = headers.indexOf(name);
+        if (i >= 0) return i;
+        if (fallback != null) return headers.indexOf(fallback);
+        return -1;
+      }
+
+      final siteCol     = col('site', 'url');
+      final usernameCol = col('username', 'login');
+      final passwordCol = col('password');
+      final notesCol    = col('notes', 'note');
+
+      if (passwordCol < 0) {
+        throw FormatException(
+            'CSV missing required "password" column. '
+            'Available columns: ${headers.join(", ")}');
+      }
 
       return lines.skip(1).map((line) {
         final cols = _splitCsv(line);

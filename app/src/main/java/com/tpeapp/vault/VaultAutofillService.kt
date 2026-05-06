@@ -44,6 +44,7 @@ class VaultAutofillService : AutofillService() {
 
     companion object {
         private const val TAG = "VaultAutofillService"
+        private const val MASKED_PASSWORD_DISPLAY = "●●●●●●●●"
     }
 
     override fun onFillRequest(
@@ -115,7 +116,7 @@ class VaultAutofillService : AutofillService() {
                 datasetBuilder.setValue(usernameField.id, AutofillValue.forText(username), view)
             }
             if (passwordField != null) {
-                val view = if (usernameField == null) remoteView("$username ($site)") else remoteView("●●●●●●●●")
+                val view = if (usernameField == null) remoteView("$username ($site)") else remoteView(MASKED_PASSWORD_DISPLAY)
                 datasetBuilder.setValue(passwordField.id, AutofillValue.forText(password), view)
             }
 

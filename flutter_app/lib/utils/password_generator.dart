@@ -42,7 +42,7 @@ class PasswordGenerator {
 
     final rng       = Random.secure();
     final poolStr   = pool.toString();
-    final effective = length.clamp(required.length, 128);
+    final effectiveLength = length.clamp(required.length, 128);
 
     // Start with one guaranteed character from each enabled class.
     final chars = required
@@ -50,7 +50,7 @@ class PasswordGenerator {
         .toList();
 
     // Fill the rest from the full pool.
-    while (chars.length < effective) {
+    while (chars.length < effectiveLength) {
       chars.add(poolStr[rng.nextInt(poolStr.length)]);
     }
 

@@ -244,6 +244,8 @@ class PasswordVaultManager(context: Context) {
      * [entries] is a list of maps with keys `site`, `username`, `password`, and optionally
      * `notes`.  Duplicate pairs (same site + username) are **skipped** — the existing entry
      * is kept so that partner-set passwords cannot be silently overwritten by an import.
+     * Entries with a blank `password` value are also **skipped** and not counted in the
+     * return value.
      *
      * @return the number of new entries that were actually inserted.
      */

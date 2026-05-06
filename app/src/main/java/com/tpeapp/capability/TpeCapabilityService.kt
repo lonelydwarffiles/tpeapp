@@ -78,8 +78,10 @@ class TpeCapabilityService : AccessibilityService() {
         private const val MAX_WORD_TIMESTAMP_ENTRIES = 200
 
         /**
-         * Lower-case substrings that, when found as whole-window title or any top-level
-         * node text, indicate the user is on a "change / create password" screen.
+         * Lowercase substrings matched (via [String.contains]) against window titles and
+         * top-level accessibility node text to detect a password-change screen.  All
+         * strings must be lowercase because the matching code calls [String.lowercase] on
+         * the target text before comparing.
          */
         private val PASSWORD_CHANGE_HINTS = setOf(
             "new password",
