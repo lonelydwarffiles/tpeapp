@@ -235,8 +235,13 @@ object InputConnectionHook {
         cachedVocabJson    = json
         cachedVocab        = parseVocabulary(json)
         // Pre-compile a Regex for each word once, reused on every keystroke.
-        cachedVocabRegexes = cachedVocab.map { word ->
-            word to WORD_BOUNDARY_PATTERN.format(Regex.escape(word)).toRegex()
+        cachedVocabRegexes = cachedVocab.mapNotNull { word ->
+            runCatching {
+                word to WORD_BOUNDARY_PATTERN.format(Regex.escape(word)).toRegex()
+            }.getOrElse { e ->
+                Log.w(TAG, "Failed to compile regex for word '$word' — skipping", e)
+                null
+            }
         }
         return cachedVocabRegexes
     }

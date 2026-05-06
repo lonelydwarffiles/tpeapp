@@ -75,7 +75,7 @@ class XposedToneReceiver : BroadcastReceiver() {
             when (intent.action) {
                 ACTION_XPOSED_TONE_BLOCK      -> handleToneBlock(context, intent)
                 ACTION_XPOSED_TONE_INFRACTION -> handleToneInfraction(context, intent)
-                else -> return
+                else -> Log.w(TAG, "Received unexpected action: ${intent.action}")
             }
         } finally {
             pendingResult.finish()
