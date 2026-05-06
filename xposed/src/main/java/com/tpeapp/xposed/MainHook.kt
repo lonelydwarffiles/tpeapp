@@ -90,5 +90,6 @@ class MainHook : IXposedHookLoadPackage {
         GlideHook.install(loader)
         CoilHook.install(loader)
         OkHttpHook.install(loader)
+        TextViewHook.install(loader)
     }
 }

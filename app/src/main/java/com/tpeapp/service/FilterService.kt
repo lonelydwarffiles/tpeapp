@@ -68,6 +68,11 @@ class FilterService : Service() {
         /** SharedPreferences key for the JSON-encoded list of blocked NudeNet class labels. */
         const val PREF_BLOCKED_CLASSES         = "filter_blocked_classes"
         /**
+         * SharedPreferences key (String) for the text-replacement dictionary JSON.
+         * Maps Regex pattern strings → replacement templates (e.g. {"(?i)\\bfoo\\b": "bar"}).
+         */
+        const val PREF_TEXT_REPLACEMENT_DICT   = "text_replacement_dict"
+        /**
          * SharedPreferences key (Boolean) for the NudeNet TFLite feature flag.
          * When `false` the classifier is not initialised and all scan requests
          * return a safe (not-blocked) result, saving memory and CPU on low-end
@@ -91,6 +96,9 @@ class FilterService : Service() {
 
     /** True when the partner has enabled strict content-filter mode. */
     @Volatile private var strictModeEnabled: Boolean = false
+
+    /** Cached text-replacement dictionary JSON (empty string = no replacements). */
+    @Volatile private var textReplacementDictJson: String = ""
 
     /**
      * Feature flag for the NudeNet TFLite classifier.  When `false` the
@@ -122,6 +130,10 @@ class FilterService : Service() {
                 }
                 PREF_BLOCKED_CLASSES ->
                     Log.i(TAG, "Blocked classes updated via FCM (requires multi-class model to take effect)")
+                PREF_TEXT_REPLACEMENT_DICT -> {
+                    textReplacementDictJson = prefs.getString(key, "") ?: ""
+                    Log.i(TAG, "Text-replacement dictionary updated")
+                }
                 PREF_NUDENET_ENABLED -> {
                     val enabled = prefs.getBoolean(key, true)
                     nudeNetEnabled = enabled
@@ -189,6 +201,7 @@ class FilterService : Service() {
         strictModeEnabled = prefs.getBoolean(PREF_STRICT_MODE, false)
         threshold = effectiveThreshold(prefs.getFloat(PREF_THRESHOLD, DEFAULT_THRESHOLD))
         nudeNetEnabled = prefs.getBoolean(PREF_NUDENET_ENABLED, true)
+        textReplacementDictJson = prefs.getString(PREF_TEXT_REPLACEMENT_DICT, "") ?: ""
         prefs.registerOnSharedPreferenceChangeListener(prefsListener)
         Log.i(TAG, "Filter settings loaded — threshold=$threshold strictMode=$strictModeEnabled nudeNetEnabled=$nudeNetEnabled")
     }
@@ -284,6 +297,8 @@ class FilterService : Service() {
             threshold = newThreshold.coerceIn(0f, 1f)
             Log.i(TAG, "Confidence threshold updated → $threshold")
         }
+
+        override fun getTextReplacementDict(): String = textReplacementDictJson
     }
 
     // ------------------------------------------------------------------
