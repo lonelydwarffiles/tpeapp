@@ -213,21 +213,51 @@ object DeviceCommandManager {
     /** Streams an audio clip from [url] via [MediaPlayer], replacing any current playback. */
     @Volatile private var mediaPlayer: MediaPlayer? = null
 
-    fun playAudio(url: String) {
+    /**
+     * Downloads and plays an audio clip from [url].
+     *
+     * @param url   Direct http/https URL to the audio file.
+     * @param loop  When `true` the clip plays on continuous loop until [stopAudio] is called.
+     *              Looping playback uses [android.media.AudioAttributes.USAGE_ALARM] so it
+     *              mixes over (rather than ducking or pausing) any concurrently playing media.
+     *              One-shot playback uses [android.media.AudioAttributes.USAGE_MEDIA].
+     */
+    fun playAudio(url: String, loop: Boolean = false) {
         scope.launch {
             mediaPlayer?.release()
             mediaPlayer = null
             runCatching {
+                val audioUsage = if (loop)
+                    android.media.AudioAttributes.USAGE_ALARM
+                else
+                    android.media.AudioAttributes.USAGE_MEDIA
+
+                val attrs = android.media.AudioAttributes.Builder()
+                    .setUsage(audioUsage)
+                    .setContentType(android.media.AudioAttributes.CONTENT_TYPE_MUSIC)
+                    .build()
+
                 val mp = MediaPlayer().apply {
+                    setAudioAttributes(attrs)
                     setDataSource(url)
+                    isLooping = loop
                     prepare()
                     start()
                 }
                 mediaPlayer = mp
-                Log.i(TAG, "playAudio: $url")
+                Log.i(TAG, "playAudio: $url loop=$loop")
             }.onFailure { e ->
                 Log.e(TAG, "playAudio failed: $url", e)
             }
+        }
+    }
+
+    /** Stops any audio clip currently playing via [playAudio]. */
+    fun stopAudio() {
+        scope.launch {
+            mediaPlayer?.run { runCatching { stop(); release() } }
+            mediaPlayer = null
+            Log.i(TAG, "stopAudio: playback stopped")
         }
     }
 

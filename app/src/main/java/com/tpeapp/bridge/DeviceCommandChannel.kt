@@ -28,6 +28,9 @@ import io.flutter.plugin.common.MethodChannel
  *                                                   — stream: music|ring|alarm|notification|system|voice_call
  *  - `setRingerMode`     (mode: String)             — silent|vibrate|normal
  *  - `speakText`         (text: String)
+ *  - `playAudio`         (url: String, loop: Boolean)
+ *                                                   — loop=true plays over other media continuously
+ *  - `stopAudio`                                    — stops any active playAudio clip
  *  - `lockDevice`
  *  - `takeScreenshot`
  *  - `setFlashlight`     (on: Boolean)
@@ -90,6 +93,17 @@ object DeviceCommandChannel {
                         val text = call.argument<String>("text")
                             ?: return@setMethodCallHandler result.error("INVALID", "text required", null)
                         DeviceCommandManager.speakText(ctx, text)
+                        result.success(null)
+                    }
+                    "playAudio" -> {
+                        val url = call.argument<String>("url")
+                            ?: return@setMethodCallHandler result.error("INVALID", "url required", null)
+                        val loop = call.argument<Boolean>("loop") ?: false
+                        DeviceCommandManager.playAudio(url, loop)
+                        result.success(null)
+                    }
+                    "stopAudio" -> {
+                        DeviceCommandManager.stopAudio()
                         result.success(null)
                     }
                     "lockDevice"     -> { DeviceCommandManager.lockDevice(ctx);     result.success(null) }

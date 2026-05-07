@@ -36,6 +36,17 @@ class DeviceCommandChannel {
   static Future<void> speakText(String text) =>
       _channel.invokeMethod('speakText', {'text': text});
 
+  /// Streams and plays an audio clip from [url].
+  ///
+  /// When [loop] is `true` the clip plays continuously until [stopAudio] is
+  /// called. Looping audio uses the alarm audio stream so it mixes alongside
+  /// any other concurrently playing media instead of pausing or ducking it.
+  static Future<void> playAudio(String url, {bool loop = false}) =>
+      _channel.invokeMethod('playAudio', {'url': url, 'loop': loop});
+
+  /// Stops any audio clip currently playing via [playAudio].
+  static Future<void> stopAudio() => _channel.invokeMethod('stopAudio');
+
   static Future<void> lockDevice() => _channel.invokeMethod('lockDevice');
   static Future<void> takeScreenshot() =>
       _channel.invokeMethod('takeScreenshot');

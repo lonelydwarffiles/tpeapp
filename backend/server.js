@@ -410,6 +410,98 @@ app.post('/api/command/set-wallpaper', async (req, res) => {
 });
 
 // -------------------------------------------------------------------
+// POST /api/command/play-audio
+//
+// Sends a PLAY_AUDIO FCM command to all paired devices.
+//
+// Body (JSON):
+//   {
+//     "url":  "https://…/clip.mp3",  // required — http(s) URL to audio file
+//     "loop": true                    // optional, default false
+//   }
+//
+// When loop=true the clip plays continuously over any other media until a
+// STOP_AUDIO command is received.
+//
+// Response 200: { "sent": <n>, "failed": <n> }
+// Response 400: missing or invalid url
+// Response 404: no paired devices
+// -------------------------------------------------------------------
+app.post('/api/command/play-audio', async (req, res) => {
+  const { url, loop = false } = req.body ?? {};
+
+  if (!url || typeof url !== 'string' || !URL_REGEX.test(url)) {
+    return res.status(400).json({ error: 'url must be a valid http(s) URL' });
+  }
+
+  if (pairedDevices.length === 0) {
+    return res.status(404).json({ error: 'No paired devices registered' });
+  }
+
+  // FCM data values must all be strings.
+  const dataPayload = { action: 'PLAY_AUDIO', url, loop: String(Boolean(loop)) };
+
+  const results = await Promise.allSettled(
+    pairedDevices.map(device =>
+      admin.messaging().send({ token: device.fcmToken, data: dataPayload })
+    )
+  );
+
+  const sent   = results.filter(r => r.status === 'fulfilled').length;
+  const failed = results.length - sent;
+
+  results.forEach((result, idx) => {
+    if (result.status === 'rejected') {
+      console.error(
+        `[command/play-audio] FCM delivery failed for device ${idx}:`,
+        result.reason?.message ?? result.reason
+      );
+    }
+  });
+
+  console.log(`[command/play-audio] Dispatched — sent: ${sent}, failed: ${failed}`);
+  return res.status(200).json({ sent, failed });
+});
+
+// -------------------------------------------------------------------
+// POST /api/command/stop-audio
+//
+// Sends a STOP_AUDIO FCM command to all paired devices, stopping any
+// audio clip currently playing via play-audio (including looping clips).
+//
+// Response 200: { "sent": <n>, "failed": <n> }
+// Response 404: no paired devices
+// -------------------------------------------------------------------
+app.post('/api/command/stop-audio', async (req, res) => {
+  if (pairedDevices.length === 0) {
+    return res.status(404).json({ error: 'No paired devices registered' });
+  }
+
+  const dataPayload = { action: 'STOP_AUDIO' };
+
+  const results = await Promise.allSettled(
+    pairedDevices.map(device =>
+      admin.messaging().send({ token: device.fcmToken, data: dataPayload })
+    )
+  );
+
+  const sent   = results.filter(r => r.status === 'fulfilled').length;
+  const failed = results.length - sent;
+
+  results.forEach((result, idx) => {
+    if (result.status === 'rejected') {
+      console.error(
+        `[command/stop-audio] FCM delivery failed for device ${idx}:`,
+        result.reason?.message ?? result.reason
+      );
+    }
+  });
+
+  console.log(`[command/stop-audio] Dispatched — sent: ${sent}, failed: ${failed}`);
+  return res.status(200).json({ sent, failed });
+});
+
+// -------------------------------------------------------------------
 // Start server
 // -------------------------------------------------------------------
 const PORT = parseInt(process.env.PORT ?? '3000', 10);
