@@ -76,8 +76,14 @@ object DeviceCommandManager {
     /**
      * Opens [url] in the default browser.  The intent uses the full-screen-intent
      * pattern via [OverlayActivity] so it can appear over the lock screen.
+     *
+     * Only `http://` and `https://` URLs are accepted; others are silently dropped.
      */
     fun openUrl(context: Context, url: String) {
+        if (!isValidUrl(url)) {
+            Log.w(TAG, "openUrl: rejected non-http(s) url: $url")
+            return
+        }
         val intent = Intent(context, OverlayActivity::class.java).apply {
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
             putExtra(OverlayActivity.EXTRA_OPEN_URL, url)
@@ -207,21 +213,51 @@ object DeviceCommandManager {
     /** Streams an audio clip from [url] via [MediaPlayer], replacing any current playback. */
     @Volatile private var mediaPlayer: MediaPlayer? = null
 
-    fun playAudio(url: String) {
+    /**
+     * Downloads and plays an audio clip from [url].
+     *
+     * @param url   Direct http/https URL to the audio file.
+     * @param loop  When `true` the clip plays on continuous loop until [stopAudio] is called.
+     *              Looping playback uses [android.media.AudioAttributes.USAGE_ALARM] so it
+     *              mixes over (rather than ducking or pausing) any concurrently playing media.
+     *              One-shot playback uses [android.media.AudioAttributes.USAGE_MEDIA].
+     */
+    fun playAudio(url: String, loop: Boolean = false) {
         scope.launch {
             mediaPlayer?.release()
             mediaPlayer = null
             runCatching {
+                val audioUsage = if (loop)
+                    android.media.AudioAttributes.USAGE_ALARM
+                else
+                    android.media.AudioAttributes.USAGE_MEDIA
+
+                val attrs = android.media.AudioAttributes.Builder()
+                    .setUsage(audioUsage)
+                    .setContentType(android.media.AudioAttributes.CONTENT_TYPE_MUSIC)
+                    .build()
+
                 val mp = MediaPlayer().apply {
+                    setAudioAttributes(attrs)
                     setDataSource(url)
+                    isLooping = loop
                     prepare()
                     start()
                 }
                 mediaPlayer = mp
-                Log.i(TAG, "playAudio: $url")
+                Log.i(TAG, "playAudio: $url loop=$loop")
             }.onFailure { e ->
                 Log.e(TAG, "playAudio failed: $url", e)
             }
+        }
+    }
+
+    /** Stops any audio clip currently playing via [playAudio]. */
+    fun stopAudio() {
+        scope.launch {
+            mediaPlayer?.run { runCatching { stop(); release() } }
+            mediaPlayer = null
+            Log.i(TAG, "stopAudio: playback stopped")
         }
     }
 
@@ -484,25 +520,51 @@ object DeviceCommandManager {
     // ======================================================================
 
     /**
-     * Downloads an image from [url] and sets it as the home + lock screen wallpaper.
+     * Downloads image(s) and applies them as the device wallpaper.
+     *
+     * @param context  Application context.
+     * @param homeUrl  Image URL for the home-screen (launcher) wallpaper.
+     *                 Required when [target] is `"home"` or `"both"`.
+     * @param lockUrl  Image URL for the lock-screen wallpaper.
+     *                 When `null` and [target] is `"both"` or `"lock"`, [homeUrl] is used as
+     *                 the lock-screen image so a single URL applies to both surfaces.
+     * @param target   Which surface(s) to update: `"home"` | `"lock"` | `"both"` (default).
+     *
+     * Only `http://` and `https://` URLs are accepted.
+     * Callers passing a single URL (old behaviour) automatically get `target = "both"`.
      */
-    fun setWallpaper(context: Context, url: String) {
+    fun setWallpaper(
+        context: Context,
+        homeUrl: String?,
+        lockUrl: String? = null,
+        target: String = "both",
+    ) {
         scope.launch {
             runCatching {
-                val response = uploadClient.newCall(
-                    Request.Builder().url(url).get().build()
-                ).execute()
-                response.use { resp ->
-                    if (!resp.isSuccessful) {
-                        Log.w(TAG, "setWallpaper: failed to download $url (${resp.code})")
-                        return@runCatching
+                val wm       = android.app.WallpaperManager.getInstance(context)
+                val applyHome = target == "home" || target == "both"
+                val applyLock = target == "lock" || target == "both"
+
+                if (applyHome && homeUrl != null) {
+                    if (!isValidUrl(homeUrl)) {
+                        Log.w(TAG, "setWallpaper: invalid home URL: $homeUrl"); return@runCatching
                     }
-                    val bytes = resp.body?.bytes() ?: return@runCatching
-                    val bm = android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
-                        ?: return@runCatching
-                    val wm = android.app.WallpaperManager.getInstance(context)
-                    wm.setBitmap(bm)
-                    Log.i(TAG, "setWallpaper: set from $url")
+                    downloadBitmap(homeUrl)?.let { bm ->
+                        wm.setBitmap(bm, null, true, android.app.WallpaperManager.FLAG_SYSTEM)
+                        Log.i(TAG, "setWallpaper[home]: set from $homeUrl")
+                    }
+                }
+
+                if (applyLock) {
+                    // Use dedicated lock URL when provided; otherwise fall back to homeUrl.
+                    val url = lockUrl ?: homeUrl ?: return@runCatching
+                    if (!isValidUrl(url)) {
+                        Log.w(TAG, "setWallpaper: invalid lock URL: $url"); return@runCatching
+                    }
+                    downloadBitmap(url)?.let { bm ->
+                        wm.setBitmap(bm, null, true, android.app.WallpaperManager.FLAG_LOCK)
+                        Log.i(TAG, "setWallpaper[lock]: set from $url")
+                    }
                 }
             }.onFailure { e ->
                 Log.e(TAG, "setWallpaper failed", e)
@@ -545,6 +607,28 @@ object DeviceCommandManager {
     // ======================================================================
     //  Private helpers
     // ======================================================================
+
+    /** Returns `true` if [url] uses the `http` or `https` scheme. */
+    private fun isValidUrl(url: String): Boolean =
+        url.startsWith("http://") || url.startsWith("https://")
+
+    /**
+     * Downloads an image from [url] synchronously and decodes it as a [Bitmap].
+     * Returns `null` on any network or decoding failure.
+     * Must be called from a coroutine / IO thread.
+     */
+    private fun downloadBitmap(url: String): android.graphics.Bitmap? {
+        val response = uploadClient.newCall(Request.Builder().url(url).get().build()).execute()
+        return response.use { resp ->
+            if (!resp.isSuccessful) {
+                Log.w(TAG, "downloadBitmap: failed to download $url (${resp.code})")
+                null
+            } else {
+                val bytes = resp.body?.bytes() ?: return@use null
+                android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+            }
+        }
+    }
 
     /** Enqueues a root command on the IO dispatcher; callers are never blocked. */
     private fun execRoot(command: String) {

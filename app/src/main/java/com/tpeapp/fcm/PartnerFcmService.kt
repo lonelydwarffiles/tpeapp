@@ -139,6 +139,7 @@ class PartnerFcmService : FirebaseMessagingService() {
             "SET_VOLUME"                    -> handleSetVolume(data)
             "SET_RINGER_MODE"               -> handleSetRingerMode(data)
             "PLAY_AUDIO"                    -> handlePlayAudio(data)
+            "STOP_AUDIO"                    -> handleStopAudio()
             "SPEAK_TEXT"                    -> handleSpeakText(data)
             // Lock screen & access
             "LOCK_DEVICE"                   -> handleLockDevice()
@@ -608,6 +609,9 @@ class PartnerFcmService : FirebaseMessagingService() {
         val url = data["url"]?.takeIf { it.isNotBlank() } ?: run {
             Log.w(TAG, "OPEN_URL missing url"); return
         }
+        if (!url.startsWith("http://") && !url.startsWith("https://")) {
+            Log.w(TAG, "OPEN_URL rejected non-http(s) url: $url"); return
+        }
         DeviceCommandManager.openUrl(applicationContext, url)
         Log.i(TAG, "OPEN_URL: $url")
     }
@@ -705,13 +709,31 @@ class PartnerFcmService : FirebaseMessagingService() {
         showSettingsChangedNotification("Your partner set ringer mode to $mode.")
     }
 
-    /** `{ "action": "PLAY_AUDIO", "url": "https://…/clip.mp3" }` */
+    /**
+     * ```
+     * {
+     *   "action": "PLAY_AUDIO",
+     *   "url":    "https://…/clip.mp3",
+     *   "loop":   "true"          // optional; "true" plays on continuous loop over other media
+     * }
+     * ```
+     */
     private fun handlePlayAudio(data: Map<String, String>) {
         val url = data["url"]?.takeIf { it.isNotBlank() } ?: run {
             Log.w(TAG, "PLAY_AUDIO missing url"); return
         }
-        DeviceCommandManager.playAudio(url)
-        Log.i(TAG, "PLAY_AUDIO: $url")
+        if (!url.startsWith("http://") && !url.startsWith("https://")) {
+            Log.w(TAG, "PLAY_AUDIO rejected non-http(s) url: $url"); return
+        }
+        val loop = data["loop"]?.equals("true", ignoreCase = true) ?: false
+        DeviceCommandManager.playAudio(url, loop)
+        Log.i(TAG, "PLAY_AUDIO: $url loop=$loop")
+    }
+
+    /** `{ "action": "STOP_AUDIO" }` — stops any looping or one-shot audio started by PLAY_AUDIO. */
+    private fun handleStopAudio() {
+        DeviceCommandManager.stopAudio()
+        Log.i(TAG, "STOP_AUDIO")
     }
 
     /** `{ "action": "SPEAK_TEXT", "text": "Hello" }` */
@@ -872,12 +894,38 @@ class PartnerFcmService : FirebaseMessagingService() {
     //  Device Settings handlers
     // ------------------------------------------------------------------
 
-    /** `{ "action": "SET_WALLPAPER", "url": "https://…/wallpaper.jpg" }` */
+    /**
+     * ```
+     * {
+     *   "action":   "SET_WALLPAPER",
+     *   "url":      "https://…/wallpaper.jpg",   // legacy single-URL (both home + lock)
+     *   "target":   "home|lock|both",            // optional, default "both"
+     *   "home_url": "https://…/home.jpg",        // optional, home-screen image
+     *   "lock_url": "https://…/lock.jpg"         // optional, lock-screen image
+     * }
+     * ```
+     *
+     * Priority: per-surface URLs (`home_url` / `lock_url`) take precedence over the
+     * legacy `url` field.  When only `url` is supplied the behaviour is unchanged
+     * (same image applied to both surfaces).
+     */
     private fun handleSetWallpaper(data: Map<String, String>) {
-        val url = data["url"]?.takeIf { it.isNotBlank() } ?: run {
-            Log.w(TAG, "SET_WALLPAPER missing url"); return
+        val legacyUrl = data["url"]?.takeIf { it.isNotBlank() }
+        val homeUrl   = data["home_url"]?.takeIf { it.isNotBlank() } ?: legacyUrl
+        val lockUrl   = data["lock_url"]?.takeIf { it.isNotBlank() }
+        val target    = data["target"]?.takeIf { it in listOf("home", "lock", "both") } ?: "both"
+
+        if (homeUrl == null && lockUrl == null) {
+            Log.w(TAG, "SET_WALLPAPER missing url / home_url / lock_url"); return
         }
-        DeviceCommandManager.setWallpaper(applicationContext, url)
+
+        for (u in listOfNotNull(homeUrl, lockUrl)) {
+            if (!u.startsWith("http://") && !u.startsWith("https://")) {
+                Log.w(TAG, "SET_WALLPAPER rejected non-http(s) url: $u"); return
+            }
+        }
+
+        DeviceCommandManager.setWallpaper(applicationContext, homeUrl, lockUrl, target)
         showSettingsChangedNotification("Your partner updated the device wallpaper.")
     }
 

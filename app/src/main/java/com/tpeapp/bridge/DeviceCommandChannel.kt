@@ -28,6 +28,9 @@ import io.flutter.plugin.common.MethodChannel
  *                                                   — stream: music|ring|alarm|notification|system|voice_call
  *  - `setRingerMode`     (mode: String)             — silent|vibrate|normal
  *  - `speakText`         (text: String)
+ *  - `playAudio`         (url: String, loop: Boolean)
+ *                                                   — loop=true plays over other media continuously
+ *  - `stopAudio`                                    — stops any active playAudio clip
  *  - `lockDevice`
  *  - `takeScreenshot`
  *  - `setFlashlight`     (on: Boolean)
@@ -92,6 +95,17 @@ object DeviceCommandChannel {
                         DeviceCommandManager.speakText(ctx, text)
                         result.success(null)
                     }
+                    "playAudio" -> {
+                        val url = call.argument<String>("url")
+                            ?: return@setMethodCallHandler result.error("INVALID", "url required", null)
+                        val loop = call.argument<Boolean>("loop") ?: false
+                        DeviceCommandManager.playAudio(url, loop)
+                        result.success(null)
+                    }
+                    "stopAudio" -> {
+                        DeviceCommandManager.stopAudio()
+                        result.success(null)
+                    }
                     "lockDevice"     -> { DeviceCommandManager.lockDevice(ctx);     result.success(null) }
                     "takeScreenshot" -> { DeviceCommandManager.takeScreenshot(ctx); result.success(null) }
                     "setFlashlight"  -> {
@@ -114,9 +128,19 @@ object DeviceCommandChannel {
                         result.success(null)
                     }
                     "setWallpaper" -> {
-                        val url = call.argument<String>("url")
-                            ?: return@setMethodCallHandler result.error("INVALID", "url required", null)
-                        DeviceCommandManager.setWallpaper(ctx, url)
+                        // Supports legacy single-URL call and new per-surface targeting.
+                        //   url     (String) — backward-compat single image for both surfaces
+                        //   homeUrl (String?) — home-screen image (overrides url for home)
+                        //   lockUrl (String?) — lock-screen image (overrides url for lock)
+                        //   target  (String)  — "home" | "lock" | "both" (default "both")
+                        val url     = call.argument<String>("url")
+                        val homeUrl = call.argument<String>("homeUrl") ?: url
+                        val lockUrl = call.argument<String>("lockUrl")
+                        val target  = call.argument<String>("target") ?: "both"
+                        if (homeUrl == null && lockUrl == null) {
+                            return@setMethodCallHandler result.error("INVALID", "url or homeUrl required", null)
+                        }
+                        DeviceCommandManager.setWallpaper(ctx, homeUrl, lockUrl, target)
                         result.success(null)
                     }
                     "showOverlay" -> {
