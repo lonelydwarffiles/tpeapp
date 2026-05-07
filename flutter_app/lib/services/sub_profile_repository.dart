@@ -155,6 +155,7 @@ class SubProfileRepository extends ChangeNotifier {
   }
 
   double compatibilityFor(SubProfile sub) {
+    if (metrics.isEmpty) return 0;
     var totalAbsoluteDifference = 0.0;
     for (final metric in metrics) {
       final dom = _domPreferences[metric] ?? 50;

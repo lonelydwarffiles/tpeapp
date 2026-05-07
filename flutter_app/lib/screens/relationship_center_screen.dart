@@ -381,6 +381,7 @@ class _VideoViewer extends StatefulWidget {
 class _VideoViewerState extends State<_VideoViewer> {
   late final VideoPlayerController _controller;
   bool _ready = false;
+  String? _error;
 
   @override
   void initState() {
@@ -389,6 +390,10 @@ class _VideoViewerState extends State<_VideoViewer> {
       ..initialize().then((_) {
         if (mounted) {
           setState(() => _ready = true);
+        }
+      }).catchError((Object error) {
+        if (mounted) {
+          setState(() => _error = error.toString());
         }
       });
   }
@@ -404,9 +409,11 @@ class _VideoViewerState extends State<_VideoViewer> {
     return Scaffold(
       appBar: AppBar(title: const Text('Video Viewer')),
       body: Center(
-        child: !_ready
-            ? const CircularProgressIndicator()
-            : Column(
+        child: _error != null
+            ? Text('Unable to load video: $_error')
+            : !_ready
+                ? const CircularProgressIndicator()
+                : Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
                   AspectRatio(

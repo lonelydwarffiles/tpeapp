@@ -15,6 +15,7 @@ class DeviceMediaService extends ChangeNotifier {
   }
 
   static const _itemsKey = 'saved_media_items_json';
+  static const _libraryDirName = 'tpe_saved_media';
 
   final SharedPreferences _prefs;
   final _picker = ImagePicker();
@@ -50,7 +51,7 @@ class DeviceMediaService extends ChangeNotifier {
 
   Future<Directory> _libraryDirectory() async {
     final docs = await getApplicationDocumentsDirectory();
-    final dir = Directory('${docs.path}/tpe_saved_media');
+    final dir = Directory('${docs.path}/$_libraryDirName');
     if (!await dir.exists()) {
       await dir.create(recursive: true);
     }
