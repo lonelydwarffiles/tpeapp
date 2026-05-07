@@ -32,6 +32,12 @@ dependencies:
   # Image picking for task proof photos (replaces ActivityResultContracts.TakePicture)
   image_picker: ^1.1.2
 
+  # App-private on-device file paths for saved reports/media
+  path_provider: ^2.1.4
+
+  # In-app playback for saved device videos
+  video_player: ^2.9.2
+
   # Cryptographic utilities (PBKDF2 for Dart-side PIN pre-hashing if needed)
   crypto: ^3.0.3
 
