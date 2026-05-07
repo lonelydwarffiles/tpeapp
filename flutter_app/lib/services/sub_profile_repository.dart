@@ -155,13 +155,13 @@ class SubProfileRepository extends ChangeNotifier {
   }
 
   double compatibilityFor(SubProfile sub) {
-    var totalDelta = 0.0;
+    var totalAbsoluteDifference = 0.0;
     for (final metric in metrics) {
       final dom = _domPreferences[metric] ?? 50;
       final target = sub.preferences[metric] ?? 50;
-      totalDelta += (dom - target).abs();
+      totalAbsoluteDifference += (dom - target).abs();
     }
-    final averageDelta = totalDelta / metrics.length;
+    final averageDelta = totalAbsoluteDifference / metrics.length;
     final score = 100 - averageDelta;
     return score.clamp(0, 100);
   }

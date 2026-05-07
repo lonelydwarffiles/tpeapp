@@ -67,7 +67,7 @@ class DeviceMediaService extends ChangeNotifier {
     final source = File(sourcePath);
     final dir = await _libraryDirectory();
     final ext = _extensionFor(sourcePath);
-    final filename = '${type.name}_${DateTime.now().millisecondsSinceEpoch}$ext';
+    final filename = '${type.name}_${DateTime.now().millisecondsSinceEpoch}_${_uuid.v4()}$ext';
     final target = File('${dir.path}/$filename');
     await source.copy(target.path);
     return target.path;
@@ -77,6 +77,8 @@ class DeviceMediaService extends ChangeNotifier {
     final picked = await _picker.pickMultiImage();
     if (picked.isEmpty) return;
 
+    final nowMs = DateTime.now().millisecondsSinceEpoch;
+    var offset = 0;
     for (final image in picked) {
       final savedPath = await _copyToLibrary(image.path, SavedMediaType.image);
       _items.add(
@@ -84,10 +86,11 @@ class DeviceMediaService extends ChangeNotifier {
           id: _uuid.v4(),
           path: savedPath,
           type: SavedMediaType.image,
-          savedAtMs: DateTime.now().millisecondsSinceEpoch,
+          savedAtMs: nowMs + offset,
           subId: subId,
         ),
       );
+      offset += 1;
     }
 
     _items.sort((a, b) => b.savedAtMs.compareTo(a.savedAtMs));
@@ -99,6 +102,7 @@ class DeviceMediaService extends ChangeNotifier {
     final picked = await _picker.pickVideo(source: ImageSource.gallery);
     if (picked == null) return;
 
+    final nowMs = DateTime.now().millisecondsSinceEpoch;
     final savedPath = await _copyToLibrary(picked.path, SavedMediaType.video);
     _items.insert(
       0,
@@ -106,7 +110,7 @@ class DeviceMediaService extends ChangeNotifier {
         id: _uuid.v4(),
         path: savedPath,
         type: SavedMediaType.video,
-        savedAtMs: DateTime.now().millisecondsSinceEpoch,
+        savedAtMs: nowMs,
         subId: subId,
       ),
     );
@@ -120,7 +124,8 @@ class DeviceMediaService extends ChangeNotifier {
     required String content,
   }) async {
     final dir = await _libraryDirectory();
-    final name = '${filenamePrefix}_${DateTime.now().millisecondsSinceEpoch}.txt';
+    final nowMs = DateTime.now().millisecondsSinceEpoch;
+    final name = '${filenamePrefix}_${nowMs}_${_uuid.v4()}.txt';
     final file = File('${dir.path}/$name');
     await file.writeAsString(content);
     return file.path;

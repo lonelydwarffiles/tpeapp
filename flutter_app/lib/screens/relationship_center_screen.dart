@@ -101,7 +101,7 @@ class RelationshipCenterScreen extends StatelessWidget {
             ),
             const SizedBox(height: 16),
             _Section(
-              title: 'Device Media Library (API-like in-app service)',
+              title: 'Device Media Library',
               trailing: Wrap(
                 spacing: 8,
                 children: [
