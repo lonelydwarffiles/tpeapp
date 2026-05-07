@@ -67,7 +67,6 @@ class DeviceMediaService extends ChangeNotifier {
     final source = File(sourcePath);
     final dir = await _libraryDirectory();
     final ext = _extensionFor(sourcePath);
-    // UUID is the primary uniqueness guarantee for filenames.
     final filename = '${type.name}_${DateTime.now().millisecondsSinceEpoch}_${_uuid.v4()}$ext';
     final target = File('${dir.path}/$filename');
     await source.copy(target.path);
@@ -123,7 +122,6 @@ class DeviceMediaService extends ChangeNotifier {
     required String content,
   }) async {
     final dir = await _libraryDirectory();
-    // UUID is the primary uniqueness guarantee for report filenames.
     final nowMs = DateTime.now().millisecondsSinceEpoch;
     final name = '${filenamePrefix}_${nowMs}_${_uuid.v4()}.txt';
     final file = File('${dir.path}/$name');

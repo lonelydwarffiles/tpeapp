@@ -238,7 +238,8 @@ class _PreferenceSlider extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final title = '${label[0].toUpperCase()}${label.substring(1)}';
+    final safeLabel = label.isEmpty ? 'Preference' : label;
+    final title = '${safeLabel[0].toUpperCase()}${safeLabel.substring(1)}';
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
