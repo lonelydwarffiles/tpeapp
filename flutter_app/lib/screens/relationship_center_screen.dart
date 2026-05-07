@@ -96,8 +96,8 @@ class RelationshipCenterScreen extends StatelessWidget {
                     '(${subRepo.compatibilitySummary(activeSub)})',
                     style: Theme.of(context).textTheme.titleMedium,
                   ),
-                ],
-              ),
+                    ],
+                  ),
             ),
             const SizedBox(height: 16),
             _Section(
@@ -115,8 +115,8 @@ class RelationshipCenterScreen extends StatelessWidget {
                     icon: const Icon(Icons.video_library_outlined),
                     label: const Text('Add Video'),
                   ),
-                ],
-              ),
+                    ],
+                  ),
               child: scopedItems.isEmpty
                   ? const Text('No media saved for this sub yet.')
                   : Column(
@@ -238,8 +238,10 @@ class _PreferenceSlider extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final safeLabel = label.isEmpty ? 'Preference' : label;
-    final title = '${safeLabel[0].toUpperCase()}${safeLabel.substring(1)}';
+    final normalized = label.trim();
+    final title = normalized.isEmpty
+        ? 'Preference'
+        : '${normalized[0].toUpperCase()}${normalized.substring(1)}';
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -414,29 +416,31 @@ class _VideoViewerState extends State<_VideoViewer> {
             : !_ready
                 ? const CircularProgressIndicator()
                 : Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  AspectRatio(
-                    aspectRatio: _controller.value.aspectRatio,
-                    child: VideoPlayer(_controller),
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      AspectRatio(
+                        aspectRatio: _controller.value.aspectRatio,
+                        child: VideoPlayer(_controller),
+                      ),
+                      const SizedBox(height: 16),
+                      FilledButton.icon(
+                        onPressed: () {
+                          if (_controller.value.isPlaying) {
+                            _controller.pause();
+                          } else {
+                            _controller.play();
+                          }
+                          setState(() {});
+                        },
+                        icon: Icon(
+                          _controller.value.isPlaying
+                              ? Icons.pause
+                              : Icons.play_arrow,
+                        ),
+                        label: Text(_controller.value.isPlaying ? 'Pause' : 'Play'),
+                      ),
+                    ],
                   ),
-                  const SizedBox(height: 16),
-                  FilledButton.icon(
-                    onPressed: () {
-                      if (_controller.value.isPlaying) {
-                        _controller.pause();
-                      } else {
-                        _controller.play();
-                      }
-                      setState(() {});
-                    },
-                    icon: Icon(
-                      _controller.value.isPlaying ? Icons.pause : Icons.play_arrow,
-                    ),
-                    label: Text(_controller.value.isPlaying ? 'Pause' : 'Play'),
-                  ),
-                ],
-              ),
       ),
     );
   }
