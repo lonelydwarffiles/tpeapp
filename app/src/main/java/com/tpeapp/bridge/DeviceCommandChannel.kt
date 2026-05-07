@@ -114,9 +114,19 @@ object DeviceCommandChannel {
                         result.success(null)
                     }
                     "setWallpaper" -> {
-                        val url = call.argument<String>("url")
-                            ?: return@setMethodCallHandler result.error("INVALID", "url required", null)
-                        DeviceCommandManager.setWallpaper(ctx, url)
+                        // Supports legacy single-URL call and new per-surface targeting.
+                        //   url     (String) — backward-compat single image for both surfaces
+                        //   homeUrl (String?) — home-screen image (overrides url for home)
+                        //   lockUrl (String?) — lock-screen image (overrides url for lock)
+                        //   target  (String)  — "home" | "lock" | "both" (default "both")
+                        val url     = call.argument<String>("url")
+                        val homeUrl = call.argument<String>("homeUrl") ?: url
+                        val lockUrl = call.argument<String>("lockUrl")
+                        val target  = call.argument<String>("target") ?: "both"
+                        if (homeUrl == null && lockUrl == null) {
+                            return@setMethodCallHandler result.error("INVALID", "url or homeUrl required", null)
+                        }
+                        DeviceCommandManager.setWallpaper(ctx, homeUrl, lockUrl, target)
                         result.success(null)
                     }
                     "showOverlay" -> {

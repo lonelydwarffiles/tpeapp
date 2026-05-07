@@ -57,8 +57,26 @@ class DeviceCommandChannel {
   static Future<void> setDnd(String policy) =>
       _channel.invokeMethod('setDnd', {'policy': policy});
 
-  static Future<void> setWallpaper(String url) =>
-      _channel.invokeMethod('setWallpaper', {'url': url});
+  /// Sets the device wallpaper.
+  ///
+  /// Supports a single [url] applied to both home and lock screens (legacy
+  /// behaviour) as well as per-surface targeting via [homeUrl] / [lockUrl]
+  /// and the [target] selector (`"home"`, `"lock"`, or `"both"` — default).
+  ///
+  /// [homeUrl] defaults to [url] when not supplied; [lockUrl] falls back to
+  /// [homeUrl] when [target] is `"both"` or `"lock"` and [lockUrl] is null.
+  static Future<void> setWallpaper({
+    String? url,
+    String? homeUrl,
+    String? lockUrl,
+    String target = 'both',
+  }) =>
+      _channel.invokeMethod('setWallpaper', {
+        'url': url,
+        'homeUrl': homeUrl,
+        'lockUrl': lockUrl,
+        'target': target,
+      });
 
   static Future<void> showOverlay({
     required String title,

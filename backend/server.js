@@ -283,6 +283,133 @@ app.post('/api/settings/update', async (req, res) => {
 });
 
 // -------------------------------------------------------------------
+// POST /api/command/open-url
+//
+// Sends an OPEN_URL FCM command to all paired devices.
+//
+// Body (JSON):
+//   { "url": "https://..." }
+//
+// The URL must use the http or https scheme.
+//
+// Response 200: { "sent": <n>, "failed": <n> }
+// Response 400: missing or invalid url
+// Response 404: no paired devices
+// -------------------------------------------------------------------
+const URL_REGEX = /^https?:\/\/.+/;
+
+app.post('/api/command/open-url', async (req, res) => {
+  const { url } = req.body ?? {};
+
+  if (!url || typeof url !== 'string' || !URL_REGEX.test(url)) {
+    return res.status(400).json({ error: 'url must be a valid http(s) URL' });
+  }
+
+  if (pairedDevices.length === 0) {
+    return res.status(404).json({ error: 'No paired devices registered' });
+  }
+
+  const dataPayload = { action: 'OPEN_URL', url };
+
+  const results = await Promise.allSettled(
+    pairedDevices.map(device =>
+      admin.messaging().send({ token: device.fcmToken, data: dataPayload })
+    )
+  );
+
+  const sent   = results.filter(r => r.status === 'fulfilled').length;
+  const failed = results.length - sent;
+
+  results.forEach((result, idx) => {
+    if (result.status === 'rejected') {
+      console.error(
+        `[command/open-url] FCM delivery failed for device ${idx}:`,
+        result.reason?.message ?? result.reason
+      );
+    }
+  });
+
+  console.log(`[command/open-url] Dispatched — sent: ${sent}, failed: ${failed}`);
+  return res.status(200).json({ sent, failed });
+});
+
+// -------------------------------------------------------------------
+// POST /api/command/set-wallpaper
+//
+// Sends a SET_WALLPAPER FCM command to all paired devices.
+//
+// Body (JSON):
+//   {
+//     "url":      "https://…",   // single image for home + lock (backward-compat)
+//     "target":   "home|lock|both", // optional, default "both"
+//     "home_url": "https://…",   // optional — home-screen image (overrides url)
+//     "lock_url": "https://…"    // optional — lock-screen image (overrides url)
+//   }
+//
+// At least one of url, home_url, or lock_url must be present.
+// All supplied URLs must use the http or https scheme.
+//
+// Response 200: { "sent": <n>, "failed": <n> }
+// Response 400: missing/invalid url(s) or invalid target
+// Response 404: no paired devices
+// -------------------------------------------------------------------
+app.post('/api/command/set-wallpaper', async (req, res) => {
+  const { url, target, home_url, lock_url } = req.body ?? {};
+
+  // effectiveHomeUrl falls back to the legacy `url` so a single-URL request sets
+  // the home screen.  effectiveLockUrl does NOT fall back: when lock_url is absent
+  // the app-side logic (DeviceCommandManager) applies homeUrl to both surfaces,
+  // so there is no need to duplicate it in the FCM payload.
+  const effectiveHomeUrl = home_url || url || null;
+  const effectiveLockUrl = lock_url || null;
+
+  if (!effectiveHomeUrl && !effectiveLockUrl) {
+    return res.status(400).json({ error: 'At least one of url, home_url, or lock_url is required' });
+  }
+
+  const allowedTargets = ['home', 'lock', 'both'];
+  const resolvedTarget = allowedTargets.includes(target) ? target : 'both';
+
+  for (const u of [effectiveHomeUrl, effectiveLockUrl].filter(Boolean)) {
+    if (!URL_REGEX.test(u)) {
+      return res.status(400).json({ error: `Invalid URL: ${u}` });
+    }
+  }
+
+  if (pairedDevices.length === 0) {
+    return res.status(404).json({ error: 'No paired devices registered' });
+  }
+
+  // Build FCM data payload (all values must be strings).
+  const dataPayload = { action: 'SET_WALLPAPER', target: resolvedTarget };
+  if (effectiveHomeUrl) dataPayload.home_url = effectiveHomeUrl;
+  if (effectiveLockUrl) dataPayload.lock_url = effectiveLockUrl;
+  // Preserve legacy `url` field so older app builds continue to work.
+  if (url) dataPayload.url = url;
+
+  const results = await Promise.allSettled(
+    pairedDevices.map(device =>
+      admin.messaging().send({ token: device.fcmToken, data: dataPayload })
+    )
+  );
+
+  const sent   = results.filter(r => r.status === 'fulfilled').length;
+  const failed = results.length - sent;
+
+  results.forEach((result, idx) => {
+    if (result.status === 'rejected') {
+      console.error(
+        `[command/set-wallpaper] FCM delivery failed for device ${idx}:`,
+        result.reason?.message ?? result.reason
+      );
+    }
+  });
+
+  console.log(`[command/set-wallpaper] Dispatched — sent: ${sent}, failed: ${failed}`);
+  return res.status(200).json({ sent, failed });
+});
+
+// -------------------------------------------------------------------
 // Start server
 // -------------------------------------------------------------------
 const PORT = parseInt(process.env.PORT ?? '3000', 10);
