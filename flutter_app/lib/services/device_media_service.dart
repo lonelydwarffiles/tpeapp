@@ -67,7 +67,8 @@ class DeviceMediaService extends ChangeNotifier {
     final source = File(sourcePath);
     final dir = await _libraryDirectory();
     final ext = _extensionFor(sourcePath);
-    final filename = '${type.name}_${DateTime.now().microsecondsSinceEpoch}_${_uuid.v4()}$ext';
+    // UUID is the primary uniqueness guarantee for filenames.
+    final filename = '${type.name}_${DateTime.now().millisecondsSinceEpoch}_${_uuid.v4()}$ext';
     final target = File('${dir.path}/$filename');
     await source.copy(target.path);
     return target.path;
@@ -78,7 +79,6 @@ class DeviceMediaService extends ChangeNotifier {
     if (picked.isEmpty) return;
 
     final nowMs = DateTime.now().millisecondsSinceEpoch;
-    var offset = 0;
     for (final image in picked) {
       final savedPath = await _copyToLibrary(image.path, SavedMediaType.image);
       _items.add(
@@ -86,11 +86,10 @@ class DeviceMediaService extends ChangeNotifier {
           id: _uuid.v4(),
           path: savedPath,
           type: SavedMediaType.image,
-          savedAtMs: nowMs + offset,
+          savedAtMs: nowMs,
           subId: subId,
         ),
       );
-      offset += 1;
     }
 
     _items.sort((a, b) => b.savedAtMs.compareTo(a.savedAtMs));
@@ -124,8 +123,9 @@ class DeviceMediaService extends ChangeNotifier {
     required String content,
   }) async {
     final dir = await _libraryDirectory();
-    final nowUs = DateTime.now().microsecondsSinceEpoch;
-    final name = '${filenamePrefix}_${nowUs}_${_uuid.v4()}.txt';
+    // UUID is the primary uniqueness guarantee for report filenames.
+    final nowMs = DateTime.now().millisecondsSinceEpoch;
+    final name = '${filenamePrefix}_${nowMs}_${_uuid.v4()}.txt';
     final file = File('${dir.path}/$name');
     await file.writeAsString(content);
     return file.path;
