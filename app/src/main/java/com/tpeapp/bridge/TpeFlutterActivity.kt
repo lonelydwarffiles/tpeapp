@@ -1,7 +1,11 @@
 package com.tpeapp.bridge
 
 import android.content.Intent
+import android.net.Uri
 import android.os.Bundle
+import android.os.PowerManager
+import android.provider.Settings
+import com.tpeapp.fcm.PartnerFcmService
 import com.tpeapp.service.FilterService
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
@@ -19,7 +23,7 @@ import io.flutter.embedding.engine.FlutterEngine
  *  | com.tpeapp/device_admin          | [DeviceAdminChannel]          |
  *  | com.tpeapp/partner_pin           | [PartnerPinChannel]           |
  *  | com.tpeapp/ble                   | [BleChannel]                  |
- *  | com.tpeapp/fcm                   | [FcmChannel]                  |
+ *  | com.tpeapp/mqtt_events           | [MqttChannel]                 |
  *  | com.tpeapp/device_commands       | [DeviceCommandChannel]        |
  *  | com.tpeapp/screen_share          | [ScreenShareChannel]          |
  *  | com.tpeapp/remote_control        | [RemoteControlChannel]        |
@@ -35,6 +39,8 @@ class TpeFlutterActivity : FlutterActivity() {
         super.onCreate(savedInstanceState)
         // Keep FilterService alive for the lifetime of the host activity.
         startForegroundService(Intent(this, FilterService::class.java))
+        startForegroundService(Intent(this, PartnerFcmService::class.java))
+        requestIgnoreBatteryOptimizationsIfNeeded()
     }
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
@@ -45,11 +51,23 @@ class TpeFlutterActivity : FlutterActivity() {
         DeviceAdminChannel.register(messenger, applicationContext)
         PartnerPinChannel.register(messenger, applicationContext)
         BleChannel.register(messenger, applicationContext)
-        FcmChannel.register(messenger, applicationContext)
+        MqttChannel.register(messenger, applicationContext)
         DeviceCommandChannel.register(messenger, applicationContext)
         ScreenShareChannel.register(messenger, applicationContext)
         RemoteControlChannel.register(messenger, applicationContext)
         TextReplacementChannel.register(messenger, applicationContext)
         PasswordVaultChannel.register(messenger, applicationContext)
+    }
+
+    private fun requestIgnoreBatteryOptimizationsIfNeeded() {
+        val pm = getSystemService(PowerManager::class.java)
+        if (pm.isIgnoringBatteryOptimizations(packageName)) return
+        runCatching {
+            startActivity(
+                Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+                    data = Uri.parse("package:$packageName")
+                }
+            )
+        }
     }
 }

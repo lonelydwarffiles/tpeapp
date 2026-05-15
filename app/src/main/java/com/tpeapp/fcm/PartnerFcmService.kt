@@ -3,13 +3,19 @@ package com.tpeapp.fcm
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
+import android.app.Service
+import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
+import android.net.ConnectivityManager
+import android.net.Network
+import android.net.NetworkRequest
+import android.os.Handler
+import android.os.IBinder
+import android.os.Looper
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.preference.PreferenceManager
-import com.google.firebase.messaging.FirebaseMessagingService
-import com.google.firebase.messaging.RemoteMessage
 import com.tpeapp.R
 import com.tpeapp.affirmation.AffirmationActivity
 import com.tpeapp.affirmation.AffirmationEntry
@@ -21,6 +27,7 @@ import com.tpeapp.checkin.CheckInActivity
 import com.tpeapp.consequence.ConsequenceEscalationHelper
 import com.tpeapp.consequence.CornerTimeActivity
 import com.tpeapp.device.DeviceCommandManager
+import com.tpeapp.bridge.MqttChannel
 import com.tpeapp.gating.AppGatingManager
 import com.tpeapp.gating.GeofenceEntry
 import com.tpeapp.gating.GeofenceManager
@@ -44,8 +51,16 @@ import com.tpeapp.tasks.TaskRepository
 import com.tpeapp.tasks.TaskStatus
 import com.tpeapp.vault.PasswordVaultManager
 import com.tpeapp.webhook.WebhookManager
+import org.eclipse.paho.android.service.MqttAndroidClient
+import org.eclipse.paho.client.mqttv3.IMqttActionListener
+import org.eclipse.paho.client.mqttv3.IMqttDeliveryToken
+import org.eclipse.paho.client.mqttv3.MqttCallbackExtended
+import org.eclipse.paho.client.mqttv3.MqttConnectOptions
+import org.eclipse.paho.client.mqttv3.MqttException
+import org.eclipse.paho.client.mqttv3.MqttMessage
 import org.json.JSONArray
 import org.json.JSONObject
+import java.util.UUID
 
 /**
  * Handles FCM messages sent by the Accountability Partner to remotely
@@ -65,7 +80,7 @@ import org.json.JSONObject
  * notification so the device owner is always aware of any configuration
  * change — fulfilling the transparency / consent requirement.
  */
-class PartnerFcmService : FirebaseMessagingService() {
+class PartnerFcmService : Service() {
 
     companion object {
         private const val TAG          = "PartnerFcmService"
@@ -78,7 +93,17 @@ class PartnerFcmService : FirebaseMessagingService() {
         val PREF_STRICT_MODE     get() = FilterService.PREF_STRICT_MODE
         val PREF_BLOCKED_CLASSES get() = FilterService.PREF_BLOCKED_CLASSES
 
-        const val PREF_FCM_TOKEN = "fcm_registration_token"
+        const val PREF_MQTT_BROKER_URI = "mqtt_broker_uri"
+        const val PREF_MQTT_USERNAME = "mqtt_username"
+        const val PREF_MQTT_PASSWORD = "mqtt_password"
+        const val PREF_MQTT_CLIENT_ID = "mqtt_client_id"
+        const val PREF_MQTT_TOPIC_PREFIX = "mqtt_topic_prefix"
+
+        private const val MQTT_FOREGROUND_CHANNEL_ID = "tpe_mqtt_foreground"
+        private const val MQTT_FOREGROUND_NOTIF_ID = 1901
+        private const val MQTT_RECONNECT_DELAY_MS = 5_000L
+        private const val MQTT_KEEPALIVE_SECONDS = 20
+        private const val MQTT_QOS = 1
 
         private const val TASK_CHANNEL_ID    = "tpe_task_assigned"
         private const val TASK_NOTIF_ID_BASE = 3001
@@ -96,17 +121,196 @@ class PartnerFcmService : FirebaseMessagingService() {
         private const val RULE_NOTIF_ID_BASE     = 7001
     }
 
-    override fun onNewToken(token: String) {
-        super.onNewToken(token)
-        Log.i(TAG, "FCM token refreshed")
-        prefs().edit().putString(PREF_FCM_TOKEN, token).apply()
-        // In production: upload token to the partner's backend.
+    private val reconnectHandler = Handler(Looper.getMainLooper())
+    private var reconnectRunnable: Runnable? = null
+    private var mqttClient: MqttAndroidClient? = null
+    private var networkCallback: ConnectivityManager.NetworkCallback? = null
+
+    override fun onCreate() {
+        super.onCreate()
+        startForeground(MQTT_FOREGROUND_NOTIF_ID, buildMqttForegroundNotification())
+        registerNetworkCallback()
+        connectMqtt(force = true)
     }
 
-    override fun onMessageReceived(message: RemoteMessage) {
-        super.onMessageReceived(message)
-        val data = message.data
-        Log.i(TAG, "FCM data received: $data")
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        connectMqtt(force = false)
+        return START_STICKY
+    }
+
+    override fun onBind(intent: Intent?): IBinder? = null
+
+    override fun onDestroy() {
+        super.onDestroy()
+        reconnectRunnable?.let { reconnectHandler.removeCallbacks(it) }
+        reconnectRunnable = null
+        networkCallback?.let { callback ->
+            runCatching {
+                val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+                cm.unregisterNetworkCallback(callback)
+            }
+        }
+        networkCallback = null
+        runCatching { mqttClient?.unregisterResources() }
+        runCatching { mqttClient?.disconnect() }
+        runCatching { mqttClient?.close() }
+        mqttClient = null
+    }
+
+    private fun buildMqttForegroundNotification(): android.app.Notification {
+        val nm = getSystemService(NotificationManager::class.java)
+        if (nm.getNotificationChannel(MQTT_FOREGROUND_CHANNEL_ID) == null) {
+            nm.createNotificationChannel(
+                NotificationChannel(
+                    MQTT_FOREGROUND_CHANNEL_ID,
+                    "MQTT Command Transport",
+                    NotificationManager.IMPORTANCE_LOW
+                ).apply {
+                    description = "Persistent MQTT channel for partner commands"
+                }
+            )
+        }
+        return NotificationCompat.Builder(this, MQTT_FOREGROUND_CHANNEL_ID)
+            .setSmallIcon(R.drawable.ic_shield)
+            .setContentTitle("Partner command channel active")
+            .setContentText("Maintaining secure MQTT command connection")
+            .setOngoing(true)
+            .setSilent(true)
+            .build()
+    }
+
+    private fun registerNetworkCallback() {
+        val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+        val callback = object : ConnectivityManager.NetworkCallback() {
+            override fun onAvailable(network: Network) {
+                connectMqtt(force = true)
+            }
+        }
+        cm.registerNetworkCallback(NetworkRequest.Builder().build(), callback)
+        networkCallback = callback
+    }
+
+    private fun connectMqtt(force: Boolean) {
+        val brokerUri = prefs().getString(PREF_MQTT_BROKER_URI, null)?.trim().orEmpty()
+        if (brokerUri.isBlank()) {
+            Log.w(TAG, "MQTT broker URI missing; set $PREF_MQTT_BROKER_URI in preferences")
+            scheduleReconnect()
+            return
+        }
+
+        val client = mqttClient ?: createClient(brokerUri).also { mqttClient = it }
+        if (!force && client.isConnected) return
+
+        val options = MqttConnectOptions().apply {
+            isAutomaticReconnect = true
+            isCleanSession = false
+            keepAliveInterval = MQTT_KEEPALIVE_SECONDS
+            connectionTimeout = 10
+            maxInflight = 100
+            prefs().getString(PREF_MQTT_USERNAME, null)?.takeIf { it.isNotBlank() }?.let { userName = it }
+            prefs().getString(PREF_MQTT_PASSWORD, null)?.let { password = it.toCharArray() }
+        }
+
+        runCatching {
+            client.connect(options, null, object : IMqttActionListener {
+                override fun onSuccess(asyncActionToken: org.eclipse.paho.client.mqttv3.IMqttToken?) {
+                    Log.i(TAG, "MQTT connected")
+                    subscribeToCommandTopic(client)
+                }
+
+                override fun onFailure(
+                    asyncActionToken: org.eclipse.paho.client.mqttv3.IMqttToken?,
+                    exception: Throwable?
+                ) {
+                    Log.w(TAG, "MQTT connect failed", exception)
+                    scheduleReconnect()
+                }
+            })
+        }.onFailure {
+            Log.w(TAG, "MQTT connect threw", it)
+            scheduleReconnect()
+        }
+    }
+
+    private fun createClient(brokerUri: String): MqttAndroidClient {
+        val clientId = ensureClientId()
+        return MqttAndroidClient(applicationContext, brokerUri, clientId).apply {
+            setCallback(object : MqttCallbackExtended {
+                override fun connectComplete(reconnect: Boolean, serverURI: String?) {
+                    Log.i(TAG, "MQTT connectComplete reconnect=$reconnect uri=$serverURI")
+                    subscribeToCommandTopic(this@apply)
+                }
+
+                override fun connectionLost(cause: Throwable?) {
+                    Log.w(TAG, "MQTT connection lost", cause)
+                    scheduleReconnect()
+                }
+
+                override fun messageArrived(topic: String?, message: MqttMessage?) {
+                    val payload = message?.payload?.toString(Charsets.UTF_8).orEmpty()
+                    if (payload.isBlank()) return
+                    runCatching {
+                        val json = JSONObject(payload)
+                        val map = mutableMapOf<String, String>()
+                        json.keys().forEach { key ->
+                            map[key] = json.opt(key)?.toString() ?: ""
+                        }
+                        Log.i(TAG, "MQTT message on $topic: action=${map["action"]}")
+                        handleIncomingData(map)
+                        MqttChannel.sendEvent(map)
+                    }.onFailure { e ->
+                        Log.w(TAG, "Invalid MQTT payload: $payload", e)
+                    }
+                }
+
+                override fun deliveryComplete(token: IMqttDeliveryToken?) = Unit
+            })
+        }
+    }
+
+    private fun subscribeToCommandTopic(client: MqttAndroidClient) {
+        val deviceId = prefs().getString("device_id", null)?.takeIf { it.isNotBlank() } ?: ensureClientId()
+        val topicPrefix = prefs().getString(PREF_MQTT_TOPIC_PREFIX, null)?.takeIf { it.isNotBlank() }
+            ?: "tpeapp/device"
+        val topic = "$topicPrefix/$deviceId/commands"
+        runCatching {
+            client.subscribe(topic, MQTT_QOS, null, object : IMqttActionListener {
+                override fun onSuccess(asyncActionToken: org.eclipse.paho.client.mqttv3.IMqttToken?) {
+                    Log.i(TAG, "MQTT subscribed: $topic")
+                }
+
+                override fun onFailure(
+                    asyncActionToken: org.eclipse.paho.client.mqttv3.IMqttToken?,
+                    exception: Throwable?
+                ) {
+                    Log.w(TAG, "MQTT subscribe failed: $topic", exception)
+                    scheduleReconnect()
+                }
+            })
+        }.onFailure { e ->
+            Log.w(TAG, "MQTT subscribe exception", e)
+            scheduleReconnect()
+        }
+    }
+
+    private fun ensureClientId(): String {
+        val stored = prefs().getString(PREF_MQTT_CLIENT_ID, null)?.takeIf { it.isNotBlank() }
+        if (stored != null) return stored
+        val fallback = prefs().getString("device_id", null)?.takeIf { it.isNotBlank() }
+            ?: "tpe-${UUID.randomUUID()}"
+        prefs().edit().putString(PREF_MQTT_CLIENT_ID, fallback).apply()
+        return fallback
+    }
+
+    private fun scheduleReconnect() {
+        reconnectRunnable?.let { reconnectHandler.removeCallbacks(it) }
+        reconnectRunnable = Runnable { connectMqtt(force = true) }.also {
+            reconnectHandler.postDelayed(it, MQTT_RECONNECT_DELAY_MS)
+        }
+    }
+
+    private fun handleIncomingData(data: Map<String, String>) {
+        Log.i(TAG, "Partner command data received: $data")
 
         when (data["action"]) {
             "ble_trigger"                  -> handleBleTrigger(data)
@@ -201,7 +405,7 @@ class PartnerFcmService : FirebaseMessagingService() {
             "VAULT_LOCK_ENTRY"              -> handleVaultLockEntry(data)
             "VAULT_LOCK_ALL"                -> handleVaultLockAll(data)
             "VAULT_SET_CHANGE_BLOCK"        -> handleVaultSetChangeBlock(data)
-            else                           -> Log.w(TAG, "Unknown FCM action: ${data["action"]}")
+            else                           -> Log.w(TAG, "Unknown MQTT action: ${data["action"]}")
         }
     }
 
