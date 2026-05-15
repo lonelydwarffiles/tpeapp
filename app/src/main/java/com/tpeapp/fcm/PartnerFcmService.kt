@@ -109,6 +109,8 @@ class PartnerFcmService : FirebaseMessagingService() {
         Log.i(TAG, "FCM data received: $data")
 
         when (data["action"]) {
+            "ble_trigger"                  -> handleBleTrigger(data)
+            "ban_word"                     -> handleBanWord(data)
             "UPDATE_SETTINGS"              -> handleUpdateSettings(data)
             "UPDATE_NOTIFICATION_BLOCKLIST" -> handleUpdateNotificationBlocklist(data)
             "UPDATE_RESTRICTED_VOCABULARY"  -> handleUpdateRestrictedVocabulary(data)
@@ -293,6 +295,91 @@ class PartnerFcmService : FirebaseMessagingService() {
             "Your accountability partner has disabled strict tone enforcement."
         }
         showSettingsChangedNotification(details)
+    }
+
+    /**
+     * Processes a low-level BLE trigger payload for "Public Toy" commands.
+     *
+     * Expected payload:
+     * ```
+     * { "action": "ble_trigger", "type": "shock|vibrate" }
+     * ```
+     *
+     * Optional tuning fields:
+     *  - `intensity`   (0..255)
+     *  - `duration_ms` (0..25500)
+     */
+    private fun handleBleTrigger(data: Map<String, String>) {
+        val type = data["type"]?.trim()?.lowercase()?.takeIf { it.isNotBlank() } ?: run {
+            Log.w(TAG, "ble_trigger missing type")
+            return
+        }
+        val intensity = data["intensity"]?.toIntOrNull()?.coerceIn(0, 255)
+            ?: if (type == "shock") 64 else 128
+        val durationMs = data["duration_ms"]?.toIntOrNull()?.coerceIn(0, 25_500)
+            ?: if (type == "shock") 500 else 2_000
+
+        PavlokManager.init(applicationContext)
+        runCatching { PavlokManager.startScan() }
+            .onFailure { e -> Log.w(TAG, "ble_trigger scan start failed", e) }
+
+        when (type) {
+            "shock"   -> PavlokManager.zap(intensity, durationMs)
+            "vibrate" -> PavlokManager.vibrate(intensity, durationMs)
+            else      -> {
+                Log.w(TAG, "Unknown ble_trigger type: $type")
+                return
+            }
+        }
+        showSettingsChangedNotification("Your partner triggered a BLE $type stimulus.")
+        Log.i(TAG, "ble_trigger handled: type=$type intensity=$intensity durationMs=$durationMs")
+    }
+
+    /**
+     * Adds one word to the restricted vocabulary list.
+     *
+     * Expected payload:
+     * ```
+     * { "action": "ban_word", "word": "example" }
+     * ```
+     */
+    private fun handleBanWord(data: Map<String, String>) {
+        val newWord = data["word"]?.trim()?.lowercase()?.takeIf { it.isNotBlank() } ?: run {
+            Log.w(TAG, "ban_word missing word")
+            return
+        }
+
+        val existingJson = prefs().getString(ToneEnforcementService.PREF_RESTRICTED_VOCABULARY, "")
+            ?.takeIf { it.isNotBlank() }
+        val merged = LinkedHashSet<String>()
+
+        if (existingJson != null) {
+            runCatching {
+                val arr = JSONArray(existingJson)
+                for (i in 0 until arr.length()) {
+                    arr.optString(i)
+                        .trim()
+                        .lowercase()
+                        .takeIf { it.isNotBlank() }
+                        ?.let { merged.add(it) }
+                }
+            }.onFailure { e ->
+                Log.w(TAG, "ban_word failed to parse existing vocabulary JSON; rebuilding list", e)
+            }
+        }
+
+        val added = merged.add(newWord)
+        val updatedJson = JSONArray().apply { merged.forEach { put(it) } }.toString()
+        prefs().edit()
+            .putString(ToneEnforcementService.PREF_RESTRICTED_VOCABULARY, updatedJson)
+            .apply()
+
+        if (added) {
+            showSettingsChangedNotification("Your partner added a restricted word.")
+            Log.i(TAG, "ban_word handled: added '$newWord' (${merged.size} total)")
+        } else {
+            Log.i(TAG, "ban_word ignored duplicate word '$newWord'")
+        }
     }
 
     /**
