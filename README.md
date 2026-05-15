@@ -20,11 +20,11 @@ tpeapp/
   - `is_paired`
   - `partner_endpoint_url`
   - `webhook_url`
-  - `fcm_registration_token`
+  - `mqtt_client_id`
   - stable `device_id` (UUID v4)
-- Pairing posts to `POST /api/pair` and starts `FilterService`.
+- Pairing posts to `POST /api/pair` and starts `FilterService` + persistent MQTT service.
 
-### 2) Native command + settings control (via FCM)
+### 2) Native command + settings control (via MQTT)
 - `PartnerFcmService` handles many partner actions, including:
   - filter/tone/vocabulary updates
   - task/check-in/review triggers

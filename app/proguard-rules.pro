@@ -8,7 +8,7 @@
 # Keep Device Admin receiver
 -keep class com.tpeapp.mdm.AppDeviceAdminReceiver { *; }
 
-# Keep FCM service
+# Keep partner command service
 -keep class com.tpeapp.fcm.PartnerFcmService { *; }
 
 # Keep Glide generated API

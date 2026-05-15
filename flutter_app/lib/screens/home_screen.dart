@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
-import '../channels/fcm_channel.dart';
+import '../channels/mqtt_channel.dart';
 import '../channels/partner_pin_channel.dart';
 import '../services/chat_repository.dart';
 import '../models/chat_message.dart';
@@ -16,7 +16,7 @@ import 'relationship_center_screen.dart';
 
 /// Main screen — the "Handler" AI chat interface.
 ///
-/// Dart equivalent of [HandlerChatActivity].  Also listens to [FcmChannel]
+/// Dart equivalent of [HandlerChatActivity].  Also listens to [MqttChannel]
 /// events so the UI can react to partner pushes (REQUEST_CHECKIN, etc.).
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -33,7 +33,7 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void initState() {
     super.initState();
-    FcmChannel.events.listen(_onFcmEvent);
+    MqttChannel.events.listen(_onMqttEvent);
   }
 
   @override
@@ -43,7 +43,7 @@ class _HomeScreenState extends State<HomeScreen> {
     super.dispose();
   }
 
-  void _onFcmEvent(Map<String, String> data) {
+  void _onMqttEvent(Map<String, String> data) {
     switch (data['action']) {
       case 'REQUEST_CHECKIN':
         if (mounted) {

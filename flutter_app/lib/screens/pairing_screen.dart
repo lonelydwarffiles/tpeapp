@@ -5,14 +5,13 @@ import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:uuid/uuid.dart';
 
-import '../channels/fcm_channel.dart';
 import '../channels/filter_service_channel.dart';
 import '../services/api_service.dart';
 import 'home_screen.dart';
 
 /// Dart equivalent of [PairingActivity].
 ///
-/// Scans the partner's QR code, retrieves the FCM token via [FcmChannel],
+/// Scans the partner's QR code, generates a stable MQTT client identity,
 /// POSTs the pairing request to the partner backend via [ApiService], and
 /// writes `is_paired = true` to SharedPreferences on success.
 class PairingScreen extends StatefulWidget {
@@ -40,7 +39,7 @@ class _PairingScreenState extends State<PairingScreen> {
 
     setState(() {
       _pairing = true;
-      _status = 'QR code detected — retrieving device token…';
+      _status = 'QR code detected — preparing secure device identity…';
     });
 
     try {
@@ -48,44 +47,50 @@ class _PairingScreenState extends State<PairingScreen> {
       final endpoint    = (json['endpoint'] as String).trimRight().replaceAll(RegExp(r'/$'), '');
       final pairingToken = json['pairing_token'] as String;
       final webhookSecret = (json['webhook_secret'] as String?) ?? '';
+      final mqttBrokerUri = (json['mqtt_broker_uri'] as String?)?.trim() ?? '';
+      final mqttUsername = (json['mqtt_username'] as String?)?.trim() ?? '';
+      final mqttPassword = (json['mqtt_password'] as String?) ?? '';
+      final mqttTopicPrefix = (json['mqtt_topic_prefix'] as String?)?.trim() ?? '';
 
       if (!endpoint.startsWith('https://')) {
         _setStatus('⚠️ Partner endpoint must use HTTPS. Contact your accountability partner.');
         return;
       }
 
-      setState(() => _status = 'Retrieving FCM token…');
-
-      final fcmToken = await FcmChannel.refresh();
-      if (fcmToken == null) {
-        _setStatus('⚠️ Could not retrieve device token. Check Google Play Services.');
-        return;
-      }
-
       setState(() => _status = 'Pairing with accountability partner…');
 
       final prefs = await SharedPreferences.getInstance();
+      final deviceId = prefs.getString('device_id')?.trim().isNotEmpty == true
+          ? prefs.getString('device_id')!
+          : const Uuid().v4();
+      await prefs.setString('device_id', deviceId);
+      await prefs.setString('mqtt_client_id', deviceId);
+
       final api = ApiService(prefs);
       await api.pair(
         endpoint: endpoint,
         pairingToken: pairingToken,
-        fcmToken: fcmToken,
+        mqttClientId: deviceId,
       );
 
       // Persist paired state and webhook configuration.
       await prefs.setBool('is_paired', true);
       await prefs.setString('partner_endpoint_url', endpoint);
-      await prefs.setString('fcm_registration_token', fcmToken);
       await prefs.setString('webhook_url', '$endpoint/api/tpe/webhook');
+      if (mqttBrokerUri.isNotEmpty) {
+        await prefs.setString('mqtt_broker_uri', mqttBrokerUri);
+      }
+      if (mqttUsername.isNotEmpty) {
+        await prefs.setString('mqtt_username', mqttUsername);
+      }
+      if (mqttPassword.isNotEmpty) {
+        await prefs.setString('mqtt_password', mqttPassword);
+      }
+      if (mqttTopicPrefix.isNotEmpty) {
+        await prefs.setString('mqtt_topic_prefix', mqttTopicPrefix);
+      }
       if (webhookSecret.isNotEmpty) {
         await prefs.setString('webhook_bearer_token', webhookSecret);
-      }
-
-      // Generate and persist a stable device_id for multi-tenant backend routing.
-      // A new UUID is generated only on first pairing; subsequent re-pairings
-      // preserve the existing ID so the backend can correlate history.
-      if (!prefs.containsKey('device_id')) {
-        await prefs.setString('device_id', const Uuid().v4());
       }
 
       await FilterServiceChannel.start();

@@ -75,21 +75,27 @@ class ApiService {
 
   // ── Pairing ───────────────────────────────────────────────────────────
 
-  /// POSTs `{ fcm_token, pairing_token }` to `{endpoint}/api/pair`.
+  /// POSTs pairing payload to `{endpoint}/api/pair`.
   /// Returns true on success; throws on failure.
   Future<bool> pair({
     required String endpoint,
     required String pairingToken,
-    required String fcmToken,
+    required String mqttClientId,
   }) async {
+    final deviceId = _deviceId;
     final body = jsonEncode({
-      'fcm_token': fcmToken,
+      'mqtt_client_id': mqttClientId,
+      'fcm_token': mqttClientId,
       'pairing_token': pairingToken,
+      if (deviceId != null) 'device_id': deviceId,
     });
     final response = await http
         .post(
           Uri.parse('$endpoint/api/pair'),
-          headers: {'Content-Type': 'application/json'},
+          headers: {
+            'Content-Type': 'application/json',
+            if (deviceId != null) 'X-Device-ID': deviceId,
+          },
           body: body,
         )
         .timeout(_timeout);

@@ -14,11 +14,11 @@ tpeapp/
 │       │   ├── DeviceAdminChannel.kt     com.tpeapp/device_admin
 │       │   ├── PartnerPinChannel.kt      com.tpeapp/partner_pin
 │       │   ├── BleChannel.kt             com.tpeapp/ble + com.tpeapp/ble_events
-│       │   ├── FcmChannel.kt             com.tpeapp/fcm + com.tpeapp/fcm_events
+│       │   ├── MqttChannel.kt            com.tpeapp/mqtt_events
 │       │   └── DeviceCommandChannel.kt   com.tpeapp/device_commands
 │       ├── service/FilterService.kt      ← KEPT NATIVE (AIDL + TFLite)
 │       ├── mdm/                          ← KEPT NATIVE (Device Admin)
-│       ├── fcm/PartnerFcmService.kt      ← KEPT NATIVE (FCM handler)
+│       ├── fcm/PartnerFcmService.kt      ← KEPT NATIVE (persistent MQTT command handler)
 │       ├── device/DeviceCommandManager.kt← KEPT NATIVE (root commands)
 │       ├── consequence/                  ← KEPT NATIVE (punishment/reward)
 │       ├── ble/                          ← KEPT NATIVE (used by FilterService)
@@ -35,7 +35,7 @@ tpeapp/
         │   ├── device_admin_channel.dart
         │   ├── partner_pin_channel.dart
         │   ├── ble_channel.dart
-        │   ├── fcm_channel.dart
+        │   ├── mqtt_channel.dart
         │   └── device_command_channel.dart
         ├── services/             ← Pure Dart services (replaces Kotlin repositories)
         │   ├── api_service.dart          HTTP calls (replaces OkHttp)
@@ -63,7 +63,7 @@ tpeapp/
 | `FilterService` + AIDL | Long-lived background service; NudeNetClassifier (TFLite) |
 | `AppDeviceAdminReceiver` | Must extend `DeviceAdminReceiver` |
 | `PartnerPinManager` | EncryptedSharedPreferences + PBKDF2 — stays in Keystore |
-| `PartnerFcmService` | Extends `FirebaseMessagingService` |
+| `PartnerFcmService` | Extends `Service` and maintains persistent MQTT transport |
 | `DeviceCommandManager` | Privileged root shell commands |
 | `ConsequenceDispatcher` | Called from background services, not UI |
 | `BleManager` / `LovenseManager` / `PavlokManager` | Shared with ConsequenceDispatcher |
@@ -78,8 +78,7 @@ tpeapp/
 | `com.tpeapp/partner_pin` | `PartnerPinChannel` | Standalone PIN management |
 | `com.tpeapp/ble` | `BleChannel` | Lovense & Pavlok commands |
 | `com.tpeapp/ble_events` | `BleChannel` (EventChannel) | BLE connection state → Dart |
-| `com.tpeapp/fcm` | `FcmChannel` | FCM token get/refresh |
-| `com.tpeapp/fcm_events` | `FcmChannel` (EventChannel) | FCM pushes → Dart UI |
+| `com.tpeapp/mqtt_events` | `MqttChannel` (EventChannel) | MQTT command payloads → Dart UI |
 | `com.tpeapp/device_commands` | `DeviceCommandChannel` | Remote device controls |
 
 ## Building

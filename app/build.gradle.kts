@@ -2,7 +2,6 @@ plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.kapt)
-    alias(libs.plugins.google.services)
 }
 
 android {
@@ -78,10 +77,9 @@ dependencies {
     implementation(libs.coil)
     implementation(libs.okhttp)
 
-    // Firebase
-    implementation(platform(libs.firebase.bom))
-    implementation(libs.firebase.messaging.ktx)
-    implementation(libs.firebase.analytics.ktx)
+    // MQTT (persistent command channel)
+    implementation(libs.paho.android.service)
+    implementation(libs.paho.client)
 
     // Blur utility
     implementation(libs.renderscript.toolkit)

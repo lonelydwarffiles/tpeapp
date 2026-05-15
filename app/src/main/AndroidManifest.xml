@@ -31,6 +31,7 @@
     <!-- FCM / networking -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
 
     <!-- Device Admin (uninstall lock) -->
     <uses-permission android:name="android.permission.BIND_DEVICE_ADMIN" />
@@ -240,15 +241,13 @@
         </service>
 
         <!-- ============================================================
-             FCM service
+             Persistent MQTT command service
         ============================================================ -->
         <service
             android:name=".fcm.PartnerFcmService"
-            android:exported="false">
-            <intent-filter>
-                <action android:name="com.google.firebase.MESSAGING_EVENT" />
-            </intent-filter>
-        </service>
+            android:exported="false"
+            android:foregroundServiceType="dataSync"
+            android:stopWithTask="false" />
 
         <!-- ============================================================
              Mindful Communication Module — Incoming filter

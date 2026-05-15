@@ -26,7 +26,6 @@ import com.tpeapp.databinding.ActivityPairingBinding
 import com.tpeapp.fcm.PartnerFcmService
 import com.tpeapp.handler.HandlerChatActivity
 import com.tpeapp.ui.MainActivity
-import com.google.firebase.messaging.FirebaseMessaging
 import okhttp3.Call
 import okhttp3.Callback
 import okhttp3.MediaType.Companion.toMediaType
@@ -49,8 +48,8 @@ import java.util.concurrent.atomic.AtomicBoolean
  * Flow:
  *  1. If the device is already paired the Activity finishes immediately and
  *     forwards to [MainActivity].
- *  2. Otherwise it opens the camera, scans the partner's QR code, retrieves
- *     the FCM registration token, and POSTs both to the partner's backend via
+ *  2. Otherwise it opens the camera, scans the partner's QR code, derives a
+ *     stable MQTT client ID, and POSTs it to the partner's backend via
  *     [OkHttpClient].
  *  3. On a successful pairing response the "is_paired" flag is written to
  *     [SharedPreferences] so this screen is never shown again.
@@ -208,7 +207,7 @@ class PairingActivity : AppCompatActivity() {
     }
 
     // ------------------------------------------------------------------
-    //  QR payload → FCM token → pairing request
+    //  QR payload → MQTT client ID → pairing request
     // ------------------------------------------------------------------
 
     /**
@@ -221,17 +220,25 @@ class PairingActivity : AppCompatActivity() {
      * ```
      */
     private fun handleQrPayload(raw: String) {
-        showStatus("QR code detected — retrieving FCM token…")
+        showStatus("QR code detected — preparing secure device identity…")
 
         val endpoint: String
         val pairingToken: String
         val webhookSecret: String
+        val mqttBrokerUri: String
+        val mqttUsername: String
+        val mqttPassword: String
+        val mqttTopicPrefix: String
 
         try {
             val json     = JSONObject(raw)
             endpoint     = json.getString("endpoint").trimEnd('/')
             pairingToken = json.getString("pairing_token")
             webhookSecret = json.optString("webhook_secret", "")
+            mqttBrokerUri = json.optString("mqtt_broker_uri", "").trim()
+            mqttUsername = json.optString("mqtt_username", "").trim()
+            mqttPassword = json.optString("mqtt_password", "")
+            mqttTopicPrefix = json.optString("mqtt_topic_prefix", "").trim()
         } catch (e: JSONException) {
             Log.e(TAG, "Invalid QR payload", e)
             showStatus("⚠️ Invalid QR code. Ask your accountability partner for a new one.")
@@ -239,7 +246,7 @@ class PairingActivity : AppCompatActivity() {
             return
         }
 
-        // Enforce HTTPS to prevent sending the FCM token over plain HTTP.
+        // Enforce HTTPS to prevent sending pairing secrets over plain HTTP.
         if (!endpoint.startsWith("https://")) {
             Log.w(TAG, "Rejecting non-HTTPS endpoint: $endpoint")
             showStatus("⚠️ Partner endpoint must use HTTPS. Contact your accountability partner.")
@@ -247,19 +254,19 @@ class PairingActivity : AppCompatActivity() {
             return
         }
 
-        FirebaseMessaging.getInstance().token
-            .addOnSuccessListener { fcmToken ->
-                sendPairingRequest(endpoint, pairingToken, fcmToken, webhookSecret)
-            }
-            .addOnFailureListener { e ->
-                Log.e(TAG, "FCM token retrieval failed", e)
-                showStatus("⚠️ Could not retrieve device token. Check Google Play Services.")
-                pairingInProgress.set(false)
-            }
+        sendPairingRequest(
+            endpoint = endpoint,
+            pairingToken = pairingToken,
+            webhookSecret = webhookSecret,
+            mqttBrokerUri = mqttBrokerUri,
+            mqttUsername = mqttUsername,
+            mqttPassword = mqttPassword,
+            mqttTopicPrefix = mqttTopicPrefix
+        )
     }
 
     /**
-     * POSTs the device's FCM token to the partner's `/api/pair` endpoint to
+     * POSTs the device's MQTT client identity to the partner's `/api/pair` endpoint to
      * complete the pairing process.
      *
      * A stable `device_id` UUID is generated and persisted on first pairing if one
@@ -270,8 +277,11 @@ class PairingActivity : AppCompatActivity() {
     private fun sendPairingRequest(
         endpoint: String,
         pairingToken: String,
-        fcmToken: String,
-        webhookSecret: String
+        webhookSecret: String,
+        mqttBrokerUri: String,
+        mqttUsername: String,
+        mqttPassword: String,
+        mqttTopicPrefix: String
     ) {
         showStatus("Pairing with accountability partner…")
 
@@ -281,9 +291,11 @@ class PairingActivity : AppCompatActivity() {
             ?: UUID.randomUUID().toString().also { newId ->
                 p.edit().putString("device_id", newId).apply()
             }
+        p.edit().putString(PartnerFcmService.PREF_MQTT_CLIENT_ID, deviceId).apply()
 
         val body = JSONObject().run {
-            put("fcm_token",     fcmToken)
+            put("mqtt_client_id", deviceId)
+            put("fcm_token", deviceId)
             put("pairing_token", pairingToken)
             put("device_id",     deviceId)
             toString()
@@ -311,7 +323,10 @@ class PairingActivity : AppCompatActivity() {
                         val editor = prefs().edit()
                             .putBoolean(PREF_IS_PAIRED, true)
                             .putString(PREF_PARTNER_ENDPOINT, endpoint)
-                            .putString(PartnerFcmService.PREF_FCM_TOKEN, fcmToken)
+                            .putString(PartnerFcmService.PREF_MQTT_BROKER_URI, mqttBrokerUri)
+                            .putString(PartnerFcmService.PREF_MQTT_USERNAME, mqttUsername)
+                            .putString(PartnerFcmService.PREF_MQTT_PASSWORD, mqttPassword)
+                            .putString(PartnerFcmService.PREF_MQTT_TOPIC_PREFIX, mqttTopicPrefix)
                             .putString(
                                 com.tpeapp.service.FilterService.PREF_WEBHOOK_URL,
                                 "$endpoint/api/tpe/webhook"
@@ -324,6 +339,7 @@ class PairingActivity : AppCompatActivity() {
                         }
                         editor.apply()
                         runOnUiThread {
+                            startForegroundService(Intent(this@PairingActivity, PartnerFcmService::class.java))
                             Toast.makeText(
                                 this@PairingActivity,
                                 "Paired successfully!",
