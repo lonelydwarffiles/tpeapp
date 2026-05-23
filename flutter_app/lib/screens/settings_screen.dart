@@ -6,6 +6,7 @@ import '../channels/filter_service_channel.dart';
 import '../channels/remote_control_channel.dart';
 import '../channels/text_replacement_channel.dart';
 import '../services/health_service.dart';
+import '../services/secure_storage_service.dart';
 import '../services/vitals_sync_service.dart';
 import 'password_vault_screen.dart';
 
@@ -78,6 +79,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   Future<void> _init() async {
     _prefs = await SharedPreferences.getInstance();
+    final secureApiKey = await SecureStorageService.instance.readHandlerApiKey();
+    final legacyApiKey = _prefs.getString(_kHandlerApiKey);
+    final handlerApiKey = (secureApiKey != null && secureApiKey.isNotEmpty)
+        ? secureApiKey
+        : (legacyApiKey ?? '');
+    if ((secureApiKey == null || secureApiKey.isEmpty) &&
+        legacyApiKey != null &&
+        legacyApiKey.isNotEmpty) {
+      await SecureStorageService.instance.writeHandlerApiKey(legacyApiKey);
+      await _prefs.remove(_kHandlerApiKey);
+    }
     final active = await DeviceAdminChannel.isAdminActive();
     final webhookUrl = await FilterServiceChannel.getWebhookUrl();
     final webhookToken = await FilterServiceChannel.getWebhookToken();
@@ -95,7 +107,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _webhookToken = webhookToken ?? '';
       _handlerEndpoint =
           _prefs.getString(_kHandlerEndpoint) ?? 'https://api.openai.com';
-      _handlerApiKey = _prefs.getString(_kHandlerApiKey) ?? '';
+      _handlerApiKey = handlerApiKey;
       _handlerModel = _prefs.getString(_kHandlerModel) ?? 'gpt-4o';
       _handlerPrompt = _prefs.getString(_kHandlerSystemPrompt) ?? '';
       _healthConnectEnabled = healthEnabled;
@@ -144,7 +156,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   Future<void> _applyHandlerSettings() async {
     await _prefs.setString(_kHandlerEndpoint, _handlerEndpoint);
-    await _prefs.setString(_kHandlerApiKey, _handlerApiKey);
+    await SecureStorageService.instance.writeHandlerApiKey(_handlerApiKey);
+    await _prefs.remove(_kHandlerApiKey);
     await _prefs.setString(_kHandlerModel, _handlerModel);
     await _prefs.setString(_kHandlerSystemPrompt, _handlerPrompt);
     if (mounted) {

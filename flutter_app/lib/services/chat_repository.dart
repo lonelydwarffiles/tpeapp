@@ -6,6 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:uuid/uuid.dart';
 
 import '../models/chat_message.dart';
+import 'secure_storage_service.dart';
 
 /// Dart equivalent of [com.tpeapp.handler.ChatRepository].
 ///
@@ -44,11 +45,6 @@ class ChatRepository extends ChangeNotifier {
   String get endpoint {
     final raw = _prefs.getString(_endpointKey) ?? _defaultEndpoint;
     return raw.trimRight();
-  }
-
-  String? get apiKey {
-    final key = _prefs.getString(_apiKeyKey);
-    return (key != null && key.isNotEmpty) ? key : null;
   }
 
   String get model => _prefs.getString(_modelKey) ?? _defaultModel;
@@ -129,9 +125,13 @@ class ChatRepository extends ChangeNotifier {
     final messages = [
       {'role': 'system', 'content': systemPrompt},
       ...recent.map((m) => {'role': m.role, 'content': m.content}),
-      {'role': 'user', 'content': userText},
+      if (recent.isEmpty ||
+          recent.last.role != 'user' ||
+          recent.last.content != userText)
+        {'role': 'user', 'content': userText},
     ];
 
+    final apiKey = await _readApiKey();
     final headers = {
       'Content-Type': 'application/json',
       if (apiKey != null) 'Authorization': 'Bearer $apiKey',
@@ -160,7 +160,8 @@ class ChatRepository extends ChangeNotifier {
   }
 
   Future<void> setApiKey(String key) async {
-    await _prefs.setString(_apiKeyKey, key);
+    await SecureStorageService.instance.writeHandlerApiKey(key);
+    await _prefs.remove(_apiKeyKey);
   }
 
   Future<void> setSystemPrompt(String prompt) async {
@@ -169,6 +170,21 @@ class ChatRepository extends ChangeNotifier {
 
   Future<void> setModel(String m) async {
     await _prefs.setString(_modelKey, m);
+  }
+
+  Future<String?> _readApiKey() async {
+    final secure = await SecureStorageService.instance.readHandlerApiKey();
+    if (secure != null && secure.isNotEmpty) {
+      return secure;
+    }
+
+    final legacy = _prefs.getString(_apiKeyKey);
+    if (legacy != null && legacy.isNotEmpty) {
+      await SecureStorageService.instance.writeHandlerApiKey(legacy);
+      await _prefs.remove(_apiKeyKey);
+      return legacy;
+    }
+    return null;
   }
 }
 

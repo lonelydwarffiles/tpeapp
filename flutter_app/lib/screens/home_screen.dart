@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -29,15 +31,17 @@ class _HomeScreenState extends State<HomeScreen> {
   final _textController = TextEditingController();
   final _scrollController = ScrollController();
   bool _sending = false;
+  StreamSubscription<Map<String, String>>? _mqttSub;
 
   @override
   void initState() {
     super.initState();
-    MqttChannel.events.listen(_onMqttEvent);
+    _mqttSub = MqttChannel.events.listen(_onMqttEvent);
   }
 
   @override
   void dispose() {
+    _mqttSub?.cancel();
     _textController.dispose();
     _scrollController.dispose();
     super.dispose();
@@ -50,6 +54,7 @@ class _HomeScreenState extends State<HomeScreen> {
           Navigator.push(
               context, MaterialPageRoute(builder: (_) => const CheckInScreen()));
         }
+        return;
       default:
         break;
     }
@@ -141,27 +146,35 @@ class _HomeScreenState extends State<HomeScreen> {
                 case 'checkin':
                   Navigator.push(context,
                       MaterialPageRoute(builder: (_) => const CheckInScreen()));
+                  return;
                 case 'tasks':
                   Navigator.push(context,
                       MaterialPageRoute(builder: (_) => const TaskListScreen()));
+                  return;
                 case 'assign':
                   _requirePin(() => Navigator.push(context,
                       MaterialPageRoute(builder: (_) => const AssignTaskScreen())));
+                  return;
                 case 'questions':
                   _requirePin(() => Navigator.push(context,
                       MaterialPageRoute(builder: (_) => const QuestionsScreen())));
+                  return;
                 case 'settings':
                   _requirePin(() => Navigator.push(context,
                       MaterialPageRoute(builder: (_) => const SettingsScreen())));
+                  return;
                 case 'screen_share':
                   Navigator.push(context,
                       MaterialPageRoute(builder: (_) => const ScreenShareScreen()));
+                  return;
                 case 'vault':
                   Navigator.push(context,
                       MaterialPageRoute(builder: (_) => const PasswordVaultScreen()));
+                  return;
                 case 'relationships':
                   _requirePin(() => Navigator.push(context,
                       MaterialPageRoute(builder: (_) => const RelationshipCenterScreen())));
+                  return;
               }
             },
             itemBuilder: (_) => const [
