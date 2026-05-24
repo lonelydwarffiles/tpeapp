@@ -3,20 +3,37 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart';
+
+/// Describes the overall connection lifecycle of [IntifaceService].
+enum IntifaceStatus {
+  /// No active socket; either never connected or intentionally disconnected.
+  disconnected,
+
+  /// [WebSocket.connect] is in progress or the handshake hasn't completed yet.
+  connecting,
+
+  /// Handshake complete; the server is reachable and scanning may be active.
+  connected,
+}
+
 /// Manages a WebSocket connection to a local Intiface Central server and
 /// implements the Buttplug.io Message Spec v3 protocol over JSON.
+///
+/// Extends [ChangeNotifier] so Flutter widgets can rebuild whenever the
+/// connection state or discovered-device state changes.
 ///
 /// Lifecycle:
 /// 1. Call [connect] to open the socket, perform the server handshake, and
 ///    begin scanning for Bluetooth toys.
-/// 2. Once a toy is detected (DeviceAdded), the [deviceIndex] is stored and
-///    [setVibration] becomes functional.
+/// 2. Once a toy is detected (DeviceAdded), [deviceIndex] and [deviceName]
+///    are set and [setVibration] becomes functional.
 /// 3. Call [disconnect] to stop everything cleanly.
 ///
 /// Reconnection: if the socket closes unexpectedly, the service waits for an
 /// exponentially increasing delay (up to [_maxReconnectDelay]) before trying
 /// again, unless [disconnect] was called intentionally.
-class IntifaceService {
+class IntifaceService extends ChangeNotifier {
   static const String _host = '127.0.0.1';
   static const int _port = 12345;
   static const String _url = 'ws://$_host:$_port';
@@ -36,20 +53,32 @@ class IntifaceService {
 
   int _msgId = 1;
   int? _deviceIndex;
+  String? _deviceName;
+  String? _serverName;
 
+  IntifaceStatus _status = IntifaceStatus.disconnected;
   bool _intentionalDisconnect = false;
   Duration _reconnectDelay = _initialReconnectDelay;
   Timer? _reconnectTimer;
 
   // ── Public API ───────────────────────────────────────────────────────
 
+  /// Overall connection status.
+  IntifaceStatus get status => _status;
+
   /// The index of the first toy detected via DeviceAdded, or `null` if none.
   int? get deviceIndex => _deviceIndex;
 
+  /// Human-readable name of the first toy, if provided by the server.
+  String? get deviceName => _deviceName;
+
+  /// Name reported by the Intiface server in the handshake, or `null` before
+  /// a successful connection.
+  String? get serverName => _serverName;
+
   /// `true` while a WebSocket connection is active and the handshake has
   /// completed successfully.
-  bool get isConnected =>
-      _socket != null && _socket!.readyState == WebSocket.open;
+  bool get isConnected => _status == IntifaceStatus.connected;
 
   /// Opens the WebSocket connection, performs the Buttplug handshake, and
   /// starts scanning for devices.
@@ -60,6 +89,7 @@ class IntifaceService {
     _reconnectTimer?.cancel();
     _reconnectTimer = null;
 
+    _setStatus(IntifaceStatus.connecting);
     await _closeSocket();
     await _openSocket();
   }
@@ -77,6 +107,7 @@ class IntifaceService {
     }
 
     await _closeSocket();
+    _setStatus(IntifaceStatus.disconnected);
   }
 
   /// Sends a VibrateCmd to the stored device with [intensity] clamped to
@@ -111,11 +142,14 @@ class IntifaceService {
     _socketSub = null;
     await _socket?.close();
     _socket = null;
+    _deviceIndex = null;
+    _deviceName = null;
   }
 
   void _scheduleReconnect() {
     if (_intentionalDisconnect) return;
 
+    _setStatus(IntifaceStatus.connecting);
     _reconnectTimer?.cancel();
     _reconnectTimer = Timer(_reconnectDelay, () async {
       if (_intentionalDisconnect) return;
@@ -129,6 +163,12 @@ class IntifaceService {
         _maxReconnectDelay.inMilliseconds,
       ),
     );
+  }
+
+  void _setStatus(IntifaceStatus s) {
+    if (_status == s) return;
+    _status = s;
+    notifyListeners();
   }
 
   // ── Internal: protocol ───────────────────────────────────────────────
@@ -204,17 +244,25 @@ class IntifaceService {
 
     switch (type) {
       case 'ServerInfo':
-        // Handshake complete — begin scanning for BLE toys.
+        // Handshake complete — capture server name and begin scanning.
+        _serverName = body['ServerName'] as String?;
+        _setStatus(IntifaceStatus.connected);
         _startScanning();
 
       case 'DeviceAdded':
-        // Store the index of the first toy found; ignore subsequent devices.
-        _deviceIndex ??= body['DeviceIndex'] as int?;
+        // Store the index and name of the first toy found.
+        if (_deviceIndex == null) {
+          _deviceIndex = body['DeviceIndex'] as int?;
+          _deviceName = body['DeviceName'] as String?;
+          notifyListeners();
+        }
 
       case 'DeviceRemoved':
         final removedIndex = body['DeviceIndex'] as int?;
         if (removedIndex != null && removedIndex == _deviceIndex) {
           _deviceIndex = null;
+          _deviceName = null;
+          notifyListeners();
         }
 
       case 'Error':
@@ -231,6 +279,8 @@ class IntifaceService {
   void _onDone() {
     _socket = null;
     _socketSub = null;
+    _deviceIndex = null;
+    _deviceName = null;
     _scheduleReconnect();
   }
 }
