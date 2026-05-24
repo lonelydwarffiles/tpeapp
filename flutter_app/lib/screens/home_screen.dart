@@ -15,6 +15,7 @@ import 'settings_screen.dart';
 import 'screen_share_screen.dart';
 import 'password_vault_screen.dart';
 import 'relationship_center_screen.dart';
+import 'intiface_screen.dart';
 
 /// Main screen — the "Handler" AI chat interface.
 ///
@@ -175,6 +176,10 @@ class _HomeScreenState extends State<HomeScreen> {
                   _requirePin(() => Navigator.push(context,
                       MaterialPageRoute(builder: (_) => const RelationshipCenterScreen())));
                   return;
+                case 'toy_control':
+                  Navigator.push(context,
+                      MaterialPageRoute(builder: (_) => const IntifaceScreen()));
+                  return;
               }
             },
             itemBuilder: (_) => const [
@@ -186,6 +191,7 @@ class _HomeScreenState extends State<HomeScreen> {
               PopupMenuItem(value: 'screen_share', child: Text('Screen Share')),
               PopupMenuItem(value: 'vault',     child: Text('Password Vault')),
               PopupMenuItem(value: 'relationships', child: Text('Relationship Center (Partner)')),
+              PopupMenuItem(value: 'toy_control',   child: Text('Toy Control')),
             ],
           ),
         ],
