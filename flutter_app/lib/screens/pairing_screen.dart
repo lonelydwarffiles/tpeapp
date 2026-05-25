@@ -24,7 +24,7 @@ class PairingScreen extends StatefulWidget {
 class _PairingScreenState extends State<PairingScreen> {
   final MobileScannerController _scanner = MobileScannerController();
   bool _pairing = false;
-  String _status = 'Scan the QR code provided by your accountability partner.';
+  String _status = 'Point your camera at the QR code provided by your accountability partner.';
 
   @override
   void dispose() {
@@ -117,33 +117,185 @@ class _PairingScreenState extends State<PairingScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+
     return Scaffold(
-      appBar: AppBar(title: const Text('Pair with Partner')),
-      body: Column(
-        children: [
-          Expanded(
-            flex: 3,
-            child: MobileScanner(
-              controller: _scanner,
-              onDetect: _handleBarcode,
-            ),
-          ),
-          Expanded(
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Center(
-                child: _pairing
-                    ? const CircularProgressIndicator()
-                    : Text(
-                        _status,
-                        textAlign: TextAlign.center,
-                        style: Theme.of(context).textTheme.bodyLarge,
+      body: SafeArea(
+        child: Column(
+          children: [
+            // ── Header ───────────────────────────────────────────────────────
+            Padding(
+              padding: const EdgeInsets.fromLTRB(24, 24, 24, 16),
+              child: Row(
+                children: [
+                  Container(
+                    width: 44,
+                    height: 44,
+                    decoration: BoxDecoration(
+                      color: cs.primaryContainer,
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Icon(Icons.qr_code_scanner_rounded,
+                        color: cs.onPrimaryContainer),
+                  ),
+                  const SizedBox(width: 14),
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'TPE',
+                        style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                              fontWeight: FontWeight.bold,
+                            ),
                       ),
+                      Text(
+                        'Pair with your accountability partner',
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                              color: cs.onSurfaceVariant,
+                            ),
+                      ),
+                    ],
+                  ),
+                ],
               ),
             ),
-          ),
-        ],
+
+            // ── QR scanner ───────────────────────────────────────────────────
+            Expanded(
+              flex: 3,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 24),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(20),
+                  child: Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      MobileScanner(
+                        controller: _scanner,
+                        onDetect: _handleBarcode,
+                      ),
+                      // Corner frame overlay
+                      CustomPaint(painter: _ScanFramePainter(color: cs.primary)),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+
+            // ── Status area ──────────────────────────────────────────────────
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.all(20),
+                child: Card(
+                  child: Padding(
+                    padding: const EdgeInsets.all(20),
+                    child: Center(
+                      child: _pairing
+                          ? Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                CircularProgressIndicator(color: cs.primary),
+                                const SizedBox(height: 16),
+                                Text(
+                                  _status,
+                                  textAlign: TextAlign.center,
+                                  style: Theme.of(context)
+                                      .textTheme
+                                      .bodyMedium
+                                      ?.copyWith(color: cs.onSurfaceVariant),
+                                ),
+                              ],
+                            )
+                          : Row(
+                              children: [
+                                Icon(
+                                  _status.startsWith('⚠️')
+                                      ? Icons.warning_amber_rounded
+                                      : Icons.info_outline_rounded,
+                                  color: _status.startsWith('⚠️')
+                                      ? cs.error
+                                      : cs.primary,
+                                  size: 20,
+                                ),
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: Text(
+                                    _status,
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .bodyMedium
+                                        ?.copyWith(
+                                          color: _status.startsWith('⚠️')
+                                              ? cs.error
+                                              : cs.onSurfaceVariant,
+                                        ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
 }
+
+/// Paints corner brackets inside the scanner viewport to guide the user.
+class _ScanFramePainter extends CustomPainter {
+  _ScanFramePainter({required this.color});
+  final Color color;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = color
+      ..strokeWidth = 3
+      ..style = PaintingStyle.stroke
+      ..strokeCap = StrokeCap.round;
+
+    const len = 28.0;
+    const margin = 20.0;
+
+    final corners = [
+      // top-left
+      [
+        Offset(margin, margin + len), Offset(margin, margin), Offset(margin + len, margin),
+      ],
+      // top-right
+      [
+        Offset(size.width - margin - len, margin),
+        Offset(size.width - margin, margin),
+        Offset(size.width - margin, margin + len),
+      ],
+      // bottom-right
+      [
+        Offset(size.width - margin, size.height - margin - len),
+        Offset(size.width - margin, size.height - margin),
+        Offset(size.width - margin - len, size.height - margin),
+      ],
+      // bottom-left
+      [
+        Offset(margin + len, size.height - margin),
+        Offset(margin, size.height - margin),
+        Offset(margin, size.height - margin - len),
+      ],
+    ];
+
+    for (final pts in corners) {
+      final path = Path()..moveTo(pts[0].dx, pts[0].dy);
+      for (final pt in pts.skip(1)) {
+        path.lineTo(pt.dx, pt.dy);
+      }
+      canvas.drawPath(path, paint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(_ScanFramePainter old) => old.color != color;
+}
+

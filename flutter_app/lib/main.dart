@@ -10,6 +10,7 @@ import 'services/vitals_sync_service.dart';
 import 'services/sub_profile_repository.dart';
 import 'services/device_media_service.dart';
 import 'services/websocket_service.dart';
+import 'services/intiface_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -29,6 +30,7 @@ void main() async {
         ChangeNotifierProvider(create: (_) => SubProfileRepository(prefs)),
         ChangeNotifierProvider(create: (_) => DeviceMediaService(prefs)),
         Provider(create: (_) => WebSocketService(prefs)),
+        ChangeNotifierProvider(create: (_) => IntifaceService()),
       ],
       child: const TpeApp(),
     ),
