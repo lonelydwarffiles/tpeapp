@@ -11,6 +11,10 @@ import 'task_list_screen.dart';
 import 'screen_share_screen.dart';
 import 'password_vault_screen.dart';
 import 'intiface_screen.dart';
+import 'assign_task_screen.dart';
+import 'questions_screen.dart';
+import 'relationship_center_screen.dart';
+import 'settings_screen.dart';
 
 // ── Navigation drawer ─────────────────────────────────────────────────────────
 
@@ -309,6 +313,11 @@ class _HomeScreenState extends State<HomeScreen> {
 
   void _navigateWithPin(Widget screen) =>
       _requirePin(() => _navigate(screen));
+
+  void _requirePin(VoidCallback onAuthorized) {
+    // TODO: Implement actual PIN check. For now, just execute the callback.
+    onAuthorized();
+  }
 
   @override
   Widget build(BuildContext context) {

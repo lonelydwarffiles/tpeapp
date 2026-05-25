@@ -18,15 +18,22 @@ pluginManagement {
 
 plugins {
     id("dev.flutter.flutter-plugin-loader") version "1.0.0"
+    id("com.android.application") version "8.6.0" apply false
+    id("com.android.library") version "8.6.0" apply false
+    id("org.jetbrains.kotlin.android") version "2.2.20" apply false
+    id("org.jetbrains.kotlin.kapt") version "2.2.20" apply false
 }
 
 dependencyResolutionManagement {
-    repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+    repositoriesMode.set(RepositoriesMode.PREFER_SETTINGS)
     repositories {
         google()
         mavenCentral()
-        // JitPack for LSPosed API
+        maven { url = uri("https://storage.googleapis.com/download.flutter.io") }
+        maven { url = uri("https://api.xposed.info/") }
+        // JitPack for other dependencies
         maven("https://jitpack.io")
+        mavenLocal()
     }
 }
 

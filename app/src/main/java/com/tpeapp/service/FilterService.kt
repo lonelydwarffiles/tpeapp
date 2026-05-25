@@ -58,7 +58,7 @@ class FilterService : Service() {
         const val PREF_WEBHOOK_BEARER_TOKEN    = "webhook_bearer_token"
 
         // ------------------------------------------------------------------
-        //  Filter configuration keys — written by PartnerFcmService via FCM
+        //  Filter configuration keys — written by PartnerMqttService via MQTT
         // ------------------------------------------------------------------
 
         /** SharedPreferences key for the partner-configured confidence threshold (Float). */
@@ -101,8 +101,8 @@ class FilterService : Service() {
     @Volatile private var textReplacementDictJson: String = ""
 
     /**
-     * Cached restricted-vocabulary JSON array (empty string = no vocabulary).
-     * Written by PartnerFcmService; read by the Xposed tone-enforcement hook
+    * Cached restricted-vocabulary JSON array (empty string = no vocabulary).
+    * Written by PartnerMqttService; read by the Xposed tone-enforcement hook
      * via [IFilterService.getRestrictedVocabulary].
      */
     @Volatile private var restrictedVocabularyJson: String = ""
@@ -115,10 +115,10 @@ class FilterService : Service() {
     @Volatile private var strictToneModeEnabled: Boolean = false
 
     /**
-     * Feature flag for the NudeNet TFLite classifier.  When `false` the
+    * Feature flag for the NudeNet TFLite classifier.  When `false` the
      * classifier is not initialised and all scan requests immediately return
      * a safe (not-blocked) result, saving performance on low-end devices.
-     * Updated live via FCM → SharedPreferences listener.
+    * Updated live via MQTT command payloads → SharedPreferences listener.
      */
     @Volatile private var nudeNetEnabled: Boolean = true
 
@@ -127,7 +127,7 @@ class FilterService : Service() {
     @Volatile private var lastCleanScanRewardAt: Long = 0L
 
     /**
-     * Listens for live FCM-driven preference changes so the threshold and strict
+     * Listens for live MQTT-driven preference changes so the threshold and strict
      * mode take effect without restarting the service.
      */
     private val prefsListener = android.content.SharedPreferences
@@ -135,15 +135,15 @@ class FilterService : Service() {
             when (key) {
                 PREF_THRESHOLD -> {
                     threshold = effectiveThreshold(prefs.getFloat(key, DEFAULT_THRESHOLD))
-                    Log.i(TAG, "Threshold updated via FCM → $threshold")
+                    Log.i(TAG, "Threshold updated via MQTT → $threshold")
                 }
                 PREF_STRICT_MODE -> {
                     strictModeEnabled = prefs.getBoolean(key, false)
                     threshold = effectiveThreshold(prefs.getFloat(PREF_THRESHOLD, DEFAULT_THRESHOLD))
-                    Log.i(TAG, "Strict mode updated via FCM → $strictModeEnabled (threshold=$threshold)")
+                    Log.i(TAG, "Strict mode updated via MQTT → $strictModeEnabled (threshold=$threshold)")
                 }
                 PREF_BLOCKED_CLASSES ->
-                    Log.i(TAG, "Blocked classes updated via FCM (requires multi-class model to take effect)")
+                    Log.i(TAG, "Blocked classes updated via MQTT (requires multi-class model to take effect)")
                 PREF_TEXT_REPLACEMENT_DICT -> {
                     textReplacementDictJson = prefs.getString(key, "") ?: ""
                     Log.i(TAG, "Text-replacement dictionary updated")
@@ -151,7 +151,7 @@ class FilterService : Service() {
                 PREF_NUDENET_ENABLED -> {
                     val enabled = prefs.getBoolean(key, true)
                     nudeNetEnabled = enabled
-                    Log.i(TAG, "NudeNet feature flag updated via FCM → $enabled")
+                    Log.i(TAG, "NudeNet feature flag updated via MQTT → $enabled")
                     if (enabled && classifier == null) {
                         initClassifierAsync()
                     } else if (!enabled) {
@@ -167,11 +167,11 @@ class FilterService : Service() {
                 }
                 com.tpeapp.mindful.ToneEnforcementService.PREF_RESTRICTED_VOCABULARY -> {
                     restrictedVocabularyJson = prefs.getString(key, "") ?: ""
-                    Log.i(TAG, "Restricted vocabulary updated via FCM")
+                    Log.i(TAG, "Restricted vocabulary updated via MQTT")
                 }
                 com.tpeapp.mindful.ComplianceManager.PREF_STRICT_TONE_MODE -> {
                     strictToneModeEnabled = prefs.getBoolean(key, false)
-                    Log.i(TAG, "Tone strict mode updated via FCM → $strictToneModeEnabled")
+                    Log.i(TAG, "Tone strict mode updated via MQTT → $strictToneModeEnabled")
                 }
             }
         }
@@ -211,10 +211,10 @@ class FilterService : Service() {
 
     /**
      * Reads the partner-configured threshold and strict-mode flag from
-     * SharedPreferences (written by [com.tpeapp.fcm.PartnerFcmService] when an
-     * FCM UPDATE_SETTINGS payload arrives).
+    * SharedPreferences (written by [com.tpeapp.mqtt.PartnerMqttService] when an
+    * MQTT UPDATE_SETTINGS payload arrives).
      *
-     * Also registers [prefsListener] so live FCM changes apply without
+    * Also registers [prefsListener] so live MQTT changes apply without
      * restarting the service.
      */
     private fun loadPersistedSettings() {

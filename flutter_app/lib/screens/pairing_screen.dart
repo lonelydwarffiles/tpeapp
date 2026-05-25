@@ -44,7 +44,7 @@ class _PairingScreenState extends State<PairingScreen> {
 
     try {
       final json = jsonDecode(raw) as Map<String, dynamic>;
-      final endpoint    = (json['endpoint'] as String).trimRight().replaceAll(RegExp(r'/$'), '');
+      final endpoint    = ((json['endpoint'] as String?) ?? (json['loc'] as String?))?.trimRight().replaceAll(RegExp(r'/$'), '') ?? '';
       final pairingToken = json['pairing_token'] as String;
       final webhookSecret = (json['webhook_secret'] as String?) ?? '';
       final mqttBrokerUri = (json['mqtt_broker_uri'] as String?)?.trim() ?? '';
@@ -71,6 +71,7 @@ class _PairingScreenState extends State<PairingScreen> {
         endpoint: endpoint,
         pairingToken: pairingToken,
         mqttClientId: deviceId,
+        webhookSecret: webhookSecret,
         mqttTopicPrefix: mqttTopicPrefix,
       );
 

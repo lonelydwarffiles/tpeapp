@@ -2,7 +2,6 @@ package com.tpeapp.xposed
 
 import android.content.Intent
 import android.util.Log
-import com.tpeapp.mindful.XposedToneReceiver
 import de.robv.android.xposed.XC_MethodHook
 import de.robv.android.xposed.XposedHelpers
 import org.json.JSONArray
@@ -307,7 +306,7 @@ object InputConnectionHook {
             Log.w(TAG, "No context available — tone_block broadcast skipped for: $word")
             return
         }
-        val intent = Intent(XposedToneReceiver.ACTION_XPOSED_TONE_BLOCK).apply {
+        val intent = Intent(XposedConstants.ACTION_XPOSED_TONE_BLOCK).apply {
             setPackage("com.tpeapp")
             putExtra("word",           word)
             putExtra("timestamp",      System.currentTimeMillis())
@@ -331,7 +330,7 @@ object InputConnectionHook {
             Log.w(TAG, "No context available — infraction broadcast skipped for: $word")
             return
         }
-        val intent = Intent(XposedToneReceiver.ACTION_XPOSED_TONE_INFRACTION).apply {
+        val intent = Intent(XposedConstants.ACTION_XPOSED_TONE_INFRACTION).apply {
             setPackage("com.tpeapp")
             putExtra("word",           word)
             putExtra("timestamp",      System.currentTimeMillis())

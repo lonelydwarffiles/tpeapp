@@ -1,7 +1,6 @@
 package com.tpeapp.review
 
 import android.accessibilityservice.AccessibilityService
-import android.accessibilityservice.AccessibilityServiceInfo
 import android.accessibilityservice.GestureDescription
 import android.graphics.Path
 import android.util.Log
@@ -76,12 +75,9 @@ class RemoteControlService : AccessibilityService() {
     // ------------------------------------------------------------------
 
     override fun onServiceConnected() {
-        // Programmatically set CAPABILITY_CAN_PERFORM_GESTURES in addition to
-        // the XML declaration so that runtime serviceInfo overrides are picked up.
-        val info = serviceInfo
-        info.capabilities =
-            info.capabilities or AccessibilityServiceInfo.CAPABILITY_CAN_PERFORM_GESTURES
-        serviceInfo = info
+        // We rely on the XML declaration (remote_control_service.xml) for
+        // CAPABILITY_CAN_PERFORM_GESTURES. Runtime modification of the capabilities
+        // field is not supported as it is populated by the framework from the manifest.
         instance = this
         Log.i(TAG, "RemoteControlService connected — gesture injection ready")
     }

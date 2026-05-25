@@ -23,8 +23,8 @@ import com.google.mlkit.vision.barcode.BarcodeScanning
 import com.google.mlkit.vision.barcode.common.Barcode
 import com.google.mlkit.vision.common.InputImage
 import com.tpeapp.databinding.ActivityPairingBinding
-import com.tpeapp.fcm.PartnerFcmService
 import com.tpeapp.handler.HandlerChatActivity
+import com.tpeapp.mqtt.PartnerMqttService
 import com.tpeapp.ui.MainActivity
 import okhttp3.Call
 import okhttp3.Callback
@@ -232,7 +232,7 @@ class PairingActivity : AppCompatActivity() {
 
         try {
             val json     = JSONObject(raw)
-            endpoint     = json.getString("endpoint").trimEnd('/')
+            endpoint     = (json.optString("endpoint", json.optString("loc", ""))).trimEnd('/')
             pairingToken = json.getString("pairing_token")
             webhookSecret = json.optString("webhook_secret", "")
             mqttBrokerUri = json.optString("mqtt_broker_uri", "").trim()
@@ -291,9 +291,16 @@ class PairingActivity : AppCompatActivity() {
             ?: UUID.randomUUID().toString().also { newId ->
                 p.edit().putString("device_id", newId).apply()
             }
-        p.edit().putString(PartnerFcmService.PREF_MQTT_CLIENT_ID, deviceId).apply()
+        // Backend still requires the legacy key name `fcm_token`; we map it to our
+        // stable MQTT/device identity so no Firebase token is required.
+        val routingToken = p.getString("fcm_token", null)?.takeIf { it.isNotBlank() } ?: deviceId
+        p.edit().putString(PartnerMqttService.PREF_MQTT_CLIENT_ID, deviceId).apply()
 
         val body = JSONObject().run {
+            put("loc", endpoint)
+            put("endpoint", endpoint)
+            put("fcm_token", routingToken)
+            put("fcmToken", routingToken)
             put("mqtt_client_id", deviceId)
             if (mqttTopicPrefix.isNotBlank()) put("mqtt_topic_prefix", mqttTopicPrefix)
             put("pairing_token", pairingToken)
@@ -316,6 +323,7 @@ class PairingActivity : AppCompatActivity() {
 
             override fun onResponse(call: Call, response: Response) {
                 response.use {
+                    val responseBody = it.body?.string()?.trim().orEmpty()
                     if (it.isSuccessful) {
                         // Persist paired state so this screen is never shown again.
                         // Also auto-wire the webhook URL so ConsequenceDispatcher can
@@ -323,10 +331,10 @@ class PairingActivity : AppCompatActivity() {
                         val editor = prefs().edit()
                             .putBoolean(PREF_IS_PAIRED, true)
                             .putString(PREF_PARTNER_ENDPOINT, endpoint)
-                            .putString(PartnerFcmService.PREF_MQTT_BROKER_URI, mqttBrokerUri)
-                            .putString(PartnerFcmService.PREF_MQTT_USERNAME, mqttUsername)
-                            .putString(PartnerFcmService.PREF_MQTT_PASSWORD, mqttPassword)
-                            .putString(PartnerFcmService.PREF_MQTT_TOPIC_PREFIX, mqttTopicPrefix)
+                            .putString(PartnerMqttService.PREF_MQTT_BROKER_URI, mqttBrokerUri)
+                            .putString(PartnerMqttService.PREF_MQTT_USERNAME, mqttUsername)
+                            .putString(PartnerMqttService.PREF_MQTT_PASSWORD, mqttPassword)
+                            .putString(PartnerMqttService.PREF_MQTT_TOPIC_PREFIX, mqttTopicPrefix)
                             .putString(
                                 com.tpeapp.service.FilterService.PREF_WEBHOOK_URL,
                                 "$endpoint/api/tpe/webhook"
@@ -339,7 +347,7 @@ class PairingActivity : AppCompatActivity() {
                         }
                         editor.apply()
                         runOnUiThread {
-                            startForegroundService(Intent(this@PairingActivity, PartnerFcmService::class.java))
+                            startForegroundService(Intent(this@PairingActivity, PartnerMqttService::class.java))
                             Toast.makeText(
                                 this@PairingActivity,
                                 "Paired successfully!",
@@ -348,7 +356,7 @@ class PairingActivity : AppCompatActivity() {
                             navigateToMain()
                         }
                     } else {
-                        Log.w(TAG, "Pairing rejected: HTTP ${it.code}")
+                        Log.w(TAG, "Pairing rejected: HTTP ${it.code} body=$responseBody")
                         showStatus("⚠️ Pairing rejected (${it.code}). Contact your accountability partner.")
                         pairingInProgress.set(false)
                     }

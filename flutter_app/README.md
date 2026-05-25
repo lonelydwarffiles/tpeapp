@@ -18,7 +18,7 @@ tpeapp/
 │       │   └── DeviceCommandChannel.kt   com.tpeapp/device_commands
 │       ├── service/FilterService.kt      ← KEPT NATIVE (AIDL + TFLite)
 │       ├── mdm/                          ← KEPT NATIVE (Device Admin)
-│       ├── fcm/PartnerFcmService.kt      ← KEPT NATIVE (persistent MQTT command handler)
+│       ├── mqtt/PartnerMqttService.kt     ← KEPT NATIVE (persistent MQTT command handler)
 │       ├── device/DeviceCommandManager.kt← KEPT NATIVE (root commands)
 │       ├── consequence/                  ← KEPT NATIVE (punishment/reward)
 │       ├── ble/                          ← KEPT NATIVE (used by FilterService)
@@ -63,7 +63,7 @@ tpeapp/
 | `FilterService` + AIDL | Long-lived background service; NudeNetClassifier (TFLite) |
 | `AppDeviceAdminReceiver` | Must extend `DeviceAdminReceiver` |
 | `PartnerPinManager` | EncryptedSharedPreferences + PBKDF2 — stays in Keystore |
-| `PartnerFcmService` | Extends `Service` and maintains persistent MQTT transport |
+| `PartnerMqttService` | Extends `Service` and maintains persistent MQTT transport |
 | `DeviceCommandManager` | Privileged root shell commands |
 | `ConsequenceDispatcher` | Called from background services, not UI |
 | `BleManager` / `LovenseManager` / `PavlokManager` | Shared with ConsequenceDispatcher |

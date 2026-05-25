@@ -13,7 +13,7 @@ import androidx.preference.PreferenceManager
  *
  * The flag is persisted in [SharedPreferences] under [PREF_STRICT_TONE_MODE]
  * and can be toggled remotely by the Accountability Partner via
- * [com.tpeapp.fcm.PartnerFcmService].
+ * [com.tpeapp.mqtt.PartnerMqttService].
  */
 object ComplianceManager {
 
@@ -29,8 +29,8 @@ object ComplianceManager {
             .getBoolean(PREF_STRICT_TONE_MODE, false)
 
     /**
-     * Persists the strict tone mode flag.  Intended to be called only by
-     * [com.tpeapp.fcm.PartnerFcmService] when an FCM payload is received.
+    * Persists the strict tone mode flag.  Intended to be called only by
+    * [com.tpeapp.mqtt.PartnerMqttService] when an MQTT payload is received.
      */
     fun setStrictToneMode(context: Context, enabled: Boolean) {
         PreferenceManager.getDefaultSharedPreferences(context)

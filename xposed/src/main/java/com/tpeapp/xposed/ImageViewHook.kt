@@ -101,11 +101,17 @@ object ImageViewHook {
         if (service == null) {
             // Service not yet bound; bind now and show original to avoid blank screen.
             MainHook.ensureServiceBound(view.context)
+            CoverageTelemetry.report(
+                lane = CoverageTelemetry.LANE_IMAGEVIEW,
+                stage = CoverageTelemetry.STAGE_SERVICE_UNAVAILABLE,
+                reason = "filter_service_not_bound"
+            )
             mainHandler.post { view.setImageBitmap(original) }
             return
         }
 
         val requestId = requestSeq.incrementAndGet()
+        val startedAt = System.currentTimeMillis()
 
         bgScope.launch {
             val bytes = runCatching {
@@ -114,22 +120,44 @@ object ImageViewHook {
                     baos.toByteArray()
                 }
             }.getOrNull() ?: run {
+                CoverageTelemetry.report(
+                    lane = CoverageTelemetry.LANE_IMAGEVIEW,
+                    stage = CoverageTelemetry.STAGE_ENCODE_FAILED,
+                    reason = "jpeg_compress_failed"
+                )
                 mainHandler.post { view.setImageBitmap(original) }
                 return@launch
             }
 
-            service.scanImageBytes(requestId, bytes, object : IFilterCallback.Stub() {
-                override fun onScanResult(id: Long, isSensitive: Boolean, confidence: Float) {
-                    Log.d(TAG, "Scan [$id] sensitive=$isSensitive confidence=$confidence")
-                    mainHandler.post {
-                        if (isSensitive) {
-                            view.setImageBitmap(BlurHelper.pixelateBitmap(original, blockSize = 20))
-                        } else {
-                            view.setImageBitmap(original)
+            runCatching {
+                service.scanImageBytes(requestId, bytes, object : IFilterCallback.Stub() {
+                    override fun onScanResult(id: Long, isSensitive: Boolean, confidence: Float) {
+                        Log.d(TAG, "Scan [$id] sensitive=$isSensitive confidence=$confidence")
+                        CoverageTelemetry.report(
+                            lane = CoverageTelemetry.LANE_IMAGEVIEW,
+                            stage = CoverageTelemetry.STAGE_SCAN_RESULT,
+                            sensitive = isSensitive,
+                            confidence = confidence,
+                            latencyMs = System.currentTimeMillis() - startedAt,
+                        )
+                        mainHandler.post {
+                            if (isSensitive) {
+                                view.setImageBitmap(BlurHelper.pixelateBitmap(original, blockSize = 20))
+                            } else {
+                                view.setImageBitmap(original)
+                            }
                         }
                     }
-                }
-            })
+                })
+            }.onFailure {
+                CoverageTelemetry.report(
+                    lane = CoverageTelemetry.LANE_IMAGEVIEW,
+                    stage = CoverageTelemetry.STAGE_SCAN_ERROR,
+                    latencyMs = System.currentTimeMillis() - startedAt,
+                    reason = it.javaClass.simpleName
+                )
+                mainHandler.post { view.setImageBitmap(original) }
+            }
         }
     }
 }

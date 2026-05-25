@@ -81,15 +81,35 @@ class ApiService {
     required String endpoint,
     required String pairingToken,
     required String mqttClientId,
+    String? webhookSecret,
     String? mqttTopicPrefix,
   }) async {
     final deviceId = _deviceId;
+    // Backend still requires the legacy key name `fcm_token`; map it to a
+    // stable MQTT/device identifier so Firebase is not required.
+    final storedRoutingToken = (_prefs.getString('fcm_token') ?? '').trim();
+    final effectiveRoutingToken = storedRoutingToken.isNotEmpty
+      ? storedRoutingToken
+        : (deviceId != null && deviceId.isNotEmpty ? deviceId : mqttClientId);
     final body = jsonEncode({
+      'loc': endpoint,
+      'endpoint': endpoint,
+      'fcm_token': effectiveRoutingToken,
+      'fcmToken': effectiveRoutingToken,
       'mqtt_client_id': mqttClientId,
+      'mqttClientId': mqttClientId,
       'pairing_token': pairingToken,
+      'pairingToken': pairingToken,
+      if (webhookSecret != null && webhookSecret.isNotEmpty)
+        'webhook_secret': webhookSecret,
+      if (webhookSecret != null && webhookSecret.isNotEmpty)
+        'webhookSecret': webhookSecret,
       if (mqttTopicPrefix != null && mqttTopicPrefix.isNotEmpty)
         'mqtt_topic_prefix': mqttTopicPrefix,
+      if (mqttTopicPrefix != null && mqttTopicPrefix.isNotEmpty)
+        'mqttTopicPrefix': mqttTopicPrefix,
       if (deviceId != null) 'device_id': deviceId,
+      if (deviceId != null) 'deviceId': deviceId,
     });
     final response = await http
         .post(
@@ -102,7 +122,12 @@ class ApiService {
         )
         .timeout(_timeout);
     if (!response.isSuccessful) {
-      throw Exception('Pairing rejected: HTTP ${response.statusCode}');
+      final details = response.body.trim();
+      throw Exception(
+        details.isEmpty
+            ? 'Pairing rejected: HTTP ${response.statusCode}'
+            : 'Pairing rejected: HTTP ${response.statusCode} - $details',
+      );
     }
     return true;
   }

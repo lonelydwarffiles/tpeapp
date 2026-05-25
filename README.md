@@ -25,7 +25,7 @@ tpeapp/
 - Pairing posts to `POST /api/pair` and starts `FilterService` + persistent MQTT service.
 
 ### 2) Native command + settings control (via MQTT)
-- `PartnerFcmService` handles many partner actions, including:
+- `PartnerMqttService` handles many partner actions, including:
   - filter/tone/vocabulary updates
   - task/check-in/review triggers
   - app lifecycle controls (open/disable/enable/uninstall/suspend)
@@ -66,7 +66,7 @@ tpeapp/
   - lock entry / lock all
   - CSV/JSON import
   - autofill service integration (`VaultAutofillService`)
-- Vault command handling is also present in `PartnerFcmService`.
+- Vault command handling is also present in `PartnerMqttService`.
 
 ### 8) Health + vitals sync
 - Flutter `HealthService` reads Health Connect Heart Rate + Steps.
@@ -112,7 +112,7 @@ Flutter UI (screens/services/channels)
         ↓↑ MethodChannels
 Native Android services/managers/workers
         ↓↑
-FCM commands, WebRTC/WebSocket signaling, webhook/event HTTP
+MQTT commands, WebRTC/WebSocket signaling, webhook/event HTTP
         ↓
 Partner backend APIs
 ```

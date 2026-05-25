@@ -66,6 +66,7 @@ dependencies {
     // AndroidX
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.appcompat)
+    implementation(libs.androidx.preference)
     implementation(libs.material)
     implementation(libs.lifecycle.service)
     implementation(libs.androidx.security.crypto)
@@ -90,6 +91,7 @@ dependencies {
     implementation(libs.paho.android.service)
     implementation(libs.paho.client)
     implementation(libs.onnxruntime.android)
+    implementation(libs.webrtc)
 
     // Blur utility
     implementation(libs.renderscript.toolkit)

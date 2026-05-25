@@ -14,6 +14,7 @@ import android.location.LocationManager
 import android.media.AudioManager
 import android.media.MediaPlayer
 import android.net.Uri
+import android.provider.AlarmClock
 import android.speech.tts.TextToSpeech
 import android.util.Log
 import androidx.preference.PreferenceManager
@@ -504,14 +505,16 @@ object DeviceCommandManager {
      */
     fun setAlarm(context: Context, title: String, timeMs: Long) {
         val cal = java.util.Calendar.getInstance().apply { timeInMillis = timeMs }
-        val intent = Intent(AlarmManager.ACTION_SET_ALARM).apply {
-            putExtra(AlarmManager.EXTRA_HOUR,    cal.get(java.util.Calendar.HOUR_OF_DAY))
-            putExtra(AlarmManager.EXTRA_MINUTES, cal.get(java.util.Calendar.MINUTE))
-            putExtra(AlarmManager.EXTRA_MESSAGE, title)
-            putExtra(AlarmManager.EXTRA_SKIP_UI, true)
+        val intent = Intent(AlarmClock.ACTION_SET_ALARM).apply {
+            putExtra(AlarmClock.EXTRA_HOUR,    cal.get(java.util.Calendar.HOUR_OF_DAY))
+            putExtra(AlarmClock.EXTRA_MINUTES, cal.get(java.util.Calendar.MINUTE))
+            putExtra(AlarmClock.EXTRA_MESSAGE, title)
+            putExtra(AlarmClock.EXTRA_SKIP_UI, true)
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         }
-        context.startActivity(intent)
+        if (intent.resolveActivity(context.packageManager) != null) {
+            context.startActivity(intent)
+        }
         Log.i(TAG, "setAlarm: '$title' at $timeMs")
     }
 

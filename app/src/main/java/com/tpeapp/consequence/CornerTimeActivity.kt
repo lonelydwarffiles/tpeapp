@@ -21,8 +21,8 @@ import java.util.concurrent.TimeUnit
 /**
  * CornerTimeActivity — full-screen countdown lock with front-camera preview.
  *
- * Launched by [com.tpeapp.fcm.PartnerFcmService] via full-screen intent when the
- * Dom sends a START_CORNER_TIME FCM message.
+ * Launched by [com.tpeapp.mqtt.PartnerMqttService] via full-screen intent when the
+ * Dom sends a START_CORNER_TIME MQTT command.
  *
  * The back button is suppressed.  When the timer expires the activity fires a
  * webhook and a reward stimulus, then finishes.

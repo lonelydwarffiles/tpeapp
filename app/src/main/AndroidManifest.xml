@@ -244,7 +244,7 @@
              Persistent MQTT command service
         ============================================================ -->
         <service
-            android:name=".fcm.PartnerFcmService"
+            android:name=".mqtt.PartnerMqttService"
             android:exported="false"
             android:foregroundServiceType="dataSync"
             android:stopWithTask="false" />
@@ -292,6 +292,19 @@
             <intent-filter>
                 <action android:name="com.tpeapp.ACTION_XPOSED_TONE_INFRACTION" />
                 <action android:name="com.tpeapp.ACTION_XPOSED_TONE_BLOCK" />
+            </intent-filter>
+        </receiver>
+
+        <!-- ============================================================
+             Xposed Coverage Receiver — receives media-lane coverage events
+             from LSPosed hooks running in third-party app processes and
+             forwards them to the configured partner webhook.
+        ============================================================ -->
+        <receiver
+            android:name=".telemetry.XposedCoverageReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="com.tpeapp.ACTION_XPOSED_COVERAGE_EVENT" />
             </intent-filter>
         </receiver>
 

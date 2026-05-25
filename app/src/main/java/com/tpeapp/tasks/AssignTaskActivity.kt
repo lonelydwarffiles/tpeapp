@@ -218,6 +218,11 @@ class AssignTaskActivity : AppCompatActivity() {
             val prefs = EncryptedSharedPreferences.create(
                 applicationContext,
                 QuestionsActivity.PREF_ADMIN_PREFS_FILE,
+                masterKey,
+                EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+                EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
+            )
+            val user = prefs.getString(QuestionsActivity.PREF_ADMIN_USER, null)
             val pass = prefs.getString(QuestionsActivity.PREF_ADMIN_PASS, null)
             if (user.isNullOrBlank() || pass.isNullOrBlank()) null else Pair(user, pass)
         } catch (e: Exception) {

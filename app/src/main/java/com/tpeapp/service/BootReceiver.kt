@@ -4,8 +4,8 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import com.tpeapp.ble.LovenseScheduleManager
-import com.tpeapp.fcm.PartnerFcmService
 import com.tpeapp.gating.GeofenceManager
+import com.tpeapp.mqtt.PartnerMqttService
 import com.tpeapp.oversight.ActivitySummaryWorker
 import com.tpeapp.ritual.RitualRepository
 import com.tpeapp.status.SubStatusManager
@@ -18,7 +18,7 @@ class BootReceiver : BroadcastReceiver() {
         ) return
 
         context.startForegroundService(Intent(context, FilterService::class.java))
-        context.startForegroundService(Intent(context, PartnerFcmService::class.java))
+        context.startForegroundService(Intent(context, PartnerMqttService::class.java))
 
         // Persistent status notification
         SubStatusManager.startStatusNotification(context)

@@ -5,7 +5,7 @@ import android.net.Uri
 import android.os.Bundle
 import android.os.PowerManager
 import android.provider.Settings
-import com.tpeapp.fcm.PartnerFcmService
+import com.tpeapp.mqtt.PartnerMqttService
 import com.tpeapp.service.FilterService
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
@@ -30,7 +30,7 @@ import io.flutter.embedding.engine.FlutterEngine
  *  | com.tpeapp/text_replacement      | [TextReplacementChannel]      |
  *  | com.tpeapp/password_vault        | [PasswordVaultChannel]        |
  *
- * The Xposed module, FilterService, AppDeviceAdminReceiver, PartnerFcmService,
+ * The Xposed module, FilterService, AppDeviceAdminReceiver, PartnerMqttService,
  * and all background workers remain purely native and are NOT changed.
  */
 class TpeFlutterActivity : FlutterActivity() {
@@ -39,7 +39,7 @@ class TpeFlutterActivity : FlutterActivity() {
         super.onCreate(savedInstanceState)
         // Keep FilterService alive for the lifetime of the host activity.
         startForegroundService(Intent(this, FilterService::class.java))
-        startForegroundService(Intent(this, PartnerFcmService::class.java))
+        startForegroundService(Intent(this, PartnerMqttService::class.java))
         requestIgnoreBatteryOptimizationsIfNeeded()
     }
 

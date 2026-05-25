@@ -99,8 +99,17 @@ object GlideHook {
     // ------------------------------------------------------------------
 
     private fun scanAndReplaceSync(bitmap: Bitmap) {
-        val service = MainHook.filterService ?: return
+        val service = MainHook.filterService ?: run {
+            MainHook.getContext()?.let { MainHook.ensureServiceBound(it) }
+            CoverageTelemetry.report(
+                lane = CoverageTelemetry.LANE_GLIDE,
+                stage = CoverageTelemetry.STAGE_SERVICE_UNAVAILABLE,
+                reason = "filter_service_not_bound"
+            )
+            return
+        }
         val requestId = requestSeq.incrementAndGet()
+        val startedAt = System.currentTimeMillis()
 
         val bytes = runCatching {
             ByteArrayOutputStream().use { baos ->
@@ -115,13 +124,28 @@ object GlideHook {
         service.scanImageBytes(requestId, bytes, object : IFilterCallback.Stub() {
             override fun onScanResult(id: Long, isSensitive: Boolean, confidence: Float) {
                 sensitive = isSensitive
+                CoverageTelemetry.report(
+                    lane = CoverageTelemetry.LANE_GLIDE,
+                    stage = CoverageTelemetry.STAGE_SCAN_RESULT,
+                    sensitive = isSensitive,
+                    confidence = confidence,
+                    latencyMs = System.currentTimeMillis() - startedAt,
+                )
                 latch.countDown()
             }
         })
 
         // Block up to SCAN_TIMEOUT_MS — acceptable since we are on Glide's
         // background decode thread (never the main thread).
-        latch.await(SCAN_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+        val completed = latch.await(SCAN_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+        if (!completed) {
+            CoverageTelemetry.report(
+                lane = CoverageTelemetry.LANE_GLIDE,
+                stage = CoverageTelemetry.STAGE_SCAN_TIMEOUT,
+                latencyMs = System.currentTimeMillis() - startedAt,
+                reason = "latch_timeout"
+            )
+        }
 
         if (sensitive) {
             Log.d(TAG, "Glide: replacing sensitive bitmap [$requestId]")

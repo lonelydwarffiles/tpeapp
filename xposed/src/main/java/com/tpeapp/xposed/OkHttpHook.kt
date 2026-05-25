@@ -124,22 +124,57 @@ object OkHttpHook {
     }
 
     private fun scanAndCensorBytes(imageBytes: ByteArray): ByteArray {
-        val service   = MainHook.filterService ?: return imageBytes
+        val service = MainHook.filterService ?: run {
+            MainHook.getContext()?.let { MainHook.ensureServiceBound(it) }
+            CoverageTelemetry.report(
+                lane = CoverageTelemetry.LANE_OKHTTP,
+                stage = CoverageTelemetry.STAGE_SERVICE_UNAVAILABLE,
+                reason = "filter_service_not_bound"
+            )
+            return imageBytes
+        }
         val requestId = requestSeq.incrementAndGet()
+        val startedAt = System.currentTimeMillis()
 
         val latch     = CountDownLatch(1)
         var sensitive = false
         var score     = 0f
 
-        service.scanImageBytes(requestId, imageBytes, object : IFilterCallback.Stub() {
-            override fun onScanResult(id: Long, isSensitive: Boolean, confidence: Float) {
-                sensitive = isSensitive
-                score     = confidence
-                latch.countDown()
-            }
-        })
+        runCatching {
+            service.scanImageBytes(requestId, imageBytes, object : IFilterCallback.Stub() {
+                override fun onScanResult(id: Long, isSensitive: Boolean, confidence: Float) {
+                    sensitive = isSensitive
+                    score     = confidence
+                    CoverageTelemetry.report(
+                        lane = CoverageTelemetry.LANE_OKHTTP,
+                        stage = CoverageTelemetry.STAGE_SCAN_RESULT,
+                        sensitive = isSensitive,
+                        confidence = confidence,
+                        latencyMs = System.currentTimeMillis() - startedAt,
+                    )
+                    latch.countDown()
+                }
+            })
+        }.onFailure {
+            CoverageTelemetry.report(
+                lane = CoverageTelemetry.LANE_OKHTTP,
+                stage = CoverageTelemetry.STAGE_SCAN_ERROR,
+                latencyMs = System.currentTimeMillis() - startedAt,
+                reason = it.javaClass.simpleName
+            )
+            return imageBytes
+        }
 
-        latch.await(SCAN_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+        val completed = latch.await(SCAN_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+        if (!completed) {
+            CoverageTelemetry.report(
+                lane = CoverageTelemetry.LANE_OKHTTP,
+                stage = CoverageTelemetry.STAGE_SCAN_TIMEOUT,
+                latencyMs = System.currentTimeMillis() - startedAt,
+                reason = "latch_timeout"
+            )
+            return imageBytes
+        }
 
         return if (sensitive) {
             Log.d(TAG, "OkHttp: censoring image [$requestId] score=$score")

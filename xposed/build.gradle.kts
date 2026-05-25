@@ -13,6 +13,15 @@ android {
         targetSdk = 35
         versionCode = 1
         versionName = "1.0.0"
+
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+    }
+
+    buildTypes {
+        release {
+            isMinifyEnabled = false
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+        }
     }
 
     compileOptions {
@@ -30,7 +39,8 @@ android {
 }
 
 dependencies {
-    // LSPosed API (compile-only — provided at runtime by the framework)
+    // Xposed/LSPosed APIs (compile-only — provided at runtime by the framework)
+    compileOnly(libs.xposed.api)
     compileOnly(libs.lsposed.api)
     compileOnly(libs.lsposed.service)
 
@@ -40,6 +50,6 @@ dependencies {
     // Blur utility (same toolkit used by the app module)
     implementation(libs.renderscript.toolkit)
 
-    // AIDL stubs live in the :app module
-    compileOnly(project(":app"))
+    // AIDL stubs are needed but we can't depend on :app (an application)
+    // implementation(project(":app"))
 }

@@ -101,8 +101,17 @@ object CoilHook {
     // ------------------------------------------------------------------
 
     private fun scanAndReplaceSync(bitmap: Bitmap) {
-        val service   = MainHook.filterService ?: return
+        val service = MainHook.filterService ?: run {
+            MainHook.getContext()?.let { MainHook.ensureServiceBound(it) }
+            CoverageTelemetry.report(
+                lane = CoverageTelemetry.LANE_COIL,
+                stage = CoverageTelemetry.STAGE_SERVICE_UNAVAILABLE,
+                reason = "filter_service_not_bound"
+            )
+            return
+        }
         val requestId = requestSeq.incrementAndGet()
+        val startedAt = System.currentTimeMillis()
 
         val bytes = runCatching {
             ByteArrayOutputStream().use { baos ->
@@ -117,11 +126,26 @@ object CoilHook {
         service.scanImageBytes(requestId, bytes, object : IFilterCallback.Stub() {
             override fun onScanResult(id: Long, isSensitive: Boolean, confidence: Float) {
                 sensitive = isSensitive
+                CoverageTelemetry.report(
+                    lane = CoverageTelemetry.LANE_COIL,
+                    stage = CoverageTelemetry.STAGE_SCAN_RESULT,
+                    sensitive = isSensitive,
+                    confidence = confidence,
+                    latencyMs = System.currentTimeMillis() - startedAt,
+                )
                 latch.countDown()
             }
         })
 
-        latch.await(SCAN_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+        val completed = latch.await(SCAN_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+        if (!completed) {
+            CoverageTelemetry.report(
+                lane = CoverageTelemetry.LANE_COIL,
+                stage = CoverageTelemetry.STAGE_SCAN_TIMEOUT,
+                latencyMs = System.currentTimeMillis() - startedAt,
+                reason = "latch_timeout"
+            )
+        }
 
         if (sensitive) {
             Log.d(TAG, "Coil: replacing sensitive bitmap [$requestId]")

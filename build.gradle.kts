@@ -1,7 +1,13 @@
 // Top-level build file — configuration shared across sub-projects / modules.
 plugins {
-    alias(libs.plugins.android.application) apply false
-    alias(libs.plugins.android.library)     apply false
-    alias(libs.plugins.kotlin.android)      apply false
-    alias(libs.plugins.kotlin.kapt)         apply false
+    id("com.android.application") apply false
+    id("com.android.library")     apply false
+    id("org.jetbrains.kotlin.android") apply false
+    id("org.jetbrains.kotlin.kapt")    apply false
+}
+
+tasks.register("xposed") {
+    group = "build"
+    description = "Shortcut to build the xposed module"
+    dependsOn(":xposed:assemble")
 }

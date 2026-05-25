@@ -1,4 +1,4 @@
-package com.tpeapp.fcm
+package com.tpeapp.mqtt
 
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -63,7 +63,7 @@ import org.json.JSONObject
 import java.util.UUID
 
 /**
- * Handles FCM messages sent by the Accountability Partner to remotely
+ * Handles MQTT command payloads sent by the Accountability Partner to remotely
  * update filter settings.
  *
  * Expected message payload (data map):
@@ -80,10 +80,10 @@ import java.util.UUID
  * notification so the device owner is always aware of any configuration
  * change — fulfilling the transparency / consent requirement.
  */
-class PartnerFcmService : Service() {
+class PartnerMqttService : Service() {
 
     companion object {
-        private const val TAG          = "PartnerFcmService"
+        private const val TAG          = "PartnerMqttService"
         private const val CHANNEL_ID   = "tpe_partner_updates"
         private const val NOTIF_ID     = 2001
 

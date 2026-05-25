@@ -101,9 +101,15 @@ class OverlayActivity : AppCompatActivity() {
     private fun requestKeyguardDismiss() {
         val km = getSystemService(KeyguardManager::class.java)
         km.requestDismissKeyguard(this, object : KeyguardManager.KeyguardDismissCallback() {
-            override fun onDismissSucceeded() = Log.i(TAG, "Keyguard dismissed")
-            override fun onDismissCancelled() = Log.i(TAG, "Keyguard dismiss cancelled")
-            override fun onDismissError()     = Log.i(TAG, "Keyguard dismiss error")
+            override fun onDismissSucceeded() {
+                Log.i(TAG, "Keyguard dismissed")
+            }
+            override fun onDismissCancelled() {
+                Log.i(TAG, "Keyguard dismiss cancelled")
+            }
+            override fun onDismissError() {
+                Log.i(TAG, "Keyguard dismiss error")
+            }
         })
     }
 }

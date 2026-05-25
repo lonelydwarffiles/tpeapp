@@ -20,16 +20,8 @@ class TpeApp extends StatelessWidget {
     return MaterialApp(
       title: 'TPE',
       debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: const Color(0xFF6200EE),
-          brightness: Brightness.dark,
-        ),
-        useMaterial3: true,
-      ),
-      home: const _StartupGate(child: _RootRouter()),
       theme: _buildTheme(),
-      home: const _RootRouter(),
+      home: const _StartupGate(child: _RootRouter()),
     );
   }
 
