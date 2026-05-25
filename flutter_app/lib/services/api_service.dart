@@ -81,12 +81,14 @@ class ApiService {
     required String endpoint,
     required String pairingToken,
     required String mqttClientId,
+    String? mqttTopicPrefix,
   }) async {
     final deviceId = _deviceId;
     final body = jsonEncode({
       'mqtt_client_id': mqttClientId,
-      'fcm_token': mqttClientId,
       'pairing_token': pairingToken,
+      if (mqttTopicPrefix != null && mqttTopicPrefix.isNotEmpty)
+        'mqtt_topic_prefix': mqttTopicPrefix,
       if (deviceId != null) 'device_id': deviceId,
     });
     final response = await http

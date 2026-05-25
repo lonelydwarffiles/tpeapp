@@ -65,10 +65,20 @@ class HealthService {
       types: _types,
     );
 
-    final deduplicated = Health.removeDuplicates(dataPoints);
-    // removeDuplicates eliminates records with identical source, type, and
-    // time range that may be reported more than once by overlapping data
-    // sources (e.g. wearable + phone sensors).
+    final deduplicated = <HealthDataPoint>[];
+    final seen = <String>{};
+    for (final point in dataPoints) {
+      final key = [
+        point.type.name,
+        point.unit.name,
+        point.dateFrom.millisecondsSinceEpoch,
+        point.dateTo.millisecondsSinceEpoch,
+        point.sourceName,
+      ].join('|');
+      if (seen.add(key)) {
+        deduplicated.add(point);
+      }
+    }
 
     return deduplicated.map((point) {
       final typeKey = switch (point.type) {

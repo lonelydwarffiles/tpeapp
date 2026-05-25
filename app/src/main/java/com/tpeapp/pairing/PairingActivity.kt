@@ -295,7 +295,7 @@ class PairingActivity : AppCompatActivity() {
 
         val body = JSONObject().run {
             put("mqtt_client_id", deviceId)
-            put("fcm_token", deviceId)
+            if (mqttTopicPrefix.isNotBlank()) put("mqtt_topic_prefix", mqttTopicPrefix)
             put("pairing_token", pairingToken)
             put("device_id",     deviceId)
             toString()

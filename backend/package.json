@@ -1,7 +1,7 @@
 {
   "name": "tpe-partner-dashboard",
   "version": "1.0.0",
-  "description": "Accountability Partner control dashboard — sends filter settings to paired Android devices via FCM",
+  "description": "Accountability Partner control dashboard — sends filter settings to paired Android devices via MQTT",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
@@ -12,7 +12,7 @@
   "dependencies": {
     "express": "^4.19.2",
     "express-rate-limit": "^7.5.0",
-    "firebase-admin": "^12.2.0",
+    "mqtt": "^5.10.3",
     "multer": "^2.1.1"
   }
 }

@@ -112,7 +112,7 @@ class VitalsSyncService {
       _kVitalsTaskTag,
       _kVitalsTaskName,
       frequency: _kSyncInterval,
-      existingWorkPolicy: ExistingWorkPolicy.replace,
+      existingWorkPolicy: ExistingPeriodicWorkPolicy.replace,
       constraints: Constraints(
         networkType: NetworkType.connected,
       ),

@@ -19,6 +19,7 @@ mlkit-barcode       = "17.3.0"
 workmanager         = "2.9.0"
 paho-android-service = "1.1.1"
 paho-client          = "1.2.5"
+onnxruntime          = "1.17.1"
 
 [libraries]
 # AndroidX
@@ -44,6 +45,7 @@ okhttp                     = { group = "com.squareup.okhttp3",      name = "okht
 # MQTT (Paho)
 paho-android-service       = { group = "org.eclipse.paho", name = "org.eclipse.paho.android.service", version.ref = "paho-android-service" }
 paho-client                = { group = "org.eclipse.paho", name = "org.eclipse.paho.client.mqttv3", version.ref = "paho-client" }
+onnxruntime-android        = { group = "com.microsoft.onnxruntime", name = "onnxruntime-android", version.ref = "onnxruntime" }
 
 # LSPosed / Xposed
 lsposed-api                = { group = "io.github.libxposed", name = "api", version.ref = "lsposed-api" }

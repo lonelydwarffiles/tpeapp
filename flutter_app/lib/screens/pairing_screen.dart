@@ -71,6 +71,7 @@ class _PairingScreenState extends State<PairingScreen> {
         endpoint: endpoint,
         pairingToken: pairingToken,
         mqttClientId: deviceId,
+        mqttTopicPrefix: mqttTopicPrefix,
       );
 
       // Persist paired state and webhook configuration.

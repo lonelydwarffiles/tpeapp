@@ -208,7 +208,7 @@ class ScreenShareService {
       'type': 'ice-candidate',
       'candidate': candidate.candidate,
       'sdpMid': candidate.sdpMid,
-      'sdpMLineIndex': candidate.sdpMlineIndex,
+      'sdpMLineIndex': candidate.sdpMLineIndex,
     });
   }
 

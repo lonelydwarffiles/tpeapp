@@ -595,11 +595,6 @@ class _PasswordVaultScreenState extends State<PasswordVaultScreen> {
         title: const Text('Password Vault'),
         actions: [
           IconButton(
-            icon: const Icon(Icons.upload_file),
-            tooltip: 'Import credentials',
-            onPressed: _importEntries,
-          ),
-          IconButton(
             icon: const Icon(Icons.password),
             tooltip: 'Autofill settings',
             onPressed: _openAutofillSettings,
@@ -611,11 +606,6 @@ class _PasswordVaultScreenState extends State<PasswordVaultScreen> {
           ),
         ],
       ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: _addEntry,
-        tooltip: 'Add credential (Partner PIN required)',
-        child: const Icon(Icons.add),
-      ),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : _entries.isEmpty
@@ -624,7 +614,7 @@ class _PasswordVaultScreenState extends State<PasswordVaultScreen> {
                     padding: EdgeInsets.all(24),
                     child: Text(
                       'No credentials in the vault yet.\n'
-                      'Your partner can add them remotely, or tap + to add one now.',
+                      'Your partner can add them remotely through the website.',
                       textAlign: TextAlign.center,
                     ),
                   ),
@@ -639,8 +629,6 @@ class _PasswordVaultScreenState extends State<PasswordVaultScreen> {
                     countdown:         _countdowns[_entries[i].id],
                     onReveal:          () => _reveal(_entries[i]),
                     onHide:            () => _hide(_entries[i].id),
-                    onEdit:            () => _editEntry(_entries[i]),
-                    onDelete:          () => _deleteEntry(_entries[i]),
                   ),
                 ),
     );
@@ -656,8 +644,6 @@ class _EntryTile extends StatelessWidget {
     required this.entry,
     required this.onReveal,
     required this.onHide,
-    required this.onEdit,
-    required this.onDelete,
     this.revealedPassword,
     this.countdown,
   });
@@ -667,8 +653,6 @@ class _EntryTile extends StatelessWidget {
   final int? countdown;
   final VoidCallback onReveal;
   final VoidCallback onHide;
-  final VoidCallback onEdit;
-  final VoidCallback onDelete;
 
   String _formatDuration(Duration d) {
     final h = d.inHours;
@@ -756,17 +740,6 @@ class _EntryTile extends StatelessWidget {
               tooltip: revealed ? 'Hide' : 'Reveal password',
               onPressed: revealed ? onHide : onReveal,
             ),
-          PopupMenuButton<String>(
-            onSelected: (v) {
-              if (v == 'edit') onEdit();
-              if (v == 'delete') onDelete();
-            },
-            itemBuilder: (_) => const [
-              PopupMenuItem(value: 'edit',   child: Text('Edit')),
-              PopupMenuItem(value: 'delete', child: Text('Delete',
-                  style: TextStyle(color: Colors.red))),
-            ],
-          ),
         ],
       ),
     );

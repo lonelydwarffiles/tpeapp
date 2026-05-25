@@ -2,6 +2,7 @@ plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.kapt)
+    id("dev.flutter.flutter-gradle-plugin")
 }
 
 android {
@@ -47,10 +48,18 @@ android {
     }
 
     packaging {
+        jniLibs {
+            // Keep native libs uncompressed/aligned in the APK for modern page-size compatibility.
+            useLegacyPackaging = false
+        }
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
         }
     }
+}
+
+flutter {
+    source = "../flutter_app"
 }
 
 dependencies {
@@ -80,6 +89,7 @@ dependencies {
     // MQTT (persistent command channel)
     implementation(libs.paho.android.service)
     implementation(libs.paho.client)
+    implementation(libs.onnxruntime.android)
 
     // Blur utility
     implementation(libs.renderscript.toolkit)

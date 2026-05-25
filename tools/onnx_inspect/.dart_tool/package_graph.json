@@ -1,0 +1,28 @@
+{
+  "roots": [
+    "onnx_inspect"
+  ],
+  "packages": [
+    {
+      "name": "onnx_inspect",
+      "version": "0.0.0",
+      "dependencies": [
+        "dart_onnx"
+      ],
+      "devDependencies": []
+    },
+    {
+      "name": "dart_onnx",
+      "version": "0.1.0",
+      "dependencies": [
+        "ffi"
+      ]
+    },
+    {
+      "name": "ffi",
+      "version": "2.2.0",
+      "dependencies": []
+    }
+  ],
+  "configVersion": 1
+}

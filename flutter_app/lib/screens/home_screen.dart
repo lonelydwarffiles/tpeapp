@@ -4,17 +4,12 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../channels/mqtt_channel.dart';
-import '../channels/partner_pin_channel.dart';
 import '../services/chat_repository.dart';
 import '../models/chat_message.dart';
 import 'check_in_screen.dart';
 import 'task_list_screen.dart';
-import 'assign_task_screen.dart';
-import 'questions_screen.dart';
-import 'settings_screen.dart';
 import 'screen_share_screen.dart';
 import 'password_vault_screen.dart';
-import 'relationship_center_screen.dart';
 
 /// Main screen — the "Handler" AI chat interface.
 ///
@@ -94,44 +89,6 @@ class _HomeScreenState extends State<HomeScreen> {
     });
   }
 
-  Future<void> _requirePin(VoidCallback onSuccess) async {
-    final pin = await _showPinDialog();
-    if (pin == null) return;
-    final ok = await PartnerPinChannel.verifyPin(pin);
-    if (ok) {
-      onSuccess();
-    } else {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Incorrect PIN.')),
-        );
-      }
-    }
-  }
-
-  Future<String?> _showPinDialog() async {
-    final controller = TextEditingController();
-    return showDialog<String>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Partner PIN Required'),
-        content: TextField(
-          controller: controller,
-          obscureText: true,
-          keyboardType: TextInputType.number,
-          decoration: const InputDecoration(hintText: 'Enter partner PIN'),
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, controller.text),
-            child: const Text('OK'),
-          ),
-        ],
-      ),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     final history = context.watch<ChatRepository>().history;
@@ -151,18 +108,6 @@ class _HomeScreenState extends State<HomeScreen> {
                   Navigator.push(context,
                       MaterialPageRoute(builder: (_) => const TaskListScreen()));
                   return;
-                case 'assign':
-                  _requirePin(() => Navigator.push(context,
-                      MaterialPageRoute(builder: (_) => const AssignTaskScreen())));
-                  return;
-                case 'questions':
-                  _requirePin(() => Navigator.push(context,
-                      MaterialPageRoute(builder: (_) => const QuestionsScreen())));
-                  return;
-                case 'settings':
-                  _requirePin(() => Navigator.push(context,
-                      MaterialPageRoute(builder: (_) => const SettingsScreen())));
-                  return;
                 case 'screen_share':
                   Navigator.push(context,
                       MaterialPageRoute(builder: (_) => const ScreenShareScreen()));
@@ -171,21 +116,13 @@ class _HomeScreenState extends State<HomeScreen> {
                   Navigator.push(context,
                       MaterialPageRoute(builder: (_) => const PasswordVaultScreen()));
                   return;
-                case 'relationships':
-                  _requirePin(() => Navigator.push(context,
-                      MaterialPageRoute(builder: (_) => const RelationshipCenterScreen())));
-                  return;
               }
             },
             itemBuilder: (_) => const [
               PopupMenuItem(value: 'checkin',   child: Text('Daily Check-In')),
               PopupMenuItem(value: 'tasks',     child: Text('My Tasks')),
-              PopupMenuItem(value: 'assign',    child: Text('Assign Task (Partner)')),
-              PopupMenuItem(value: 'questions', child: Text('Questions (Partner)')),
-              PopupMenuItem(value: 'settings',  child: Text('Settings (Partner)')),
               PopupMenuItem(value: 'screen_share', child: Text('Screen Share')),
               PopupMenuItem(value: 'vault',     child: Text('Password Vault')),
-              PopupMenuItem(value: 'relationships', child: Text('Relationship Center (Partner)')),
             ],
           ),
         ],

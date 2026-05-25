@@ -48,22 +48,23 @@ dependencies:
   intl: ^0.19.0
 
   # Health Connect — reads HeartRate and Steps biometric data
-  health: ^10.2.0
+  health: ^13.3.1
 
   # WorkManager — schedules periodic background vitals-sync tasks
-  workmanager: ^0.5.2
+  workmanager: ^0.9.0+3
 
   # Audio recording — used by WebSocketService for the Live Hot Mic feature
-  record: ^5.1.2
+  record: ^6.2.1
 
   # WebRTC — Flutter-side screen sharing and remote control via DataChannel
-  flutter_webrtc: ^0.9.47
+  flutter_webrtc: ^1.4.1
 
   # Text-to-Speech synthesis
   flutter_tts: ^4.2.5
 
   # Audio session / hardware output-route detection (Bluetooth / wired headset)
   audio_session: ^0.2.3
+  permission_handler: ^12.0.1
 
 dev_dependencies:
   flutter_test:

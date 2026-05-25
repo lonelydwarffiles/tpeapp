@@ -1,0 +1,28 @@
+{
+  "configVersion": 2,
+  "packages": [
+    {
+      "name": "dart_onnx",
+      "rootUri": "file:///C:/Users/techd/AppData/Local/Pub/Cache/hosted/pub.dev/dart_onnx-0.1.0",
+      "packageUri": "lib/",
+      "languageVersion": "3.8"
+    },
+    {
+      "name": "ffi",
+      "rootUri": "file:///C:/Users/techd/AppData/Local/Pub/Cache/hosted/pub.dev/ffi-2.2.0",
+      "packageUri": "lib/",
+      "languageVersion": "3.7"
+    },
+    {
+      "name": "onnx_inspect",
+      "rootUri": "../",
+      "packageUri": "lib/",
+      "languageVersion": "3.3"
+    }
+  ],
+  "generator": "pub",
+  "generatorVersion": "3.12.0",
+  "flutterRoot": "file:///C:/Users/techd/flutter",
+  "flutterVersion": "3.44.0",
+  "pubCache": "file:///C:/Users/techd/AppData/Local/Pub/Cache"
+}

@@ -7,45 +7,54 @@
  *
  *   POST /api/pair
  *     Called by the Android app after it scans the partner QR code.
- *     Registers the device's FCM token so the dashboard can push settings.
+ *     Registers the device's MQTT client identity for command routing.
  *
  *   POST /api/settings/update
  *     Called by the Accountability Partner to push new filter settings to all
- *     paired devices via Firebase Cloud Messaging (FCM) data messages.
+ *     paired devices via MQTT JSON payloads.
  *
  * Setup:
- *   1. Place your Firebase service-account JSON at ./serviceAccountKey.json
- *      OR set the GOOGLE_APPLICATION_CREDENTIALS environment variable to its
- *      absolute path.
- *   2. Set the PAIRING_TOKEN environment variable to a long random secret
+ *   1. Set the PAIRING_TOKEN environment variable to a long random secret
  *      (e.g. `openssl rand -hex 32`).  This token is encoded in the QR code
  *      you show to the device being paired.
- *   3. Run:  npm install && npm start
+ *   2. Configure MQTT_BROKER_URL (or host/port vars below).
+ *   3. Run: npm install && npm start
  */
 
 const express     = require('express');
-const admin       = require('firebase-admin');
 const multer      = require('multer');
 const rateLimit   = require('express-rate-limit');
+const mqtt        = require('mqtt');
 const path        = require('path');
 const fs          = require('fs');
 
 // -------------------------------------------------------------------
-// Firebase Admin SDK initialisation
-// Uses Application Default Credentials when GOOGLE_APPLICATION_CREDENTIALS
-// is set; falls back to an explicit service-account file if present.
+// MQTT transport configuration
 // -------------------------------------------------------------------
-const serviceAccountPath = path.join(__dirname, 'serviceAccountKey.json');
-let credential;
-try {
-  // Explicit service-account file takes priority (easier local dev).
-  credential = admin.credential.cert(require(serviceAccountPath));
-} catch (_) {
-  // Fall back to ADC (Cloud Run, GitHub Actions, etc.)
-  credential = admin.credential.applicationDefault();
-}
+const MQTT_BROKER_URL = process.env.MQTT_BROKER_URL ||
+  `${process.env.MQTT_PROTOCOL || 'mqtt'}://${process.env.MQTT_BROKER_HOST || 'mqtt.mochii.live'}:${process.env.MQTT_BROKER_PORT || '1883'}`;
+const MQTT_USERNAME = process.env.MQTT_USERNAME || undefined;
+const MQTT_PASSWORD = process.env.MQTT_PASSWORD || undefined;
+const MQTT_TOPIC_PREFIX_DEFAULT = process.env.MQTT_TOPIC_PREFIX || 'tpeapp/device';
 
-admin.initializeApp({ credential });
+const mqttClient = mqtt.connect(MQTT_BROKER_URL, {
+  username: MQTT_USERNAME,
+  password: MQTT_PASSWORD,
+  reconnectPeriod: 5_000,
+  connectTimeout: 10_000,
+});
+
+mqttClient.on('connect', () => {
+  console.log(`[mqtt] Connected: ${MQTT_BROKER_URL}`);
+});
+
+mqttClient.on('reconnect', () => {
+  console.log('[mqtt] Reconnecting...');
+});
+
+mqttClient.on('error', (err) => {
+  console.error('[mqtt] Client error:', err?.message ?? err);
+});
 
 // -------------------------------------------------------------------
 // In-memory device registry
@@ -53,10 +62,65 @@ admin.initializeApp({ credential });
 // -------------------------------------------------------------------
 
 /**
- * @typedef {{ fcmToken: string, pairedAt: string }} DeviceRecord
+ * @typedef {{ mqttClientId: string, topicPrefix: string, pairedAt: string }} DeviceRecord
  * @type {DeviceRecord[]}
  */
 const pairedDevices = [];
+
+/**
+ * Ensures command payload values are strings to match the Android command map.
+ */
+function toStringMap(payload) {
+  return Object.fromEntries(
+    Object.entries(payload)
+      .filter(([, value]) => value !== undefined && value !== null)
+      .map(([key, value]) => {
+        if (typeof value === 'string') return [key, value];
+        if (Array.isArray(value) || (typeof value === 'object' && value !== null)) {
+          return [key, JSON.stringify(value)];
+        }
+        return [key, String(value)];
+      })
+  );
+}
+
+function publishCommand(device, payload) {
+  const topicPrefix = (device.topicPrefix || MQTT_TOPIC_PREFIX_DEFAULT).replace(/\/+$/, '');
+  const topic = `${topicPrefix}/${device.mqttClientId}/commands`;
+  const message = JSON.stringify(toStringMap(payload));
+
+  return new Promise((resolve, reject) => {
+    if (!mqttClient.connected) {
+      reject(new Error('MQTT broker is not connected'));
+      return;
+    }
+    mqttClient.publish(topic, message, { qos: 1, retain: false }, (err) => {
+      if (err) return reject(err);
+      return resolve(topic);
+    });
+  });
+}
+
+async function dispatchToPairedDevices(payload, logPrefix) {
+  const results = await Promise.allSettled(
+    pairedDevices.map(device => publishCommand(device, payload))
+  );
+
+  const sent = results.filter(r => r.status === 'fulfilled').length;
+  const failed = results.length - sent;
+
+  results.forEach((result, idx) => {
+    if (result.status === 'rejected') {
+      console.error(
+        `[${logPrefix}] MQTT publish failed for device ${idx}:`,
+        result.reason?.message ?? result.reason
+      );
+    }
+  });
+
+  console.log(`[${logPrefix}] Dispatched over MQTT — sent: ${sent}, failed: ${failed}`);
+  return { sent, failed };
+}
 
 // -------------------------------------------------------------------
 // Pre-shared pairing tokens
@@ -118,7 +182,7 @@ app.use(express.json());
 //
 // Body (JSON):
 //   {
-//     "fcm_token":     "<Firebase registration token from the Android device>",
+//     "mqtt_client_id": "<stable MQTT client id from Android device>",
 //     "pairing_token": "<secret shared via QR code>"
 //   }
 //
@@ -127,26 +191,30 @@ app.use(express.json());
 // Response 403: invalid pairing_token
 // -------------------------------------------------------------------
 app.post('/api/pair', (req, res) => {
-  const { fcm_token, pairing_token } = req.body ?? {};
+  const { mqtt_client_id, pairing_token, mqtt_topic_prefix } = req.body ?? {};
+  const clientId = typeof mqtt_client_id === 'string' ? mqtt_client_id.trim() : '';
 
-  if (!fcm_token || typeof fcm_token !== 'string' || fcm_token.trim() === '') {
-    return res.status(400).json({ error: 'Missing or invalid fcm_token' });
+  if (!clientId) {
+    return res.status(400).json({ error: 'Missing or invalid mqtt_client_id' });
   }
 
   if (!VALID_PAIRING_TOKENS.has(pairing_token)) {
     return res.status(403).json({ error: 'Invalid pairing_token' });
   }
 
-  const token = fcm_token.trim();
-  const existing = pairedDevices.findIndex(d => d.fcmToken === token);
+  const topicPrefix = typeof mqtt_topic_prefix === 'string' && mqtt_topic_prefix.trim() !== ''
+    ? mqtt_topic_prefix.trim()
+    : MQTT_TOPIC_PREFIX_DEFAULT;
+  const existing = pairedDevices.findIndex(d => d.mqttClientId === clientId);
 
   if (existing === -1) {
-    pairedDevices.push({ fcmToken: token, pairedAt: new Date().toISOString() });
+    pairedDevices.push({ mqttClientId: clientId, topicPrefix, pairedAt: new Date().toISOString() });
     console.log(`[pair] New device registered. Total paired: ${pairedDevices.length}`);
   } else {
-    // Token refresh — update the timestamp.
+    // Device refresh — update routing metadata and timestamp.
+    pairedDevices[existing].topicPrefix = topicPrefix;
     pairedDevices[existing].pairedAt = new Date().toISOString();
-    console.log('[pair] Known device re-paired (token refresh).');
+    console.log('[pair] Known device re-paired (MQTT identity refresh).');
   }
 
   return res.status(200).json({ status: 'paired' });
@@ -224,7 +292,7 @@ app.post(
 // POST /api/settings/update
 //
 // Called by the Accountability Partner to push updated filter settings
-// to all registered devices via FCM data messages.
+// to all registered devices via MQTT command topic.
 //
 // Body (JSON) — all fields optional:
 //   {
@@ -243,7 +311,6 @@ app.post('/api/settings/update', async (req, res) => {
 
   const { blocked_classes, threshold, strict } = req.body ?? {};
 
-  // FCM data messages only support string values.
   const dataPayload = { action: 'UPDATE_SETTINGS' };
 
   if (Array.isArray(blocked_classes) && blocked_classes.length > 0) {
@@ -259,33 +326,14 @@ app.post('/api/settings/update', async (req, res) => {
     dataPayload.strict = String(strict);
   }
 
-  // Dispatch to every paired device; collect outcomes.
-  const results = await Promise.allSettled(
-    pairedDevices.map(device =>
-      admin.messaging().send({ token: device.fcmToken, data: dataPayload })
-    )
-  );
-
-  const sent   = results.filter(r => r.status === 'fulfilled').length;
-  const failed = results.length - sent;
-
-  results.forEach((result, idx) => {
-    if (result.status === 'rejected') {
-      console.error(
-        `[settings/update] FCM delivery failed for device ${idx}:`,
-        result.reason?.message ?? result.reason
-      );
-    }
-  });
-
-  console.log(`[settings/update] Dispatched — sent: ${sent}, failed: ${failed}`);
+  const { sent, failed } = await dispatchToPairedDevices(dataPayload, 'settings/update');
   return res.status(200).json({ sent, failed });
 });
 
 // -------------------------------------------------------------------
 // POST /api/command/open-url
 //
-// Sends an OPEN_URL FCM command to all paired devices.
+// Sends an OPEN_URL MQTT command to all paired devices.
 //
 // Body (JSON):
 //   { "url": "https://..." }
@@ -310,33 +358,14 @@ app.post('/api/command/open-url', async (req, res) => {
   }
 
   const dataPayload = { action: 'OPEN_URL', url };
-
-  const results = await Promise.allSettled(
-    pairedDevices.map(device =>
-      admin.messaging().send({ token: device.fcmToken, data: dataPayload })
-    )
-  );
-
-  const sent   = results.filter(r => r.status === 'fulfilled').length;
-  const failed = results.length - sent;
-
-  results.forEach((result, idx) => {
-    if (result.status === 'rejected') {
-      console.error(
-        `[command/open-url] FCM delivery failed for device ${idx}:`,
-        result.reason?.message ?? result.reason
-      );
-    }
-  });
-
-  console.log(`[command/open-url] Dispatched — sent: ${sent}, failed: ${failed}`);
+  const { sent, failed } = await dispatchToPairedDevices(dataPayload, 'command/open-url');
   return res.status(200).json({ sent, failed });
 });
 
 // -------------------------------------------------------------------
 // POST /api/command/set-wallpaper
 //
-// Sends a SET_WALLPAPER FCM command to all paired devices.
+// Sends a SET_WALLPAPER MQTT command to all paired devices.
 //
 // Body (JSON):
 //   {
@@ -359,7 +388,7 @@ app.post('/api/command/set-wallpaper', async (req, res) => {
   // effectiveHomeUrl falls back to the legacy `url` so a single-URL request sets
   // the home screen.  effectiveLockUrl does NOT fall back: when lock_url is absent
   // the app-side logic (DeviceCommandManager) applies homeUrl to both surfaces,
-  // so there is no need to duplicate it in the FCM payload.
+  // so there is no need to duplicate it in the command payload.
   const effectiveHomeUrl = home_url || url || null;
   const effectiveLockUrl = lock_url || null;
 
@@ -380,39 +409,21 @@ app.post('/api/command/set-wallpaper', async (req, res) => {
     return res.status(404).json({ error: 'No paired devices registered' });
   }
 
-  // Build FCM data payload (all values must be strings).
+  // Build command payload.
   const dataPayload = { action: 'SET_WALLPAPER', target: resolvedTarget };
   if (effectiveHomeUrl) dataPayload.home_url = effectiveHomeUrl;
   if (effectiveLockUrl) dataPayload.lock_url = effectiveLockUrl;
   // Preserve legacy `url` field so older app builds continue to work.
   if (url) dataPayload.url = url;
 
-  const results = await Promise.allSettled(
-    pairedDevices.map(device =>
-      admin.messaging().send({ token: device.fcmToken, data: dataPayload })
-    )
-  );
-
-  const sent   = results.filter(r => r.status === 'fulfilled').length;
-  const failed = results.length - sent;
-
-  results.forEach((result, idx) => {
-    if (result.status === 'rejected') {
-      console.error(
-        `[command/set-wallpaper] FCM delivery failed for device ${idx}:`,
-        result.reason?.message ?? result.reason
-      );
-    }
-  });
-
-  console.log(`[command/set-wallpaper] Dispatched — sent: ${sent}, failed: ${failed}`);
+  const { sent, failed } = await dispatchToPairedDevices(dataPayload, 'command/set-wallpaper');
   return res.status(200).json({ sent, failed });
 });
 
 // -------------------------------------------------------------------
 // POST /api/command/play-audio
 //
-// Sends a PLAY_AUDIO FCM command to all paired devices.
+// Sends a PLAY_AUDIO MQTT command to all paired devices.
 //
 // Body (JSON):
 //   {
@@ -438,35 +449,15 @@ app.post('/api/command/play-audio', async (req, res) => {
     return res.status(404).json({ error: 'No paired devices registered' });
   }
 
-  // FCM data values must all be strings.
   const dataPayload = { action: 'PLAY_AUDIO', url, loop: String(Boolean(loop)) };
-
-  const results = await Promise.allSettled(
-    pairedDevices.map(device =>
-      admin.messaging().send({ token: device.fcmToken, data: dataPayload })
-    )
-  );
-
-  const sent   = results.filter(r => r.status === 'fulfilled').length;
-  const failed = results.length - sent;
-
-  results.forEach((result, idx) => {
-    if (result.status === 'rejected') {
-      console.error(
-        `[command/play-audio] FCM delivery failed for device ${idx}:`,
-        result.reason?.message ?? result.reason
-      );
-    }
-  });
-
-  console.log(`[command/play-audio] Dispatched — sent: ${sent}, failed: ${failed}`);
+  const { sent, failed } = await dispatchToPairedDevices(dataPayload, 'command/play-audio');
   return res.status(200).json({ sent, failed });
 });
 
 // -------------------------------------------------------------------
 // POST /api/command/stop-audio
 //
-// Sends a STOP_AUDIO FCM command to all paired devices, stopping any
+// Sends a STOP_AUDIO MQTT command to all paired devices, stopping any
 // audio clip currently playing via play-audio (including looping clips).
 //
 // Response 200: { "sent": <n>, "failed": <n> }
@@ -478,26 +469,7 @@ app.post('/api/command/stop-audio', async (req, res) => {
   }
 
   const dataPayload = { action: 'STOP_AUDIO' };
-
-  const results = await Promise.allSettled(
-    pairedDevices.map(device =>
-      admin.messaging().send({ token: device.fcmToken, data: dataPayload })
-    )
-  );
-
-  const sent   = results.filter(r => r.status === 'fulfilled').length;
-  const failed = results.length - sent;
-
-  results.forEach((result, idx) => {
-    if (result.status === 'rejected') {
-      console.error(
-        `[command/stop-audio] FCM delivery failed for device ${idx}:`,
-        result.reason?.message ?? result.reason
-      );
-    }
-  });
-
-  console.log(`[command/stop-audio] Dispatched — sent: ${sent}, failed: ${failed}`);
+  const { sent, failed } = await dispatchToPairedDevices(dataPayload, 'command/stop-audio');
   return res.status(200).json({ sent, failed });
 });
 
