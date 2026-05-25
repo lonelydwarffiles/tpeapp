@@ -1,0 +1,35 @@
+# OS and editor files
+.DS_Store
+Thumbs.db
+.idea/
+*.iml
+
+# Logs
+*.log
+
+# Android/Gradle outputs
+.gradle/
+local.properties
+captures/
+.cxx/
+**/build/
+
+# Flutter/Dart outputs
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.pub/
+.pub-cache/
+.packages
+coverage/
+
+# Node.js backend
+backend/node_modules/
+backend/.env
+backend/serviceAccountKey.json
+
+# Python backend
+backend/fastapi/__pycache__/
+backend/fastapi/.venv/
+backend/fastapi/venv/
+*.py[cod]
