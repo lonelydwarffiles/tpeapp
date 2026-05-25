@@ -234,7 +234,6 @@
             android:name=".service.FilterService"
             android:exported="true"
             android:foregroundServiceType="dataSync"
-            android:permission="com.tpeapp.permission.BIND_FILTER"
             android:stopWithTask="false">
             <intent-filter>
                 <action android:name="com.tpeapp.BIND_FILTER_SERVICE" />
@@ -553,12 +552,5 @@
             android:exported="false" />
 
     </application>
-
-    <!-- Custom permission so only our app (or explicitly granted callers)
-         can bind to FilterService. -->
-    <permission
-        android:name="com.tpeapp.permission.BIND_FILTER"
-        android:protectionLevel="signature" />
-    <uses-permission android:name="com.tpeapp.permission.BIND_FILTER" />
 
 </manifest>

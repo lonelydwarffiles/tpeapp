@@ -66,11 +66,18 @@ class MainHook : IXposedHookLoadPackage {
                 serviceContext = context.applicationContext
                 val intent = Intent("com.tpeapp.BIND_FILTER_SERVICE")
                     .setPackage("com.tpeapp")
-                context.applicationContext.bindService(
-                    intent,
-                    connection,
-                    Context.BIND_AUTO_CREATE
-                )
+                try {
+                    val bound = context.applicationContext.bindService(
+                        intent,
+                        connection,
+                        Context.BIND_AUTO_CREATE
+                    )
+                    if (!bound) {
+                        Log.e(TAG, "bindService returned false for package=${context.packageName}")
+                    }
+                } catch (t: Throwable) {
+                    Log.e(TAG, "bindService failed for package=${context.packageName}", t)
+                }
             }
         }
 
