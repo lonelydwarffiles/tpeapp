@@ -49,7 +49,13 @@ class WebSocketService {
   /// Closes any pre-existing connection first.
   Future<void> connect() async {
     await disconnect();
-    final url = '$_wsBaseUrl/ws';
+    final token = (_prefs.getString('webhook_bearer_token') ?? '').trim();
+    final deviceId = (_prefs.getString('device_id') ?? '').trim();
+    final query = <String>[];
+    if (token.isNotEmpty) query.add('secret=${Uri.encodeQueryComponent(token)}');
+    if (deviceId.isNotEmpty) query.add('device_id=${Uri.encodeQueryComponent(deviceId)}');
+    final suffix = query.isEmpty ? '' : '?${query.join('&')}';
+    final url = '$_wsBaseUrl/ws$suffix';
     _socket = await WebSocket.connect(url);
     _socketSub = _socket!.listen(
       _onMessage,

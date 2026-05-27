@@ -48,7 +48,8 @@ class _AppDrawer extends StatelessWidget {
                   CircleAvatar(
                     radius: 26,
                     backgroundColor: cs.primary,
-                    child: Icon(Icons.smart_toy_outlined, color: cs.onPrimary, size: 28),
+                    child: Icon(Icons.smart_toy_outlined,
+                        color: cs.onPrimary, size: 28),
                   ),
                   const SizedBox(height: 10),
                   Text(
@@ -103,7 +104,8 @@ class _AppDrawer extends StatelessWidget {
                   icon: Icons.favorite_rounded,
                   label: 'Relationship Center',
                   locked: true,
-                  onTap: () => _openWithPin(context, const RelationshipCenterScreen()),
+                  onTap: () =>
+                      _openWithPin(context, const RelationshipCenterScreen()),
                 ),
                 _DrawerItem(
                   icon: Icons.settings_rounded,
@@ -204,7 +206,8 @@ class _EmptyChat extends StatelessWidget {
                 color: cs.primaryContainer,
                 shape: BoxShape.circle,
               ),
-              child: Icon(Icons.smart_toy_outlined, size: 40, color: cs.onPrimaryContainer),
+              child: Icon(Icons.smart_toy_outlined,
+                  size: 40, color: cs.onPrimaryContainer),
             ),
             const SizedBox(height: 20),
             Text(
@@ -265,8 +268,8 @@ class _HomeScreenState extends State<HomeScreen> {
     switch (data['action']) {
       case 'REQUEST_CHECKIN':
         if (mounted) {
-          Navigator.push(
-              context, MaterialPageRoute(builder: (_) => const CheckInScreen()));
+          Navigator.push(context,
+              MaterialPageRoute(builder: (_) => const CheckInScreen()));
         }
         return;
       default:
@@ -311,8 +314,7 @@ class _HomeScreenState extends State<HomeScreen> {
   void _navigate(Widget screen) =>
       Navigator.push(context, MaterialPageRoute(builder: (_) => screen));
 
-  void _navigateWithPin(Widget screen) =>
-      _requirePin(() => _navigate(screen));
+  void _navigateWithPin(Widget screen) => _requirePin(() => _navigate(screen));
 
   void _requirePin(VoidCallback onAuthorized) {
     // TODO: Implement actual PIN check. For now, just execute the callback.
@@ -323,6 +325,7 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget build(BuildContext context) {
     final history = context.watch<ChatRepository>().history;
     final cs = Theme.of(context).colorScheme;
+    final bg = Theme.of(context).scaffoldBackgroundColor;
 
     return Scaffold(
       appBar: AppBar(
@@ -336,71 +339,144 @@ class _HomeScreenState extends State<HomeScreen> {
                       MaterialPageRoute(builder: (_) => const CheckInScreen()));
                   return;
                 case 'tasks':
-                  Navigator.push(context,
-                      MaterialPageRoute(builder: (_) => const TaskListScreen()));
+                  Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                          builder: (_) => const TaskListScreen()));
                   return;
                 case 'assign':
-                  _requirePin(() => Navigator.push(context,
-                      MaterialPageRoute(builder: (_) => const AssignTaskScreen())));
+                  _requirePin(() => Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                          builder: (_) => const AssignTaskScreen())));
                   return;
                 case 'questions':
-                  _requirePin(() => Navigator.push(context,
-                      MaterialPageRoute(builder: (_) => const QuestionsScreen())));
+                  _requirePin(() => Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                          builder: (_) => const QuestionsScreen())));
                   return;
                 case 'settings':
-                  _requirePin(() => Navigator.push(context,
-                      MaterialPageRoute(builder: (_) => const SettingsScreen())));
+                  _requirePin(() => Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                          builder: (_) => const SettingsScreen())));
                   return;
                 case 'screen_share':
-                  Navigator.push(context,
-                      MaterialPageRoute(builder: (_) => const ScreenShareScreen()));
+                  Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                          builder: (_) => const ScreenShareScreen()));
                   return;
                 case 'vault':
-                  Navigator.push(context,
-                      MaterialPageRoute(builder: (_) => const PasswordVaultScreen()));
+                  Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                          builder: (_) => const PasswordVaultScreen()));
                   return;
                 case 'relationships':
-                  _requirePin(() => Navigator.push(context,
-                      MaterialPageRoute(builder: (_) => const RelationshipCenterScreen())));
+                  _requirePin(() => Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                          builder: (_) => const RelationshipCenterScreen())));
                   return;
               }
             },
             itemBuilder: (_) => const [
-              PopupMenuItem(value: 'checkin',   child: Text('Daily Check-In')),
-              PopupMenuItem(value: 'tasks',     child: Text('My Tasks')),
-              PopupMenuItem(value: 'assign',    child: Text('Assign Task (Partner)')),
-              PopupMenuItem(value: 'questions', child: Text('Questions (Partner)')),
-              PopupMenuItem(value: 'settings',  child: Text('Settings (Partner)')),
+              PopupMenuItem(value: 'checkin', child: Text('Daily Check-In')),
+              PopupMenuItem(value: 'tasks', child: Text('My Tasks')),
+              PopupMenuItem(
+                  value: 'assign', child: Text('Assign Task (Partner)')),
+              PopupMenuItem(
+                  value: 'questions', child: Text('Questions (Partner)')),
+              PopupMenuItem(
+                  value: 'settings', child: Text('Settings (Partner)')),
               PopupMenuItem(value: 'screen_share', child: Text('Screen Share')),
-              PopupMenuItem(value: 'vault',     child: Text('Password Vault')),
-              PopupMenuItem(value: 'relationships', child: Text('Relationship Center (Partner)')),
+              PopupMenuItem(value: 'vault', child: Text('Password Vault')),
+              PopupMenuItem(
+                  value: 'relationships',
+                  child: Text('Relationship Center (Partner)')),
             ],
           ),
         ],
       ),
-      body: Column(
+      body: Stack(
         children: [
-          Expanded(
-            child: history.isEmpty
-                ? _EmptyChat(cs: cs)
-                : ListView.builder(
-                    controller: _scrollController,
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                    itemCount: history.length,
-                    itemBuilder: (_, i) => _MessageBubble(message: history[i]),
-                  ),
-          ),
-          if (_sending)
-            LinearProgressIndicator(
-              backgroundColor: cs.surfaceContainerHighest,
-              color: cs.primary,
+          Positioned.fill(
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                color: bg,
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [
+                    cs.surface.withOpacity(0.92),
+                    bg,
+                  ],
+                ),
+              ),
             ),
-          _InputRow(
-            controller: _textController,
-            onSend: _send,
-            enabled: !_sending,
+          ),
+          Positioned(
+            top: -60,
+            right: -40,
+            child: _GlowOrb(color: cs.primary.withOpacity(0.22), size: 220),
+          ),
+          Positioned(
+            bottom: 90,
+            left: -50,
+            child: _GlowOrb(color: cs.tertiary.withOpacity(0.12), size: 180),
+          ),
+          Column(
+            children: [
+              Expanded(
+                child: history.isEmpty
+                    ? _EmptyChat(cs: cs)
+                    : ListView.builder(
+                        controller: _scrollController,
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 12, vertical: 8),
+                        itemCount: history.length,
+                        itemBuilder: (_, i) =>
+                            _MessageBubble(message: history[i]),
+                      ),
+              ),
+              if (_sending)
+                LinearProgressIndicator(
+                  backgroundColor: cs.surfaceContainerHighest,
+                  color: cs.primary,
+                ),
+              _InputRow(
+                controller: _textController,
+                onSend: _send,
+                enabled: !_sending,
+              ),
+            ],
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _GlowOrb extends StatelessWidget {
+  const _GlowOrb({required this.color, required this.size});
+
+  final Color color;
+  final double size;
+
+  @override
+  Widget build(BuildContext context) {
+    return IgnorePointer(
+      child: Container(
+        width: size,
+        height: size,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          gradient: RadialGradient(
+            colors: [color, color.withOpacity(0)],
+          ),
+        ),
       ),
     );
   }
@@ -428,7 +504,8 @@ class _MessageBubble extends StatelessWidget {
             CircleAvatar(
               radius: 14,
               backgroundColor: cs.primaryContainer,
-              child: Icon(Icons.smart_toy_outlined, size: 14, color: cs.onPrimaryContainer),
+              child: Icon(Icons.smart_toy_outlined,
+                  size: 14, color: cs.onPrimaryContainer),
             ),
             const SizedBox(width: 6),
           ],
@@ -439,13 +516,27 @@ class _MessageBubble extends StatelessWidget {
               ),
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
               decoration: BoxDecoration(
-                color: isUser ? cs.primary : cs.surfaceContainerHighest,
+                color: isUser
+                    ? cs.primary.withOpacity(0.92)
+                    : cs.surfaceContainerHigh,
                 borderRadius: BorderRadius.only(
                   topLeft: const Radius.circular(18),
                   topRight: const Radius.circular(18),
                   bottomLeft: Radius.circular(isUser ? 18 : 4),
                   bottomRight: Radius.circular(isUser ? 4 : 18),
                 ),
+                border: Border.all(
+                  color: isUser
+                      ? cs.primary.withOpacity(0.55)
+                      : cs.outlineVariant.withOpacity(0.4),
+                ),
+                boxShadow: [
+                  BoxShadow(
+                    blurRadius: 12,
+                    offset: const Offset(0, 4),
+                    color: Colors.black.withOpacity(0.18),
+                  ),
+                ],
               ),
               child: Text(
                 message.content,
@@ -477,31 +568,40 @@ class _InputRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
     return SafeArea(
       child: Padding(
         padding: const EdgeInsets.fromLTRB(12, 6, 12, 10),
-        child: Row(
-          children: [
-            Expanded(
-              child: TextField(
-                controller: controller,
-                enabled: enabled,
-                decoration: const InputDecoration(
-                  hintText: 'Message Handler…',
+        child: Card(
+          elevation: 4,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(10, 8, 8, 8),
+            child: Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: controller,
+                    enabled: enabled,
+                    decoration: const InputDecoration(
+                      hintText: 'Message Handler…',
+                    ),
+                    onSubmitted: (_) => onSend(),
+                    textInputAction: TextInputAction.send,
+                  ),
                 ),
-                onSubmitted: (_) => onSend(),
-                textInputAction: TextInputAction.send,
-              ),
+                const SizedBox(width: 8),
+                IconButton.filled(
+                  onPressed: enabled ? onSend : null,
+                  icon: const Icon(Icons.arrow_upward_rounded),
+                  style: IconButton.styleFrom(
+                    shape: const CircleBorder(),
+                    backgroundColor: cs.primary,
+                    foregroundColor: cs.onPrimary,
+                  ),
+                ),
+              ],
             ),
-            const SizedBox(width: 8),
-            IconButton.filled(
-              onPressed: enabled ? onSend : null,
-              icon: const Icon(Icons.arrow_upward_rounded),
-              style: IconButton.styleFrom(
-                shape: const CircleBorder(),
-              ),
-            ),
-          ],
+          ),
         ),
       ),
     );

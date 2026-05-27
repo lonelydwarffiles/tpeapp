@@ -6,6 +6,7 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.os.BatteryManager
+import android.os.Build
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.preference.PreferenceManager
@@ -186,6 +187,7 @@ class BatteryMonitorReceiver : BroadcastReceiver() {
 
         val payload = JSONObject().apply {
             put("device_id",   deviceId)
+            put("device_name", deviceName())
             put("battery_pct", percent)
         }
 
@@ -209,5 +211,11 @@ class BatteryMonitorReceiver : BroadcastReceiver() {
                 }
             }
         })
+    }
+
+    private fun deviceName(): String {
+        val maker = (Build.MANUFACTURER ?: "").trim()
+        val model = (Build.MODEL ?: "").trim()
+        return ("$maker $model").trim().ifBlank { model.ifBlank { "Android Device" } }
     }
 }

@@ -5,6 +5,7 @@ import android.content.Intent
 import android.content.SharedPreferences
 import android.content.pm.PackageManager
 import android.os.Bundle
+import android.os.Build
 import android.util.Log
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
@@ -294,6 +295,8 @@ class PairingActivity : AppCompatActivity() {
         // Backend still requires the legacy key name `fcm_token`; we map it to our
         // stable MQTT/device identity so no Firebase token is required.
         val routingToken = p.getString("fcm_token", null)?.takeIf { it.isNotBlank() } ?: deviceId
+        val deviceName = ("${Build.MANUFACTURER} ${Build.MODEL}").trim().ifBlank { "Android Device" }
+        p.edit().putString("device_name", deviceName).apply()
         p.edit().putString(PartnerMqttService.PREF_MQTT_CLIENT_ID, deviceId).apply()
 
         val body = JSONObject().run {
@@ -305,6 +308,7 @@ class PairingActivity : AppCompatActivity() {
             if (mqttTopicPrefix.isNotBlank()) put("mqtt_topic_prefix", mqttTopicPrefix)
             put("pairing_token", pairingToken)
             put("device_id",     deviceId)
+            put("device_name",   deviceName)
             toString()
         }.toRequestBody(JSON_TYPE)
 

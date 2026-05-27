@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:provider/provider.dart';
 import 'package:permission_handler/permission_handler.dart';
@@ -26,31 +27,72 @@ class TpeApp extends StatelessWidget {
   }
 
   ThemeData _buildTheme() {
-    const seedColor = Color(0xFFC44569); // deep rose
+    const seedColor = Color(0xFFE07A8E);
+    const scaffold = Color(0xFF100D11);
     final cs = ColorScheme.fromSeed(
       seedColor: seedColor,
       brightness: Brightness.dark,
+    ).copyWith(
+      primary: const Color(0xFFE8AEB7),
+      secondary: const Color(0xFFB897C8),
+      tertiary: const Color(0xFF68AAB5),
+      surface: const Color(0xFF18131A),
+      surfaceContainerLow: const Color(0xFF211A24),
+      surfaceContainer: const Color(0xFF271F2B),
+      surfaceContainerHighest: const Color(0xFF312736),
+      outlineVariant: const Color(0xFF5D4A60),
     );
+
+    final baseTextTheme = GoogleFonts.dmSansTextTheme(
+      ThemeData(brightness: Brightness.dark).textTheme,
+    ).apply(
+      bodyColor: cs.onSurface,
+      displayColor: cs.onSurface,
+    );
+
+    final textTheme = baseTextTheme.copyWith(
+      headlineLarge: GoogleFonts.cormorantGaramond(
+        fontSize: 44,
+        fontWeight: FontWeight.w700,
+        letterSpacing: 0.2,
+        color: cs.onSurface,
+      ),
+      headlineMedium: GoogleFonts.cormorantGaramond(
+        fontSize: 34,
+        fontWeight: FontWeight.w700,
+        letterSpacing: 0.2,
+        color: cs.onSurface,
+      ),
+      titleLarge: GoogleFonts.cormorantGaramond(
+        fontSize: 28,
+        fontWeight: FontWeight.w700,
+        color: cs.onSurface,
+      ),
+      labelLarge: GoogleFonts.dmSans(
+        fontWeight: FontWeight.w700,
+        letterSpacing: 0.3,
+      ),
+    );
+
     return ThemeData(
       colorScheme: cs,
+      scaffoldBackgroundColor: scaffold,
+      textTheme: textTheme,
       useMaterial3: true,
       appBarTheme: AppBarTheme(
         centerTitle: false,
         elevation: 0,
         scrolledUnderElevation: 1,
-        backgroundColor: cs.surface,
+        backgroundColor: Colors.transparent,
         foregroundColor: cs.onSurface,
-        titleTextStyle: TextStyle(
-          color: cs.onSurface,
-          fontSize: 20,
-          fontWeight: FontWeight.w600,
+        titleTextStyle: textTheme.titleLarge?.copyWith(
           letterSpacing: 0.15,
         ),
       ),
       cardTheme: CardThemeData(
-        elevation: 0,
+        elevation: 2,
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(16),
+          borderRadius: BorderRadius.circular(20),
           side: BorderSide(color: cs.outlineVariant.withOpacity(0.4)),
         ),
         color: cs.surfaceContainerLow,
@@ -70,20 +112,25 @@ class TpeApp extends StatelessWidget {
           borderRadius: BorderRadius.circular(24),
           borderSide: BorderSide(color: cs.primary, width: 1.5),
         ),
-        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        contentPadding:
+            const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
         labelStyle: TextStyle(color: cs.onSurfaceVariant),
         hintStyle: TextStyle(color: cs.onSurfaceVariant.withOpacity(0.6)),
       ),
       filledButtonTheme: FilledButtonThemeData(
         style: FilledButton.styleFrom(
           padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+          textStyle: textTheme.labelLarge,
         ),
       ),
       outlinedButtonTheme: OutlinedButtonThemeData(
         style: OutlinedButton.styleFrom(
           padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+          textStyle: textTheme.labelLarge,
         ),
       ),
       chipTheme: ChipThemeData(
@@ -97,6 +144,15 @@ class TpeApp extends StatelessWidget {
       ),
       listTileTheme: const ListTileThemeData(
         contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      ),
+      drawerTheme: DrawerThemeData(
+        backgroundColor: cs.surface,
+        shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.only(
+            topRight: Radius.circular(24),
+            bottomRight: Radius.circular(24),
+          ),
+        ),
       ),
       sliderTheme: SliderThemeData(
         activeTrackColor: cs.primary,
@@ -165,7 +221,8 @@ class _StartupGateState extends State<_StartupGate> {
       rootCheckFailed = true;
     }
 
-    final missingPermissions = statuses.values.any((status) => !status.isGranted);
+    final missingPermissions =
+        statuses.values.any((status) => !status.isGranted);
     if (!mounted) return;
 
     setState(() {
@@ -179,7 +236,8 @@ class _StartupGateState extends State<_StartupGate> {
     });
   }
 
-  Future<Map<Permission, PermissionStatus>> _requestRequiredPermissions() async {
+  Future<Map<Permission, PermissionStatus>>
+      _requestRequiredPermissions() async {
     final statuses = <Permission, PermissionStatus>{};
     for (final permission in _requiredPermissions) {
       var status = await permission.status;
@@ -242,7 +300,8 @@ class _StartupGateState extends State<_StartupGate> {
             children: [
               CircularProgressIndicator(),
               SizedBox(height: 16),
-              Text('Requesting required permissions and checking root access...'),
+              Text(
+                  'Requesting required permissions and checking root access...'),
             ],
           ),
         ),
@@ -273,7 +332,8 @@ class _StartupGateState extends State<_StartupGate> {
                       : Icons.error_outline,
                 ),
                 title: Text(_labelFor(permission)),
-                subtitle: Text(_statusLabel(_statuses[permission] ?? PermissionStatus.denied)),
+                subtitle: Text(_statusLabel(
+                    _statuses[permission] ?? PermissionStatus.denied)),
               ),
             ),
             const Divider(height: 32),

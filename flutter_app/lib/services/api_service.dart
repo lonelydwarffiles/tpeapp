@@ -50,6 +50,11 @@ class ApiService {
     return (id != null && id.isNotEmpty) ? id : null;
   }
 
+  String? get _deviceName {
+    final name = _prefs.getString('device_name');
+    return (name != null && name.isNotEmpty) ? name : null;
+  }
+
   // ── Headers ───────────────────────────────────────────────────────────
 
   Map<String, String> get _bearerHeaders => {
@@ -85,6 +90,7 @@ class ApiService {
     String? mqttTopicPrefix,
   }) async {
     final deviceId = _deviceId;
+    final deviceName = _deviceName;
     // Backend still requires the legacy key name `fcm_token`; map it to a
     // stable MQTT/device identifier so Firebase is not required.
     final storedRoutingToken = (_prefs.getString('fcm_token') ?? '').trim();
@@ -110,6 +116,8 @@ class ApiService {
         'mqttTopicPrefix': mqttTopicPrefix,
       if (deviceId != null) 'device_id': deviceId,
       if (deviceId != null) 'deviceId': deviceId,
+      if (deviceName != null) 'device_name': deviceName,
+      if (deviceName != null) 'deviceName': deviceName,
     });
     final response = await http
         .post(
@@ -130,6 +138,57 @@ class ApiService {
       );
     }
     return true;
+  }
+
+  /// POSTs manual code pairing payload to `{endpoint}/api/pair/code`.
+  ///
+  /// Returns decoded JSON response so callers can persist returned transport
+  /// settings (webhook secret / mqtt fields) when provided by backend.
+  Future<Map<String, dynamic>> pairWithCode({
+    required String endpoint,
+    required String pairingCode,
+    required String mqttClientId,
+  }) async {
+    final deviceId = _deviceId;
+    final deviceName = _deviceName;
+    final storedRoutingToken = (_prefs.getString('fcm_token') ?? '').trim();
+    final effectiveRoutingToken = storedRoutingToken.isNotEmpty
+        ? storedRoutingToken
+        : (deviceId != null && deviceId.isNotEmpty ? deviceId : mqttClientId);
+
+    final body = jsonEncode({
+      'fcm_token': effectiveRoutingToken,
+      'pairing_code': pairingCode.trim().toUpperCase(),
+      'mqtt_client_id': mqttClientId,
+      if (deviceId != null) 'device_id': deviceId,
+      if (deviceName != null) 'device_name': deviceName,
+    });
+
+    final response = await http
+        .post(
+          Uri.parse('$endpoint/api/pair/code'),
+          headers: {
+            'Content-Type': 'application/json',
+            if (deviceId != null) 'X-Device-ID': deviceId,
+          },
+          body: body,
+        )
+        .timeout(_timeout);
+
+    if (!response.isSuccessful) {
+      final details = response.body.trim();
+      throw Exception(
+        details.isEmpty
+            ? 'Pairing rejected: HTTP ${response.statusCode}'
+            : 'Pairing rejected: HTTP ${response.statusCode} - $details',
+      );
+    }
+
+    final raw = response.body.trim();
+    if (raw.isEmpty) return const <String, dynamic>{};
+    final decoded = jsonDecode(raw);
+    if (decoded is Map<String, dynamic>) return decoded;
+    return const <String, dynamic>{};
   }
 
   // ── Check-in ─────────────────────────────────────────────────────────
