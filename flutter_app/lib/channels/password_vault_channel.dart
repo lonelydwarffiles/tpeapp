@@ -29,8 +29,11 @@ class PasswordVaultChannel {
   /// Returns the plaintext password for [id], or `null` when the entry is
   /// time-locked or not found.  A `password_viewed` webhook is fired on the
   /// Kotlin side whenever this returns a non-null value.
-  static Future<String?> revealPassword(String id) =>
-      _channel.invokeMethod<String?>('revealPassword', {'id': id});
+  static Future<String?> revealPassword(String id, {String? reason}) =>
+      _channel.invokeMethod<String?>('revealPassword', {
+        'id': id,
+        if (reason != null) 'reason': reason,
+      });
 
   /// Adds a new vault entry and returns the generated UUID.
   static Future<String> addEntry({
@@ -97,6 +100,10 @@ class PasswordVaultChannel {
     });
     return count ?? 0;
   }
+
+  /// Opens Android autofill provider settings for selecting TpeApp.
+  static Future<void> openAutofillSettings() =>
+      _channel.invokeMethod('openAutofillSettings');
 }
 
 /// Lightweight model for a vault entry returned by [PasswordVaultChannel.getEntries].

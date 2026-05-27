@@ -9,6 +9,7 @@ import com.tpeapp.service.FilterService
 import com.tpeapp.webhook.WebhookManager
 import org.json.JSONArray
 import org.json.JSONObject
+import kotlin.math.pow
 import java.util.UUID
 
 /**
@@ -46,6 +47,27 @@ class PasswordVaultManager(context: Context) {
 
         /** SharedPreferences key for how many seconds to show a revealed password (default 10). */
         const val PREF_REVEAL_TIMEOUT_SECONDS = "vault_reveal_timeout_seconds"
+
+        /** When true, reveal requests must include a reason with minimum length. */
+        const val PREF_REQUIRE_REVEAL_REASON = "vault_require_reveal_reason"
+
+        /** Minimum number of chars required for reveal reason (default 6). */
+        const val PREF_MIN_REVEAL_REASON_LENGTH = "vault_min_reveal_reason_length"
+
+        /** Max successful reveals per window per entry before cooldown. */
+        const val PREF_REVEAL_MAX_IN_WINDOW = "vault_reveal_max_in_window"
+
+        /** Rolling rate-limit window in ms (default 10 minutes). */
+        const val PREF_REVEAL_WINDOW_MS = "vault_reveal_window_ms"
+
+        /** Base cooldown in ms once rate limit is exceeded (default 30 seconds). */
+        const val PREF_REVEAL_COOLDOWN_BASE_MS = "vault_reveal_cooldown_base_ms"
+
+        /** Maximum cooldown in ms (default 30 minutes). */
+        const val PREF_REVEAL_COOLDOWN_MAX_MS = "vault_reveal_cooldown_max_ms"
+
+        private const val MIN_LOCK_MS = 1_000L
+        private const val MAX_LOCK_MS = 30L * 24 * 60 * 60 * 1_000L
     }
 
     private val prefs = EncryptedSharedPreferences.create(
@@ -63,6 +85,15 @@ class PasswordVaultManager(context: Context) {
     // ------------------------------------------------------------------
     //  Public API
     // ------------------------------------------------------------------
+
+    data class RevealResult(
+        val password: String? = null,
+        val errorCode: String? = null,
+        val errorMessage: String? = null,
+        val retryAfterMs: Long = 0L,
+    ) {
+        val isSuccess: Boolean get() = errorCode == null
+    }
 
     /**
      * Returns all vault entries with passwords **redacted** (replaced with empty string).
@@ -90,22 +121,92 @@ class PasswordVaultManager(context: Context) {
      * Fires a `password_viewed` webhook on success.
      */
     fun revealPassword(context: Context, id: String): String? {
+        return revealPasswordWithResult(context, id, null).password
+    }
+
+    fun revealPasswordWithResult(
+        context: Context,
+        id: String,
+        reason: String?,
+    ): RevealResult {
+        return revealPassword(context, id, emitViewedEvent = true, reason = reason)
+    }
+
+    /**
+     * Returns plaintext password for autofill use-cases without emitting
+     * password-viewed telemetry (fill requests happen frequently and passively).
+     */
+    fun revealPasswordForAutofill(id: String): String? {
+        val arr = loadArray()
+        for (i in 0 until arr.length()) {
+            val obj = arr.getJSONObject(i)
+            if (obj.getString("id") != id) continue
+            if (isLockedAt(obj)) return null
+            return obj.optString("password")
+        }
+        return null
+    }
+
+    private fun revealPassword(
+        context: Context,
+        id: String,
+        emitViewedEvent: Boolean,
+        reason: String?,
+    ): RevealResult {
+        val normalizedReason = (reason ?: "").trim()
+        if (emitViewedEvent && isRevealReasonRequired()) {
+            val minLen = getMinRevealReasonLength()
+            if (normalizedReason.length < minLen) {
+                return RevealResult(
+                    errorCode = "REASON_REQUIRED",
+                    errorMessage = "Reveal reason must be at least $minLen characters",
+                )
+            }
+        }
+
         val arr = loadArray()
         for (i in 0 until arr.length()) {
             val obj = arr.getJSONObject(i)
             if (obj.getString("id") != id) continue
             if (isLockedAt(obj)) {
                 Log.d(TAG, "revealPassword: entry $id is locked")
-                return null
+                return RevealResult(
+                    errorCode = "ENTRY_LOCKED",
+                    errorMessage = "Entry is locked",
+                )
             }
+
+            if (emitViewedEvent) {
+                val blocked = checkRevealRateLimit(id)
+                if (blocked != null) {
+                    dispatchPasswordRevealBlocked(
+                        site = obj.optString("site"),
+                        username = obj.optString("username"),
+                        reason = normalizedReason,
+                        retryAfterMs = blocked,
+                    )
+                    return RevealResult(
+                        errorCode = "RATE_LIMITED",
+                        errorMessage = "Too many reveal requests",
+                        retryAfterMs = blocked,
+                    )
+                }
+            }
+
             val password = obj.optString("password")
             val site     = obj.optString("site")
             val username = obj.optString("username")
-            dispatchPasswordViewed(site, username)
-            return password
+            if (emitViewedEvent) {
+                recordRevealSuccess(id)
+                dispatchPasswordViewed(site, username, normalizedReason)
+            }
+            return RevealResult(password = password)
         }
         Log.w(TAG, "revealPassword: entry $id not found")
-        return null
+        return RevealResult(
+            errorCode = "NOT_FOUND",
+            errorMessage = "Entry not found",
+        )
     }
 
     /**
@@ -118,20 +219,26 @@ class PasswordVaultManager(context: Context) {
         password: String,
         notes: String,
     ): String {
+        val normalizedSite = site.trim()
+        val normalizedUsername = username.trim()
+        val normalizedPassword = password.trim()
+        val normalizedNotes = notes.trim()
+        require(normalizedPassword.isNotEmpty()) { "password must not be blank" }
+
         val id  = UUID.randomUUID().toString()
         val obj = JSONObject().apply {
             put("id",          id)
-            put("site",        site)
-            put("username",    username)
-            put("password",    password)
-            put("notes",       notes)
+            put("site",        normalizedSite)
+            put("username",    normalizedUsername)
+            put("password",    normalizedPassword)
+            put("notes",       normalizedNotes)
             put("lockedUntil", 0L)
         }
         val arr = loadArray()
         arr.put(obj)
         saveArray(arr)
-        Log.i(TAG, "Vault entry added: id=$id site=$site")
-        dispatchVaultEvent("vault_entry_added", mapOf("site" to site, "username" to username))
+        Log.i(TAG, "Vault entry added: id=$id site=$normalizedSite")
+        dispatchVaultEvent("vault_entry_added", mapOf("site" to normalizedSite, "username" to normalizedUsername))
         return id
     }
 
@@ -195,7 +302,8 @@ class PasswordVaultManager(context: Context) {
      * Fires a `vault_entry_locked` webhook.
      */
     fun lockEntry(id: String, durationMs: Long) {
-        val until = System.currentTimeMillis() + durationMs
+        val safeDurationMs = durationMs.coerceIn(MIN_LOCK_MS, MAX_LOCK_MS)
+        val until = System.currentTimeMillis() + safeDurationMs
         val arr   = loadArray()
         for (i in 0 until arr.length()) {
             val obj = arr.getJSONObject(i)
@@ -215,7 +323,8 @@ class PasswordVaultManager(context: Context) {
      * Time-locks every entry in the vault.  Fires a `vault_all_locked` webhook.
      */
     fun lockAll(durationMs: Long) {
-        val until = System.currentTimeMillis() + durationMs
+        val safeDurationMs = durationMs.coerceIn(MIN_LOCK_MS, MAX_LOCK_MS)
+        val until = System.currentTimeMillis() + safeDurationMs
         val arr   = loadArray()
         for (i in 0 until arr.length()) {
             arr.getJSONObject(i).put("lockedUntil", until)
@@ -324,13 +433,133 @@ class PasswordVaultManager(context: Context) {
         return Pair(url, token)
     }
 
-    private fun dispatchPasswordViewed(site: String, username: String) {
+    private fun isRevealReasonRequired(): Boolean {
+        return appPrefs.getBoolean(PREF_REQUIRE_REVEAL_REASON, true)
+    }
+
+    private fun getMinRevealReasonLength(): Int {
+        return appPrefs.getInt(PREF_MIN_REVEAL_REASON_LENGTH, 6).coerceIn(1, 256)
+    }
+
+    private fun getRevealWindowMs(): Long {
+        return appPrefs.getLong(PREF_REVEAL_WINDOW_MS, 10 * 60 * 1_000L)
+            .coerceIn(5_000L, 24L * 60 * 60 * 1_000L)
+    }
+
+    private fun getRevealMaxInWindow(): Int {
+        return appPrefs.getInt(PREF_REVEAL_MAX_IN_WINDOW, 3).coerceIn(1, 50)
+    }
+
+    private fun getRevealCooldownBaseMs(): Long {
+        return appPrefs.getLong(PREF_REVEAL_COOLDOWN_BASE_MS, 30_000L)
+            .coerceIn(1_000L, 24L * 60 * 60 * 1_000L)
+    }
+
+    private fun getRevealCooldownMaxMs(): Long {
+        return appPrefs.getLong(PREF_REVEAL_COOLDOWN_MAX_MS, 30 * 60 * 1_000L)
+            .coerceIn(10_000L, 7L * 24 * 60 * 60 * 1_000L)
+    }
+
+    private fun prefKey(prefix: String, id: String): String = "vault_${prefix}_$id"
+
+    /**
+     * Returns retry-after ms if blocked by cooldown/rate-limit, else null.
+     */
+    private fun checkRevealRateLimit(id: String): Long? {
+        val now = System.currentTimeMillis()
+        val cooldownUntilKey = prefKey("reveal_cooldown_until", id)
+        val cooldownUntil = appPrefs.getLong(cooldownUntilKey, 0L)
+        if (cooldownUntil > now) {
+            return cooldownUntil - now
+        }
+
+        val windowMs = getRevealWindowMs()
+        val maxInWindow = getRevealMaxInWindow()
+        val windowStartKey = prefKey("reveal_window_start", id)
+        val windowCountKey = prefKey("reveal_window_count", id)
+        val strikesKey = prefKey("reveal_strikes", id)
+
+        var windowStart = appPrefs.getLong(windowStartKey, 0L)
+        var windowCount = appPrefs.getInt(windowCountKey, 0)
+        var strikes = appPrefs.getInt(strikesKey, 0)
+
+        if (windowStart <= 0L || now - windowStart > windowMs) {
+            windowStart = now
+            windowCount = 0
+        }
+
+        if (windowCount >= maxInWindow) {
+            strikes = (strikes + 1).coerceAtMost(20)
+            val base = getRevealCooldownBaseMs().toDouble()
+            val cooldownMs = (base * 2.0.pow((strikes - 1).toDouble())).toLong()
+                .coerceAtMost(getRevealCooldownMaxMs())
+            val until = now + cooldownMs
+
+            appPrefs.edit()
+                .putLong(cooldownUntilKey, until)
+                .putInt(strikesKey, strikes)
+                .putLong(windowStartKey, now)
+                .putInt(windowCountKey, 0)
+                .apply()
+
+            return cooldownMs
+        }
+
+        return null
+    }
+
+    private fun recordRevealSuccess(id: String) {
+        val now = System.currentTimeMillis()
+        val windowMs = getRevealWindowMs()
+        val windowStartKey = prefKey("reveal_window_start", id)
+        val windowCountKey = prefKey("reveal_window_count", id)
+        val strikesKey = prefKey("reveal_strikes", id)
+
+        var windowStart = appPrefs.getLong(windowStartKey, 0L)
+        var windowCount = appPrefs.getInt(windowCountKey, 0)
+        var strikes = appPrefs.getInt(strikesKey, 0)
+
+        if (windowStart <= 0L || now - windowStart > windowMs) {
+            windowStart = now
+            windowCount = 0
+        }
+        windowCount += 1
+        if (strikes > 0) strikes -= 1
+
+        appPrefs.edit()
+            .putLong(windowStartKey, windowStart)
+            .putInt(windowCountKey, windowCount)
+            .putInt(strikesKey, strikes)
+            .apply()
+    }
+
+    private fun dispatchPasswordViewed(site: String, username: String, reason: String) {
         val (url, token) = webhookUrlAndToken()
         if (url.isEmpty()) return
         val payload = JSONObject().apply {
             put("event",     "password_viewed")
             put("site",      site)
             put("username",  username)
+            put("reason",    reason)
+            put("timestamp", System.currentTimeMillis())
+        }
+        WebhookManager.dispatchEvent(url, token, payload)
+    }
+
+    private fun dispatchPasswordRevealBlocked(
+        site: String,
+        username: String,
+        reason: String,
+        retryAfterMs: Long,
+    ) {
+        val (url, token) = webhookUrlAndToken()
+        if (url.isEmpty()) return
+        val payload = JSONObject().apply {
+            put("event", "password_reveal_blocked")
+            put("site", site)
+            put("username", username)
+            put("reason", reason)
+            put("retry_after_ms", retryAfterMs)
             put("timestamp", System.currentTimeMillis())
         }
         WebhookManager.dispatchEvent(url, token, payload)

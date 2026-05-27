@@ -297,6 +297,24 @@ Handler website visibility paths for incoming device data:
 - GET /api/handler/tpe/audits
 - GET /api/vitals/history
 
+Vault management should be performed by handler website through command API:
+
+- POST /api/tpe/commands with action in:
+	- vault.entries.list
+	- vault.entry.add
+	- vault.entry.update
+	- vault.entry.delete
+	- vault.entry.lock
+	- vault.entries.lock_all
+	- vault.entries.import
+	- vault.password.reveal
+
+Expected website behavior:
+
+- Website stores command + ACK timeline for auditability.
+- Website reads command ACK telemetry for vault payloads (entry list, inserted count, reveal result, etc.).
+- Website is authoritative UI for handler vault operations; app executes website-issued commands.
+
 ### 6.1 Text Replacement Policy Push (new)
 
 To remotely control per-app replacement behavior, backend may push:

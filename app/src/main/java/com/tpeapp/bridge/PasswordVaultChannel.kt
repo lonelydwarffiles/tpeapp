@@ -50,7 +50,20 @@ object PasswordVaultChannel {
                 "revealPassword" -> {
                     val id = call.argument<String>("id")
                         ?: return@setMethodCallHandler result.error("INVALID", "id required", null)
-                    result.success(vault.revealPassword(context.applicationContext, id))
+                    val reason = call.argument<String>("reason")
+                    val reveal = vault.revealPasswordWithResult(context.applicationContext, id, reason)
+                    if (reveal.isSuccess) {
+                        result.success(reveal.password)
+                    } else {
+                        when (reveal.errorCode) {
+                            "RATE_LIMITED", "REASON_REQUIRED" -> result.error(
+                                reveal.errorCode,
+                                reveal.errorMessage,
+                                mapOf("retryAfterMs" to reveal.retryAfterMs),
+                            )
+                            else -> result.success(null)
+                        }
+                    }
                 }
 
                 "addEntry" -> {

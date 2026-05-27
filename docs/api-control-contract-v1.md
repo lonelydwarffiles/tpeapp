@@ -115,6 +115,17 @@ This document defines the canonical command/ack/session contract for a device ap
 - device.wallpaper.set
 - device.url.open
 
+### Vault controls (website-managed)
+
+- vault.entries.list
+- vault.entry.add
+- vault.entry.update
+- vault.entry.delete
+- vault.entry.lock
+- vault.entries.lock_all
+- vault.entries.import
+- vault.password.reveal
+
 ### Screen share and remote input
 
 - screen.share.start
@@ -217,3 +228,105 @@ Legacy actions may continue during migration:
 - REQUEST_CHECKIN -> puppy.checkin.request
 
 Device should support both for a transition window and emit canonical ACK envelopes for both.
+
+## Vault command params and telemetry
+
+### vault.entries.list params
+
+```json
+{}
+```
+
+Success ACK telemetry includes:
+
+- vault_count: integer
+- vault_entries: array of redacted entries (`id`, `site`, `username`, `notes`, `locked_until`, `is_locked`)
+
+### vault.entry.add params
+
+```json
+{
+  "site": "example.com",
+  "username": "it@example.com",
+  "password": "required",
+  "notes": "optional"
+}
+```
+
+Success ACK telemetry includes `vault_entry_id`.
+
+### vault.entry.update params
+
+```json
+{
+  "id": "entry_uuid",
+  "site": "optional",
+  "username": "optional",
+  "password": "optional",
+  "notes": "optional"
+}
+```
+
+Success ACK telemetry includes `vault_entry_id` and `updated=true`.
+
+### vault.entry.delete params
+
+```json
+{
+  "id": "entry_uuid"
+}
+```
+
+Success ACK telemetry includes `vault_entry_id` and `deleted=true`.
+
+### vault.entry.lock params
+
+```json
+{
+  "id": "entry_uuid",
+  "ttl_sec": 900
+}
+```
+
+### vault.entries.lock_all params
+
+```json
+{
+  "ttl_sec": 900
+}
+```
+
+For both lock actions, success ACK telemetry includes `locked_for_sec`.
+
+### vault.entries.import params
+
+```json
+{
+  "entries": [
+    {
+      "site": "example.com",
+      "username": "it@example.com",
+      "password": "required",
+      "notes": "optional"
+    }
+  ]
+}
+```
+
+Success ACK telemetry includes `inserted` and `requested`.
+
+### vault.password.reveal params
+
+```json
+{
+  "id": "entry_uuid",
+  "reason": "handler verification"
+}
+```
+
+Success ACK telemetry includes `vault_entry_id` and `password`.
+
+Failure modes include:
+
+- `execution_error` with rate-limit detail when reveal cooldown is active.
+- `execution_error` when reason policy rejects the request.

@@ -1,5 +1,7 @@
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:flutter/services.dart';
 
+import '../channels/password_vault_channel.dart';
 import '../channels/remote_control_channel.dart';
 import '../channels/screen_share_channel.dart';
 import '../models/remote_command.dart';
@@ -24,10 +26,12 @@ class RemoteCommandService {
   final ScreenShareService _screenShare;
   final CheckInRequestHandler _onCheckInRequested;
   final CommandMessageHandler? _onMessage;
+  Map<String, dynamic>? _lastTelemetry;
 
   Future<void> handleEvent(Map<String, String> event) async {
     final command = RemoteCommand.fromEvent(event);
     if (command == null) return;
+    _lastTelemetry = null;
 
     await _ack(command, status: 'RECEIVED');
 
@@ -49,6 +53,30 @@ class RemoteCommandService {
         case 'screen.input.mode.set':
           await _handleInjectionMode(command);
           break;
+        case 'vault.entries.list':
+          _lastTelemetry = await _handleVaultEntriesList();
+          break;
+        case 'vault.entry.add':
+          _lastTelemetry = await _handleVaultEntryAdd(command);
+          break;
+        case 'vault.entry.update':
+          _lastTelemetry = await _handleVaultEntryUpdate(command);
+          break;
+        case 'vault.entry.delete':
+          _lastTelemetry = await _handleVaultEntryDelete(command);
+          break;
+        case 'vault.entry.lock':
+          _lastTelemetry = await _handleVaultEntryLock(command);
+          break;
+        case 'vault.entries.lock_all':
+          _lastTelemetry = await _handleVaultLockAll(command);
+          break;
+        case 'vault.entries.import':
+          _lastTelemetry = await _handleVaultImport(command);
+          break;
+        case 'vault.password.reveal':
+          _lastTelemetry = await _handleVaultReveal(command);
+          break;
         default:
           await _ack(
             command,
@@ -67,6 +95,134 @@ class RemoteCommandService {
         errorMessage: e.toString(),
       );
       _onMessage?.call('Command failed (${command.action}): $e');
+    }
+  }
+
+  Future<Map<String, dynamic>> _handleVaultEntriesList() async {
+    final entries = await PasswordVaultChannel.getEntries();
+    final mapped = entries
+        .map(
+          (e) => {
+            'id': e.id,
+            'site': e.site,
+            'username': e.username,
+            'notes': e.notes,
+            'locked_until': e.lockedUntil,
+            'is_locked': e.isLocked,
+          },
+        )
+        .toList();
+    _onMessage?.call('Vault sync sent (${mapped.length} entries).');
+    return {
+      'vault_count': mapped.length,
+      'vault_entries': mapped,
+    };
+  }
+
+  Future<Map<String, dynamic>> _handleVaultEntryAdd(RemoteCommand command) async {
+    final site = _stringValue(command.params, const ['site']) ?? '';
+    final username = _stringValue(command.params, const ['username']) ?? '';
+    final notes = _stringValue(command.params, const ['notes']) ?? '';
+    final password = _requiredString(command.params, const ['password']);
+    final id = await PasswordVaultChannel.addEntry(
+      site: site,
+      username: username,
+      password: password,
+      notes: notes,
+    );
+    _onMessage?.call('Vault entry added remotely: $id');
+    return {'vault_entry_id': id};
+  }
+
+  Future<Map<String, dynamic>> _handleVaultEntryUpdate(RemoteCommand command) async {
+    final id = _requiredString(command.params, const ['id', 'entry_id', 'entryId']);
+    final updated = await PasswordVaultChannel.updateEntry(
+      id: id,
+      site: _stringValue(command.params, const ['site']),
+      username: _stringValue(command.params, const ['username']),
+      password: _stringValue(command.params, const ['password']),
+      notes: _stringValue(command.params, const ['notes']),
+    );
+    if (!updated) {
+      throw StateError('Vault entry not found: $id');
+    }
+    _onMessage?.call('Vault entry updated remotely: $id');
+    return {'vault_entry_id': id, 'updated': true};
+  }
+
+  Future<Map<String, dynamic>> _handleVaultEntryDelete(RemoteCommand command) async {
+    final id = _requiredString(command.params, const ['id', 'entry_id', 'entryId']);
+    final deleted = await PasswordVaultChannel.deleteEntry(id);
+    if (!deleted) {
+      throw StateError('Vault entry not found: $id');
+    }
+    _onMessage?.call('Vault entry deleted remotely: $id');
+    return {'vault_entry_id': id, 'deleted': true};
+  }
+
+  Future<Map<String, dynamic>> _handleVaultEntryLock(RemoteCommand command) async {
+    final id = _requiredString(command.params, const ['id', 'entry_id', 'entryId']);
+    final ttlSec = _intValue(command.params, const ['ttl_sec', 'ttlSec']) ?? 900;
+    final duration = Duration(seconds: ttlSec);
+    await PasswordVaultChannel.lockEntry(id, duration);
+    _onMessage?.call('Vault entry locked remotely: $id');
+    return {
+      'vault_entry_id': id,
+      'locked_for_sec': duration.inSeconds,
+    };
+  }
+
+  Future<Map<String, dynamic>> _handleVaultLockAll(RemoteCommand command) async {
+    final ttlSec = _intValue(command.params, const ['ttl_sec', 'ttlSec']) ?? 900;
+    final duration = Duration(seconds: ttlSec);
+    await PasswordVaultChannel.lockAll(duration);
+    _onMessage?.call('All vault entries locked remotely.');
+    return {'locked_for_sec': duration.inSeconds};
+  }
+
+  Future<Map<String, dynamic>> _handleVaultImport(RemoteCommand command) async {
+    final entriesAny = command.params['entries'];
+    if (entriesAny is! List) {
+      throw ArgumentError('Missing required parameter: entries');
+    }
+    final entries = entriesAny
+        .whereType<Map>()
+        .map((e) => {
+              'site': (e['site'] ?? '').toString(),
+              'username': (e['username'] ?? '').toString(),
+              'password': (e['password'] ?? '').toString(),
+              'notes': (e['notes'] ?? '').toString(),
+            })
+        .toList();
+    final inserted = await PasswordVaultChannel.importEntries(entries);
+    _onMessage?.call('Vault import completed remotely: $inserted inserted.');
+    return {'inserted': inserted, 'requested': entries.length};
+  }
+
+  Future<Map<String, dynamic>> _handleVaultReveal(RemoteCommand command) async {
+    final id = _requiredString(command.params, const ['id', 'entry_id', 'entryId']);
+    final reason = _requiredString(command.params, const ['reason']);
+    try {
+      final password = await PasswordVaultChannel.revealPassword(id, reason: reason);
+      if (password == null) {
+        throw StateError('Vault entry unavailable or locked: $id');
+      }
+      _onMessage?.call('Vault password revealed remotely: $id');
+      return {
+        'vault_entry_id': id,
+        'password': password,
+      };
+    } on PlatformException catch (e) {
+      if (e.code == 'RATE_LIMITED') {
+        final retryAfterMs = e.details is Map
+            ? ((e.details['retryAfterMs'] as num?)?.toInt() ?? 0)
+            : 0;
+        throw StateError('Reveal rate-limited. retry_after_ms=$retryAfterMs');
+      }
+      if (e.code == 'REASON_REQUIRED') {
+        throw StateError('Reveal reason rejected by policy.');
+      }
+      rethrow;
     }
   }
 
@@ -153,19 +309,23 @@ class RemoteCommandService {
     required String status,
     String? errorCode,
     String? errorMessage,
+    Map<String, dynamic>? telemetry,
   }) async {
     if (!command.hasCommandId) return;
     try {
+      final mergedTelemetry = <String, dynamic>{
+        'action': command.action,
+        if (command.sessionId != null) 'session_id': command.sessionId,
+        'source': 'flutter_app',
+        if (_lastTelemetry != null) ..._lastTelemetry!,
+        if (telemetry != null) ...telemetry,
+      };
       await _api.postCommandAck(
         commandId: command.commandId!,
         status: status,
         errorCode: errorCode,
         errorMessage: errorMessage,
-        telemetry: {
-          'action': command.action,
-          if (command.sessionId != null) 'session_id': command.sessionId,
-          'source': 'flutter_app',
-        },
+        telemetry: mergedTelemetry,
       );
     } catch (_) {
       // Ack delivery is best-effort; command execution should not crash UI.

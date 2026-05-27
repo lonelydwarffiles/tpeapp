@@ -80,6 +80,11 @@ class _PasswordVaultScreenState extends State<PasswordVaultScreen> {
   // Start per-second tickers for any currently-locked entries so the UI
   // updates the remaining-lock duration live.
   void _startLockCountdowns() {
+    for (final t in _lockTimers.values) {
+      t.cancel();
+    }
+    _lockTimers.clear();
+
     for (final e in _entries) {
       if (e.isLocked) {
         _lockTimers[e.id]?.cancel();
@@ -101,7 +106,39 @@ class _PasswordVaultScreenState extends State<PasswordVaultScreen> {
   // ------------------------------------------------------------------
 
   Future<void> _reveal(VaultEntry entry) async {
-    final password = await PasswordVaultChannel.revealPassword(entry.id);
+    final reason = await _showRevealReasonDialog();
+    if (reason == null) return;
+
+    String? password;
+    try {
+      password = await PasswordVaultChannel.revealPassword(entry.id, reason: reason);
+    } on PlatformException catch (e) {
+      if (!mounted) return;
+      if (e.code == 'RATE_LIMITED') {
+        final details = e.details;
+        final retryAfterMs = details is Map
+            ? ((details['retryAfterMs'] as num?)?.toInt() ?? 0)
+            : 0;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              retryAfterMs > 0
+                  ? 'Reveal blocked. Try again in ${_formatDuration(Duration(milliseconds: retryAfterMs))}.'
+                  : 'Reveal blocked by handler policy.',
+            ),
+          ),
+        );
+        return;
+      }
+      if (e.code == 'REASON_REQUIRED') {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Please provide a more specific reveal reason.')),
+        );
+        return;
+      }
+      rethrow;
+    }
+
     if (password == null) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -179,6 +216,65 @@ class _PasswordVaultScreenState extends State<PasswordVaultScreen> {
           .showSnackBar(const SnackBar(content: Text('Credential added.')));
     }
     await _load();
+  }
+
+  Future<void> _lockAll() async {
+    final pin = await _showPinDialog('Partner PIN required to lock all entries');
+    if (pin == null) return;
+    final ok = await PartnerPinChannel.verifyPin(pin);
+    if (!ok) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(const SnackBar(content: Text('Incorrect PIN.')));
+      }
+      return;
+    }
+
+    final selected = await _showLockDurationDialog();
+    if (selected == null) return;
+
+    await PasswordVaultChannel.lockAll(selected);
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+            content:
+                Text('All entries locked for ${_formatDuration(selected)}.')),
+      );
+    }
+    await _load();
+  }
+
+  Future<void> _lockEntry(VaultEntry entry) async {
+    final pin = await _showPinDialog('Partner PIN required to lock entry');
+    if (pin == null) return;
+    final ok = await PartnerPinChannel.verifyPin(pin);
+    if (!ok) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(const SnackBar(content: Text('Incorrect PIN.')));
+      }
+      return;
+    }
+
+    final selected = await _showLockDurationDialog();
+    if (selected == null) return;
+
+    await PasswordVaultChannel.lockEntry(entry.id, selected);
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Entry locked for ${_formatDuration(selected)}.')),
+      );
+    }
+    await _load();
+  }
+
+  String _formatDuration(Duration d) {
+    final h = d.inHours;
+    final m = d.inMinutes.remainder(60);
+    if (h > 0 && m > 0) return '${h}h ${m}m';
+    if (h > 0) return '${h}h';
+    if (m > 0) return '${m}m';
+    return '${d.inSeconds}s';
   }
 
   Future<void> _editEntry(VaultEntry entry) async {
@@ -452,8 +548,7 @@ class _PasswordVaultScreenState extends State<PasswordVaultScreen> {
   /// TpeApp as the device autofill service.
   Future<void> _openAutofillSettings() async {
     try {
-      await const MethodChannel('com.tpeapp/password_vault')
-          .invokeMethod('openAutofillSettings');
+      await PasswordVaultChannel.openAutofillSettings();
     } on MissingPluginException {
       // Fallback if Kotlin side doesn't handle it yet.
     }
@@ -490,6 +585,44 @@ class _PasswordVaultScreenState extends State<PasswordVaultScreen> {
           TextButton(
               onPressed: () => Navigator.pop(ctx, controller.text),
               child: const Text('OK')),
+        ],
+      ),
+    );
+  }
+
+  Future<String?> _showRevealReasonDialog() async {
+    final ctrl = TextEditingController();
+    return showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Reason required'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Explain why this password is needed right now. This is logged for your handler.',
+              style: TextStyle(fontSize: 12),
+            ),
+            const SizedBox(height: 10),
+            TextField(
+              controller: ctrl,
+              maxLines: 3,
+              minLines: 2,
+              decoration: const InputDecoration(
+                border: OutlineInputBorder(),
+                hintText: 'Example: Logging in for scheduled homework session',
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Cancel')),
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, ctrl.text.trim()),
+              child: const Text('Continue')),
         ],
       ),
     );
@@ -584,6 +717,38 @@ class _PasswordVaultScreenState extends State<PasswordVaultScreen> {
     );
   }
 
+  Future<Duration?> _showLockDurationDialog() async {
+    return showDialog<Duration>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Lock duration'),
+        content: const Text('Choose how long this entry should stay locked.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, const Duration(minutes: 15)),
+            child: const Text('15m'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, const Duration(hours: 1)),
+            child: const Text('1h'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, const Duration(hours: 12)),
+            child: const Text('12h'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, const Duration(days: 1)),
+            child: const Text('24h'),
+          ),
+        ],
+      ),
+    );
+  }
+
   // ------------------------------------------------------------------
   //  Build
   // ------------------------------------------------------------------
@@ -594,6 +759,21 @@ class _PasswordVaultScreenState extends State<PasswordVaultScreen> {
       appBar: AppBar(
         title: const Text('Password Vault'),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.lock),
+            tooltip: 'Lock all entries',
+            onPressed: _lockAll,
+          ),
+          IconButton(
+            icon: const Icon(Icons.upload_file),
+            tooltip: 'Import credentials',
+            onPressed: _importEntries,
+          ),
+          IconButton(
+            icon: const Icon(Icons.add),
+            tooltip: 'Add credential',
+            onPressed: _addEntry,
+          ),
           IconButton(
             icon: const Icon(Icons.password),
             tooltip: 'Autofill settings',
@@ -629,6 +809,9 @@ class _PasswordVaultScreenState extends State<PasswordVaultScreen> {
                     countdown:         _countdowns[_entries[i].id],
                     onReveal:          () => _reveal(_entries[i]),
                     onHide:            () => _hide(_entries[i].id),
+                    onEdit:            () => _editEntry(_entries[i]),
+                    onDelete:          () => _deleteEntry(_entries[i]),
+                    onLock:            () => _lockEntry(_entries[i]),
                   ),
                 ),
     );
@@ -644,6 +827,9 @@ class _EntryTile extends StatelessWidget {
     required this.entry,
     required this.onReveal,
     required this.onHide,
+    required this.onEdit,
+    required this.onDelete,
+    required this.onLock,
     this.revealedPassword,
     this.countdown,
   });
@@ -653,6 +839,9 @@ class _EntryTile extends StatelessWidget {
   final int? countdown;
   final VoidCallback onReveal;
   final VoidCallback onHide;
+  final VoidCallback onEdit;
+  final VoidCallback onDelete;
+  final VoidCallback onLock;
 
   String _formatDuration(Duration d) {
     final h = d.inHours;
@@ -740,6 +929,27 @@ class _EntryTile extends StatelessWidget {
               tooltip: revealed ? 'Hide' : 'Reveal password',
               onPressed: revealed ? onHide : onReveal,
             ),
+          PopupMenuButton<String>(
+            tooltip: 'More actions',
+            onSelected: (value) {
+              switch (value) {
+                case 'edit':
+                  onEdit();
+                  return;
+                case 'lock':
+                  onLock();
+                  return;
+                case 'delete':
+                  onDelete();
+                  return;
+              }
+            },
+            itemBuilder: (_) => const [
+              PopupMenuItem(value: 'edit', child: Text('Edit')),
+              PopupMenuItem(value: 'lock', child: Text('Lock')),
+              PopupMenuItem(value: 'delete', child: Text('Delete')),
+            ],
+          ),
         ],
       ),
     );

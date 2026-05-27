@@ -106,8 +106,8 @@ class VaultAutofillService : AutofillService() {
             val site     = entry.optString("site")
             val username = entry.optString("username")
 
-            // Reveal the password from encrypted storage.
-            val password = vault.revealPassword(applicationContext, id) ?: continue
+            // Fetch password without emitting password_viewed telemetry.
+            val password = vault.revealPasswordForAutofill(id) ?: continue
 
             val datasetBuilder = Dataset.Builder()
 
