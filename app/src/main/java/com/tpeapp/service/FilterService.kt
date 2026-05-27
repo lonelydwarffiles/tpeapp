@@ -76,7 +76,7 @@ class FilterService : Service() {
          * SharedPreferences key (Boolean) for the NudeNet TFLite feature flag.
          * When `false` the classifier is not initialised and all scan requests
          * return a safe (not-blocked) result, saving memory and CPU on low-end
-         * or non-rooted devices.  Defaults to `true` (enabled).
+         * or non-rooted devices.  Defaults to `false` (disabled).
          */
         const val PREF_NUDENET_ENABLED         = "nudenet_enabled"
 
@@ -120,7 +120,7 @@ class FilterService : Service() {
      * a safe (not-blocked) result, saving performance on low-end devices.
     * Updated live via MQTT command payloads → SharedPreferences listener.
      */
-    @Volatile private var nudeNetEnabled: Boolean = true
+    @Volatile private var nudeNetEnabled: Boolean = false
 
     /** Minimum gap between consecutive clean-scan reward triggers (30 minutes). */
     private val CLEAN_SCAN_REWARD_INTERVAL_MS = 30 * 60 * 1_000L
@@ -149,21 +149,21 @@ class FilterService : Service() {
                     Log.i(TAG, "Text-replacement dictionary updated")
                 }
                 PREF_NUDENET_ENABLED -> {
-                    val enabled = prefs.getBoolean(key, true)
-                    nudeNetEnabled = enabled
-                    Log.i(TAG, "NudeNet feature flag updated via MQTT → $enabled")
-                    if (enabled && classifier == null) {
-                        initClassifierAsync()
-                    } else if (!enabled) {
-                        // Null the field before closing so that any in-flight scan that
-                        // already holds a local reference completes safely.  The classifier
-                        // itself is @Synchronized so close() and inference are mutually
-                        // exclusive; any scan that reads nudeNetEnabled=false before
-                        // reaching awaitClassifier() returns immediately without using it.
-                        val old = classifier
-                        classifier = null
-                        old?.close()
+                    val requested = prefs.getBoolean(key, false)
+                    // TODO: fixing is at the bottom of the list, keep NudeNet disabled for now.
+                    if (requested) {
+                        Log.w(TAG, "Ignoring attempt to enable NudeNet; feature is locked off")
+                        prefs.edit().putBoolean(PREF_NUDENET_ENABLED, false).apply()
                     }
+                    nudeNetEnabled = false
+                    // Null the field before closing so that any in-flight scan that
+                    // already holds a local reference completes safely.  The classifier
+                    // itself is @Synchronized so close() and inference are mutually
+                    // exclusive; any scan that reads nudeNetEnabled=false before
+                    // reaching awaitClassifier() returns immediately without using it.
+                    val old = classifier
+                    classifier = null
+                    old?.close()
                 }
                 com.tpeapp.mindful.ToneEnforcementService.PREF_RESTRICTED_VOCABULARY -> {
                     restrictedVocabularyJson = prefs.getString(key, "") ?: ""
@@ -222,7 +222,11 @@ class FilterService : Service() {
             .getDefaultSharedPreferences(applicationContext)
         strictModeEnabled = prefs.getBoolean(PREF_STRICT_MODE, false)
         threshold = effectiveThreshold(prefs.getFloat(PREF_THRESHOLD, DEFAULT_THRESHOLD))
-        nudeNetEnabled = prefs.getBoolean(PREF_NUDENET_ENABLED, true)
+        val persistedNudeNetEnabled = prefs.getBoolean(PREF_NUDENET_ENABLED, false)
+        if (persistedNudeNetEnabled) {
+            prefs.edit().putBoolean(PREF_NUDENET_ENABLED, false).apply()
+        }
+        nudeNetEnabled = false
         textReplacementDictJson = prefs.getString(PREF_TEXT_REPLACEMENT_DICT, "") ?: ""
         restrictedVocabularyJson = prefs.getString(
             com.tpeapp.mindful.ToneEnforcementService.PREF_RESTRICTED_VOCABULARY, "") ?: ""

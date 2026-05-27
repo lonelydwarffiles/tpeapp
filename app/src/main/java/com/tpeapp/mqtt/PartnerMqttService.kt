@@ -434,11 +434,10 @@ class PartnerMqttService : Service() {
             changeDescription += " Blocked content classes updated."
         }
 
-        // NudeNet TFLite feature flag — set to false to save performance on
-        // low-end or non-rooted devices.
-        data["nudenet_enabled"]?.toBooleanStrictOrNull()?.let { enabled ->
-            editor.putBoolean(FilterService.PREF_NUDENET_ENABLED, enabled)
-            changeDescription += " NudeNet classifier → ${if (enabled) "enabled" else "disabled"}."
+        // TODO: fixing is at the bottom of the list, keep NudeNet disabled for now.
+        data["nudenet_enabled"]?.toBooleanStrictOrNull()?.let {
+            editor.putBoolean(FilterService.PREF_NUDENET_ENABLED, false)
+            changeDescription += " NudeNet classifier remains disabled."
         }
 
         editor.apply()
