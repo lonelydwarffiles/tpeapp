@@ -15,6 +15,7 @@ const _kHandlerEndpoint     = 'handler_endpoint';
 const _kHandlerApiKey       = 'handler_api_key';
 const _kHandlerModel        = 'handler_model';
 const _kHandlerSystemPrompt = 'handler_system_prompt';
+const _kNudeNetEnabled      = 'nudenet_enabled';
 
 // SharedPreferences keys for the password vault (mirror of Kotlin constants)
 const _kBlockPasswordChanges = 'vault_block_password_changes';
@@ -42,6 +43,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   // Filter
   double _threshold = 0.55;
   bool _strictMode = false;
+  bool _nudeNetEnabled = false;
   String _webhookUrl = '';
   String _webhookToken = '';
 
@@ -98,11 +100,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final injectionMode = await RemoteControlChannel.getInjectionMode();
     final rootAvailable = await RemoteControlChannel.isRootAvailable();
     final textReplacementDict = await TextReplacementChannel.getDict();
+    final persistedNudeNet = _prefs.getBool(_kNudeNetEnabled) ?? false;
+    if (persistedNudeNet) {
+      await _prefs.setBool(_kNudeNetEnabled, false);
+    }
     setState(() {
       _adminActive = active;
       _loadingAdmin = false;
       _threshold = (_prefs.getDouble('filter_confidence_threshold') ?? 0.55);
       _strictMode = _prefs.getBool('filter_strict_mode') ?? false;
+      _nudeNetEnabled = false;
       _webhookUrl = webhookUrl ?? '';
       _webhookToken = webhookToken ?? '';
       _handlerEndpoint =
@@ -144,6 +151,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Future<void> _applyFilterSettings() async {
+    await _prefs.setBool(_kNudeNetEnabled, false);
     await FilterServiceChannel.setThreshold(_threshold);
     await FilterServiceChannel.setStrictMode(enabled: _strictMode);
     await FilterServiceChannel.setWebhookUrl(_webhookUrl);
@@ -326,6 +334,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
           // ── Filter settings ─────────────────────────────────────────
           Text('Content Filter', style: Theme.of(context).textTheme.titleMedium),
           const SizedBox(height: 8),
+          Text('Media Censoring (NudeNet)',
+              style: Theme.of(context).textTheme.titleSmall),
+          SwitchListTile(
+            title: const Text('Enable NudeNet media censoring'),
+            subtitle: const Text(
+                'Temporarily disabled and cannot be enabled right now.'),
+            value: _nudeNetEnabled,
+            onChanged: null,
+            contentPadding: EdgeInsets.zero,
+          ),
           Row(children: [
             const Text('Threshold:'),
             Expanded(
@@ -335,7 +353,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 max: 1.0,
                 divisions: 18,
                 label: _threshold.toStringAsFixed(2),
-                onChanged: (v) => setState(() => _threshold = v),
+                onChanged: null,
               ),
             ),
             Text(_threshold.toStringAsFixed(2)),
@@ -343,7 +361,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           SwitchListTile(
             title: const Text('Strict Mode'),
             value: _strictMode,
-            onChanged: (v) => setState(() => _strictMode = v),
+            onChanged: null,
             contentPadding: EdgeInsets.zero,
           ),
           _SettingsTextField(
