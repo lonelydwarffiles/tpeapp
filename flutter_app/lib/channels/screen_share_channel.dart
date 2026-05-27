@@ -28,4 +28,47 @@ class ScreenShareChannel {
   /// Stop the native [ScreencastService] if running.
   static Future<void> stopNativeScreenShare() =>
       _channel.invokeMethod<void>('stopNativeScreenShare');
+
+    /// Sets touch lock state for API-managed remote-control sessions.
+    static Future<Map<String, dynamic>> setTouchLock({
+        required bool enabled,
+        required String mode,
+        required bool allowRemoteInput,
+        String? sessionId,
+        int? ttlSec,
+        String? reason,
+    }) async {
+        final result = await _channel.invokeMethod<Map<Object?, Object?>>(
+            'setTouchLock',
+            {
+                'enabled': enabled,
+                'mode': mode,
+                'allowRemoteInput': allowRemoteInput,
+                'sessionId': sessionId,
+                'ttlSec': ttlSec,
+                'reason': reason,
+            },
+        );
+
+        return result?.map(
+                    (key, value) => MapEntry(
+                        key?.toString() ?? '',
+                        value,
+                    ),
+                ) ??
+                const <String, dynamic>{};
+    }
+
+    /// Returns the last known native touch-lock state.
+    static Future<Map<String, dynamic>> getTouchLockState() async {
+        final result = await _channel
+                .invokeMethod<Map<Object?, Object?>>('getTouchLockState');
+        return result?.map(
+                    (key, value) => MapEntry(
+                        key?.toString() ?? '',
+                        value,
+                    ),
+                ) ??
+                const <String, dynamic>{};
+    }
 }

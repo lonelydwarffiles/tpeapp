@@ -297,6 +297,31 @@ Handler website visibility paths for incoming device data:
 - GET /api/handler/tpe/audits
 - GET /api/vitals/history
 
+### 6.1 Text Replacement Policy Push (new)
+
+To remotely control per-app replacement behavior, backend may push:
+
+- action: `UPDATE_TEXT_REPLACEMENT_POLICY`
+- policy: JSON string with schema:
+
+{
+	"default_mode": "auto",
+	"packages": {
+		"com.example.chat": "full",
+		"com.example.bank": "identity_only"
+	},
+	"package_prefixes": {
+		"com.example.finance.": "off"
+	}
+}
+
+Supported modes:
+
+- `auto`          (context-aware default behavior)
+- `full`          (apply all eligible replacements)
+- `identity_only` (self-reference rules only)
+- `off`           (disable replacements for that scope)
+
 ## 7) Optional App-Integrated Queue Endpoints
 
 If Android app includes queue/inbox modules, these endpoints are available:
@@ -329,3 +354,101 @@ If Android app includes queue/inbox modules, these endpoints are available:
 - Public website route contract
 - Non-Android admin UI details
 - Marketing/public content surfaces
+
+## 10) Root-Guaranteed Control Profile
+
+Assumption for this profile:
+
+- Device is rooted and app is granted stable `su` execution rights.
+
+Under this assumption, control flows should prefer API-issued commands and root-backed input execution.
+
+### 10.1 Required Device Capabilities (reported to backend)
+
+Device status payloads should include capability hints so backend can route strict commands safely:
+
+{
+	"device_id": "<device_id>",
+	"capabilities": {
+		"root_available": true,
+		"remote_input_paths": ["root", "accessibility"],
+		"touch_lock_modes": ["advisory", "overlay_guard", "strict"],
+		"screen_share_control": true
+	}
+}
+
+Notes:
+
+- Backend may cache these capabilities and reject unsupported commands early.
+- `root_available` should reflect a real probe, not static build config.
+
+### 10.2 Screen Share Commands (API-first)
+
+Root profile still requires screen-share authorization from backend.
+
+- `screen.share.start`
+	- must include: `session_id`, `session_token`, `signal_url`, `allow_remote_input`, `ttl_sec`
+- `screen.share.stop`
+	- must include: `session_id`
+- `screen.input.lock.set`
+	- controls local touch lock mode during an active session
+
+Example `screen.input.lock.set` payload:
+
+{
+	"enabled": true,
+	"mode": "strict",
+	"allow_remote_input": true,
+	"session_id": "<session_id>",
+	"ttl_sec": 900,
+	"reason": "handler_control_window"
+}
+
+### 10.3 Strict Touch Lock Behavior (root profile)
+
+When `mode=strict` and `enabled=true`:
+
+1. App verifies active session + token validity.
+2. App enables local touch lock (root-backed path).
+3. App keeps remote control path active for website-driven input.
+4. App emits ACK lifecycle events: `RECEIVED` -> `RUNNING` -> `SUCCEEDED` or `FAILED`.
+
+When `enabled=false` or session ends:
+
+1. App immediately releases touch lock.
+2. App emits final ACK `SUCCEEDED`.
+
+Safety rules:
+
+- Auto-release lock on session timeout, heartbeat loss, app crash recovery, or explicit stop command.
+- Reject strict lock without an active session.
+- Reject strict lock when root probe fails at runtime.
+
+### 10.4 ACK/Error Contract For Root-Control Commands
+
+Minimum ACK fields:
+
+{
+	"command_id": "<uuid>",
+	"device_id": "<device_id>",
+	"status": "SUCCEEDED",
+	"timestamp": "2026-05-26T00:00:00Z",
+	"error_code": null,
+	"error_message": null,
+	"telemetry": {
+		"path": "root",
+		"lock_mode": "strict"
+	}
+}
+
+Recommended error codes:
+
+- `session_invalid`
+- `root_unavailable`
+- `permission_missing`
+- `capability_missing`
+- `execution_error`
+
+### 10.5 Migration Rule
+
+Legacy push actions (for example `REQUEST_CHECKIN`) may continue during migration, but all new screen-share and touch-lock controls should use typed API command envelopes and ACK lifecycle reporting.

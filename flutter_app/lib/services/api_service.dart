@@ -301,6 +301,36 @@ class ApiService {
     _assertSuccess(response, 'Assign task');
   }
 
+  // ── Remote command ack ────────────────────────────────────────────────
+
+  /// POSTs command execution status to
+  /// `{endpoint}/api/tpe/commands/{commandId}/ack`.
+  Future<void> postCommandAck({
+    required String commandId,
+    required String status,
+    String? errorCode,
+    String? errorMessage,
+    Map<String, dynamic>? telemetry,
+  }) async {
+    final body = jsonEncode({
+      'status': status,
+      if (errorCode != null && errorCode.isNotEmpty) 'error_code': errorCode,
+      if (errorMessage != null && errorMessage.isNotEmpty)
+        'error_message': errorMessage,
+      if (telemetry != null && telemetry.isNotEmpty) 'telemetry': telemetry,
+    });
+
+    final response = await http
+        .post(
+          Uri.parse('$_endpoint/api/tpe/commands/$commandId/ack'),
+          headers: _bearerHeaders,
+          body: body,
+        )
+        .timeout(_timeout);
+
+    _assertSuccess(response, 'Command ack');
+  }
+
   // ── Helpers ───────────────────────────────────────────────────────────
 
   void _assertSuccess(http.Response response, String label) {

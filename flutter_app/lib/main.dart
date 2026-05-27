@@ -11,10 +11,14 @@ import 'services/sub_profile_repository.dart';
 import 'services/device_media_service.dart';
 import 'services/websocket_service.dart';
 import 'services/intiface_service.dart';
+import 'channels/text_replacement_channel.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   final prefs = await SharedPreferences.getInstance();
+
+  // Seed default pronoun/pup-lingo replacements on first launch.
+  await TextReplacementChannel.ensureDefaults();
 
   // Initialise WorkManager so the vitals-sync background task can be
   // registered or resumed when the user enables Health Connect sync.

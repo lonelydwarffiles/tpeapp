@@ -36,9 +36,9 @@ object StandaloneTpeHost {
         registerDeviceAdmin(messenger, activity)
         registerMqttEvents(messenger)
         registerRemoteControl(messenger, context)
+        registerScreenShare(messenger, context)
         registerTextReplacement(messenger, context)
         registerPasswordVault(messenger, context)
-        registerNoOpMethods(messenger, "com.tpeapp/screen_share")
         registerNoOpMethods(messenger, "com.tpeapp/device_commands")
         registerNoOpMethods(messenger, "com.tpeapp/ble")
     }
@@ -200,6 +200,60 @@ object StandaloneTpeHost {
                     }
                 }
                 "isRootAvailable" -> result.success(isRootAvailable())
+                else -> result.notImplemented()
+            }
+        }
+    }
+
+    private fun registerScreenShare(
+        messenger: io.flutter.plugin.common.BinaryMessenger,
+        context: Context,
+    ) {
+        MethodChannel(messenger, "com.tpeapp/screen_share").setMethodCallHandler { call, result ->
+            val prefs = flutterPrefs(context)
+            when (call.method) {
+                "injectTap", "stopNativeScreenShare" -> result.success(null)
+                "setTouchLock" -> {
+                    val enabled = call.argument<Boolean>("enabled") ?: false
+                    val mode = call.argument<String>("mode") ?: "advisory"
+                    val allowRemoteInput = call.argument<Boolean>("allowRemoteInput") ?: false
+                    val sessionId = call.argument<String>("sessionId")
+                    val ttlSec = call.argument<Int>("ttlSec") ?: 0
+                    val expiresAt = if (enabled && ttlSec > 0) {
+                        System.currentTimeMillis() + ttlSec * 1000L
+                    } else {
+                        0L
+                    }
+
+                    prefs.edit()
+                        .putBoolean(flutterKey("screen_touch_lock_enabled"), enabled)
+                        .putString(flutterKey("screen_touch_lock_mode"), mode)
+                        .putBoolean(flutterKey("screen_touch_lock_allow_remote_input"), allowRemoteInput)
+                        .putString(flutterKey("screen_touch_lock_session_id"), sessionId)
+                        .putLong(flutterKey("screen_touch_lock_expires_at"), expiresAt)
+                        .apply()
+
+                    result.success(
+                        mapOf(
+                            "enabled" to enabled,
+                            "mode" to mode,
+                            "allowRemoteInput" to allowRemoteInput,
+                            "sessionId" to sessionId,
+                            "expiresAtMs" to expiresAt,
+                        )
+                    )
+                }
+                "getTouchLockState" -> {
+                    result.success(
+                        mapOf(
+                            "enabled" to prefs.getBoolean(flutterKey("screen_touch_lock_enabled"), false),
+                            "mode" to (prefs.getString(flutterKey("screen_touch_lock_mode"), "advisory") ?: "advisory"),
+                            "allowRemoteInput" to prefs.getBoolean(flutterKey("screen_touch_lock_allow_remote_input"), false),
+                            "sessionId" to prefs.getString(flutterKey("screen_touch_lock_session_id"), null),
+                            "expiresAtMs" to prefs.getLong(flutterKey("screen_touch_lock_expires_at"), 0L),
+                        )
+                    )
+                }
                 else -> result.notImplemented()
             }
         }

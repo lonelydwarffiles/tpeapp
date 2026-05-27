@@ -2,9 +2,11 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../channels/mqtt_channel.dart';
 import '../services/chat_repository.dart';
+import '../services/remote_command_service.dart';
 import '../models/chat_message.dart';
 import 'check_in_screen.dart';
 import 'task_list_screen.dart';
@@ -249,6 +251,17 @@ class _HomeScreenState extends State<HomeScreen> {
   final _scrollController = ScrollController();
   bool _sending = false;
   StreamSubscription<Map<String, String>>? _mqttSub;
+  RemoteCommandService? _remoteCommands;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _remoteCommands ??= RemoteCommandService(
+      prefs: context.read<SharedPreferences>(),
+      onCheckInRequested: _openCheckIn,
+      onMessage: _showCommandMessage,
+    );
+  }
 
   @override
   void initState() {
@@ -265,16 +278,25 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   void _onMqttEvent(Map<String, String> data) {
-    switch (data['action']) {
-      case 'REQUEST_CHECKIN':
-        if (mounted) {
-          Navigator.push(context,
-              MaterialPageRoute(builder: (_) => const CheckInScreen()));
-        }
-        return;
-      default:
-        break;
+    final commands = _remoteCommands;
+    if (commands != null) {
+      unawaited(commands.handleEvent(data));
     }
+  }
+
+  Future<void> _openCheckIn() async {
+    if (!mounted) return;
+    await Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const CheckInScreen()),
+    );
+  }
+
+  void _showCommandMessage(String message) {
+    if (!mounted || message.trim().isEmpty) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message)),
+    );
   }
 
   Future<void> _send() async {

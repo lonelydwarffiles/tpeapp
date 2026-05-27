@@ -59,6 +59,8 @@ object InputConnectionHook {
 
     /** How long the vocabulary / tone-mode caches remain valid (ms). */
     private const val CACHE_TTL_MS = 30_000L
+    private const val MODE_STRICT = "strict"
+    private const val MODE_LOOSE = "loose"
 
     /** Whole-word boundary pattern; filled with the escaped restricted word. */
     private const val WORD_BOUNDARY_PATTERN = "(?<![\\w])%s(?![\\w])"
@@ -73,7 +75,7 @@ object InputConnectionHook {
 
     // ── Tone-mode cache ───────────────────────────────────────────────────────
 
-    @Volatile private var cachedToneMode  : String = "Soft"
+    @Volatile private var cachedToneMode  : String = MODE_LOOSE
     @Volatile private var lastModeFetchMs : Long   = 0L
 
     // ── Session whitelist (Soft mode) ─────────────────────────────────────────
@@ -155,7 +157,7 @@ object InputConnectionHook {
             val textLower = textStr.lowercase()
 
             // ── Bypass check (Soft mode only) ─────────────────────────────────
-            if (toneMode == "Soft" && bypassWindowOpen) {
+            if (toneMode == MODE_LOOSE && bypassWindowOpen) {
                 val redacted = lastRedactedWord
                 if (redacted != null &&
                     System.currentTimeMillis() - lastRedactTimestamp <= BYPASS_WINDOW_MS &&
@@ -178,7 +180,7 @@ object InputConnectionHook {
             for ((word, regex) in vocabRegexes) {
                 if (word.isBlank()) continue
                 // In Soft mode, skip words the user has already whitelisted.
-                if (toneMode == "Soft" && sessionWhitelistWords.contains(word)) continue
+                if (toneMode == MODE_LOOSE && sessionWhitelistWords.contains(word)) continue
                 if (!regex.containsMatchIn(textLower)) continue
 
                 param.args[0]        = SAFE_PHRASE
@@ -246,18 +248,30 @@ object InputConnectionHook {
     }
 
     /**
-     * Returns the current tone mode ("Strict" or "Soft"), refreshing from the
-     * service if the cache has expired.  Defaults to "Soft" on service failure.
+     * Returns the current tone mode (strict or loose), refreshing from the
+     * service if the cache has expired. Accepts legacy values such as
+     * "Soft"/"Loose" case-insensitively.
      */
     private fun currentToneMode(): String {
         val now = System.currentTimeMillis()
         if (now - lastModeFetchMs < CACHE_TTL_MS) return cachedToneMode
 
         val service = MainHook.filterService ?: return cachedToneMode
-        val mode = runCatching { service.getToneMode() }.getOrNull() ?: return cachedToneMode
+        val raw = runCatching { service.getToneMode() }.getOrNull() ?: return cachedToneMode
         lastModeFetchMs = now
-        cachedToneMode  = mode
+        cachedToneMode = normalizeToneMode(raw)
         return cachedToneMode
+    }
+
+    private fun normalizeToneMode(raw: String): String {
+        return when (raw.trim().lowercase()) {
+            "strict" -> MODE_STRICT
+            "loose", "soft" -> MODE_LOOSE
+            else -> {
+                Log.w(TAG, "Unknown tone mode '$raw' — defaulting to loose")
+                MODE_LOOSE
+            }
+        }
     }
 
     private fun parseVocabulary(json: String): List<String> {

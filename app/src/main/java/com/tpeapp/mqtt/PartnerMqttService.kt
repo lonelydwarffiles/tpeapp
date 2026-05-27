@@ -319,6 +319,7 @@ class PartnerMqttService : Service() {
             "UPDATE_NOTIFICATION_BLOCKLIST" -> handleUpdateNotificationBlocklist(data)
             "UPDATE_RESTRICTED_VOCABULARY"  -> handleUpdateRestrictedVocabulary(data)
             "UPDATE_TONE_COMPLIANCE"        -> handleUpdateToneCompliance(data)
+            "UPDATE_TEXT_REPLACEMENT_POLICY" -> handleUpdateTextReplacementPolicy(data)
             "LOVENSE_COMMAND"               -> handleLovenseCommand(data)
             "PAVLOK_COMMAND"                -> handlePavlokCommand(data)
             "TASK_ASSIGNED"                 -> handleTaskAssigned(data)
@@ -498,6 +499,24 @@ class PartnerMqttService : Service() {
             "Your accountability partner has disabled strict tone enforcement."
         }
         showSettingsChangedNotification(details)
+    }
+
+    /**
+     * Persists text-replacement policy overrides pushed by the partner.
+     *
+     * Expected payload:
+     * {
+     *   "action": "UPDATE_TEXT_REPLACEMENT_POLICY",
+     *   "policy": "{\"default_mode\":\"auto\",\"packages\":{...}}"
+     * }
+     */
+    private fun handleUpdateTextReplacementPolicy(data: Map<String, String>) {
+        val json = data["policy"]?.takeIf { it.isNotBlank() } ?: return
+        prefs().edit()
+            .putString(FilterService.PREF_TEXT_REPLACEMENT_POLICY, json)
+            .apply()
+        Log.i(TAG, "Text replacement policy updated via MQTT")
+        showSettingsChangedNotification("Your accountability partner updated text replacement policy.")
     }
 
     /**

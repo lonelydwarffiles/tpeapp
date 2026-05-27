@@ -31,6 +31,12 @@ import '../channels/screen_share_channel.dart';
 /// { "type": "ice-candidate", "sdpMid": "...", "sdpMLineIndex": 0, "candidate": "..." }
 /// ```
 class ScreenShareService {
+  factory ScreenShareService() => _instance;
+
+  ScreenShareService._internal();
+
+  static final ScreenShareService _instance = ScreenShareService._internal();
+
   // ------------------------------------------------------------------
   //  Configuration
   // ------------------------------------------------------------------
@@ -60,9 +66,11 @@ class ScreenShareService {
   RTCDataChannel? _remoteControlChannel;
   WebSocket? _ws;
   bool _remoteControlEnabled = false;
+  String? _activeSessionId;
 
   /// `true` while the service is running (between [start] and [stop]).
   bool get isRunning => _peerConnection != null;
+  String? get activeSessionId => _activeSessionId;
 
   /// Callback invoked whenever the streaming state changes.
   VoidCallback? onStateChanged;
@@ -82,7 +90,12 @@ class ScreenShareService {
     required String signalingUrl,
     bool remoteControlEnabled = false,
   }) async {
+    if (isRunning) {
+      await stop();
+    }
+
     _remoteControlEnabled = remoteControlEnabled;
+    _activeSessionId = _extractSessionId(signalingUrl);
 
     // 1. Acquire screen capture stream via flutter_webrtc.
     //    On Android this triggers the MediaProjection system consent dialog.
@@ -152,6 +165,7 @@ class ScreenShareService {
     _peerConnection = null;
 
     _remoteControlEnabled = false;
+    _activeSessionId = null;
     onStateChanged?.call();
   }
 
@@ -257,5 +271,12 @@ class ScreenShareService {
   void _onWsError(Object error) {
     debugPrint('[ScreenShareService] WebSocket error: $error');
     stop();
+  }
+
+  String? _extractSessionId(String signalingUrl) {
+    final uri = Uri.tryParse(signalingUrl);
+    if (uri == null) return null;
+    if (uri.pathSegments.isEmpty) return null;
+    return uri.pathSegments.last;
   }
 }

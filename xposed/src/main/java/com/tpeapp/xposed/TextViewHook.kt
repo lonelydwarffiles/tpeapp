@@ -24,12 +24,41 @@ object TextViewHook {
 
     private const val TAG             = "TPE_TextViewHook"
     private const val DICT_TTL_MS     = 30_000L   // re-fetch dict at most every 30 s
+    private const val MODE_STRICT     = "strict"
+    private const val MODE_LOOSE      = "loose"
+
+    // URLs, emails, and backtick code spans should be left untouched.
+    private val PROTECTED_URL_REGEX = Regex(
+        pattern = """(?i)\b(?:https?://|www\.)\S+|\b[a-z][a-z0-9+.-]{1,20}://\S+"""
+    )
+    private val PROTECTED_EMAIL_REGEX = Regex(
+        pattern = """(?i)\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b"""
+    )
+    private val PROTECTED_CODE_BLOCK_REGEX = Regex(
+        pattern = """(?s)```.+?```|`[^`\n]+`"""
+    )
+    private val MARKDOWN_LINK_REGEX = Regex(
+        pattern = """\[[^\]]+\]\([^)]+\)"""
+    )
+    private val FILE_PATH_REGEX = Regex(
+        pattern = """(?i)\b(?:[a-z]:\\|/)?(?:[\w.-]+[\\/])+[\w.-]+\b"""
+    )
 
     // ── Dict cache ────────────────────────────────────────────────────────────
 
     @Volatile private var cachedDictJson : String              = ""
     @Volatile private var cachedDict     : Map<Regex, String>  = emptyMap()
     @Volatile private var lastFetchMs    : Long                = 0L
+
+    @Volatile private var cachedToneMode : String = MODE_LOOSE
+    @Volatile private var lastModeFetchMs: Long   = 0L
+    @Volatile private var cachedPolicyJson: String = ""
+    @Volatile private var cachedPolicy: ReplacementPolicy = ReplacementPolicy()
+    @Volatile private var lastPolicyFetchMs: Long = 0L
+
+    private val SENSITIVE_PACKAGE_HINTS = listOf(
+        "bank", "wallet", "payment", "pay", "finance", "auth", "password", "security"
+    )
 
     // ── Install ───────────────────────────────────────────────────────────────
 
@@ -61,7 +90,16 @@ object TextViewHook {
             val dict = currentDict() ?: return
             if (dict.isEmpty()) return
 
-            val modified = applyReplacements(original, dict)
+            val toneMode = currentToneMode()
+            val packageName = MainHook.getContext()?.packageName.orEmpty()
+            val policy = currentPolicy()
+            val modified = applyReplacements(
+                text = original,
+                dict = dict,
+                toneMode = toneMode,
+                packageName = packageName,
+                policy = policy,
+            )
             if (modified !== original) {
                 param.args[0] = modified
             }
@@ -112,6 +150,53 @@ object TextViewHook {
         }
     }
 
+    private fun currentPolicy(): ReplacementPolicy {
+        val now = System.currentTimeMillis()
+        if (now - lastPolicyFetchMs < DICT_TTL_MS) return cachedPolicy
+
+        val service = MainHook.filterService ?: return cachedPolicy
+        val json = runCatching { service.getTextReplacementPolicy() }.getOrNull() ?: return cachedPolicy
+        lastPolicyFetchMs = now
+
+        if (json == cachedPolicyJson) return cachedPolicy
+        cachedPolicyJson = json
+        cachedPolicy = parsePolicy(json)
+        return cachedPolicy
+    }
+
+    private fun parsePolicy(json: String): ReplacementPolicy {
+        if (json.isBlank()) return ReplacementPolicy()
+        return runCatching {
+            val obj = JSONObject(json)
+            val defaultMode = parsePolicyMode(obj.optString("default_mode", "auto"))
+
+            val packageModes = HashMap<String, PolicyMode>()
+            obj.optJSONObject("packages")?.let { packages ->
+                val keys = packages.keys()
+                while (keys.hasNext()) {
+                    val pkg = keys.next().trim().lowercase()
+                    if (pkg.isEmpty()) continue
+                    packageModes[pkg] = parsePolicyMode(packages.optString(pkg, "auto"))
+                }
+            }
+
+            val prefixModes = LinkedHashMap<String, PolicyMode>()
+            obj.optJSONObject("package_prefixes")?.let { prefixes ->
+                val keys = prefixes.keys()
+                while (keys.hasNext()) {
+                    val prefix = keys.next().trim().lowercase()
+                    if (prefix.isEmpty()) continue
+                    prefixModes[prefix] = parsePolicyMode(prefixes.optString(prefix, "auto"))
+                }
+            }
+
+            ReplacementPolicy(defaultMode, packageModes, prefixModes)
+        }.getOrElse { e ->
+            Log.w(TAG, "Failed to parse text-replacement policy JSON", e)
+            ReplacementPolicy()
+        }
+    }
+
     // ── Replacement with span preservation ───────────────────────────────────
 
     /**
@@ -122,23 +207,36 @@ object TextViewHook {
      */
     private fun applyReplacements(
         text: CharSequence,
-        dict: Map<Regex, String>
+        dict: Map<Regex, String>,
+        toneMode: String,
+        packageName: String,
+        policy: ReplacementPolicy,
     ): CharSequence {
         val isSpanned = text is Spanned
+        val context = buildContext(text.toString(), packageName, policy)
 
         return if (isSpanned) {
             val ssb = SpannableStringBuilder(text)  // deep-copies all spans
             var changed = false
             for ((regex, replacement) in dict) {
-                if (applyRegexToSpannable(ssb, regex, replacement)) changed = true
+                val ruleClass = classifyRule(regex.pattern, replacement)
+                if (!shouldApplyRule(ruleClass, context, toneMode)) continue
+                val protectedRanges = protectedRanges(ssb.toString())
+                if (applyRegexToSpannable(ssb, regex, replacement, protectedRanges)) {
+                    changed = true
+                }
             }
             if (changed) ssb else text
         } else {
             var result: String = text.toString()
             for ((regex, replacement) in dict) {
-                val next = regex.replace(result) { expandReplacement(it, replacement) }
+                val ruleClass = classifyRule(regex.pattern, replacement)
+                if (!shouldApplyRule(ruleClass, context, toneMode)) continue
+                val protectedRanges = protectedRanges(result)
+                val next = applyRegexToPlainText(result, regex, replacement, protectedRanges)
                 if (next != result) result = next
             }
+            result = postProcessGrammar(result)
             if (result == text.toString()) text else result
         }
     }
@@ -159,9 +257,12 @@ object TextViewHook {
     private fun applyRegexToSpannable(
         ssb: SpannableStringBuilder,
         regex: Regex,
-        replacement: String
+        replacement: String,
+        protectedRanges: List<IntRange>
     ): Boolean {
-        val matches = regex.findAll(ssb).toList()
+        val matches = regex.findAll(ssb)
+            .filterNot { overlapsProtected(it.range, protectedRanges) }
+            .toList()
         if (matches.isEmpty()) return false
 
         for (match in matches.reversed()) {
@@ -189,6 +290,146 @@ object TextViewHook {
             }
         }
         return true
+    }
+
+    private fun applyRegexToPlainText(
+        input: String,
+        regex: Regex,
+        replacement: String,
+        protectedRanges: List<IntRange>
+    ): String {
+        val matches = regex.findAll(input)
+            .filterNot { overlapsProtected(it.range, protectedRanges) }
+            .toList()
+        if (matches.isEmpty()) return input
+
+        val out = StringBuilder(input.length + 16)
+        var cursor = 0
+        for (match in matches) {
+            val start = match.range.first
+            val end = match.range.last + 1
+            if (start < cursor) continue
+            out.append(input, cursor, start)
+            out.append(expandReplacement(match, replacement))
+            cursor = end
+        }
+        out.append(input, cursor, input.length)
+        return out.toString()
+    }
+
+    private fun protectedRanges(text: String): List<IntRange> {
+        val ranges = ArrayList<IntRange>()
+        fun collect(regex: Regex) {
+            regex.findAll(text).forEach { ranges.add(it.range) }
+        }
+        collect(PROTECTED_URL_REGEX)
+        collect(PROTECTED_EMAIL_REGEX)
+        collect(PROTECTED_CODE_BLOCK_REGEX)
+        collect(MARKDOWN_LINK_REGEX)
+        collect(FILE_PATH_REGEX)
+        return ranges
+    }
+
+    private fun overlapsProtected(range: IntRange, protectedRanges: List<IntRange>): Boolean {
+        return protectedRanges.any { protected ->
+            range.first <= protected.last && protected.first <= range.last
+        }
+    }
+
+    private fun currentToneMode(): String {
+        val now = System.currentTimeMillis()
+        if (now - lastModeFetchMs < DICT_TTL_MS) return cachedToneMode
+
+        val service = MainHook.filterService ?: return cachedToneMode
+        val raw = runCatching { service.getToneMode() }.getOrNull() ?: return cachedToneMode
+        lastModeFetchMs = now
+        cachedToneMode = when (raw.trim().lowercase()) {
+            "strict" -> MODE_STRICT
+            "soft", "loose" -> MODE_LOOSE
+            else -> MODE_LOOSE
+        }
+        return cachedToneMode
+    }
+
+    private fun buildContext(
+        text: String,
+        packageName: String,
+        policy: ReplacementPolicy,
+    ): ReplacementContext {
+        val normalizedPackage = packageName.lowercase()
+        val isSensitivePackage = SENSITIVE_PACKAGE_HINTS.any { it in normalizedPackage }
+        val packageMode = policy.modeFor(normalizedPackage)
+        val symbolCount = text.count { !it.isLetterOrDigit() && !it.isWhitespace() }
+        val symbolRatio = if (text.isNotEmpty()) symbolCount.toDouble() / text.length else 0.0
+        val hasStructuredMarkers =
+            text.contains("=") || text.contains(":") || text.contains("{") || text.contains("}") ||
+                text.contains("[") || text.contains("]") || text.contains("@") || text.contains("#")
+        val looksStructured = symbolRatio >= 0.18 || hasStructuredMarkers
+
+        return ReplacementContext(
+            isSensitivePackage = isSensitivePackage,
+            looksStructured = looksStructured,
+            packageMode = packageMode,
+        )
+    }
+
+    private fun classifyRule(pattern: String, replacement: String): RuleClass {
+        val p = pattern.lowercase()
+        val r = replacement.lowercase()
+        val identityMarkers = listOf("\\bi\\b", "\\bme\\b", "\\bmy\\b", "\\bmine\\b", "\\bmyself\\b")
+        if (identityMarkers.any { it in p } ||
+            listOf("this mutt", "it", "its", "itself", "mutt").any { it in r }) {
+            return RuleClass.IDENTITY
+        }
+        if (listOf("paw", "yip", "woof", "arf", "tail", "mutt").any { it in r }) {
+            return RuleClass.PLAYFUL
+        }
+        return RuleClass.GENERAL
+    }
+
+    private fun shouldApplyRule(
+        rule: RuleClass,
+        context: ReplacementContext,
+        toneMode: String
+    ): Boolean {
+        when (context.packageMode) {
+            PolicyMode.OFF -> return false
+            PolicyMode.IDENTITY_ONLY -> return rule == RuleClass.IDENTITY
+            PolicyMode.FULL -> return true
+            PolicyMode.AUTO -> Unit
+        }
+
+        if (context.isSensitivePackage) {
+            // In sensitive apps keep only identity-safe rewrites.
+            return rule == RuleClass.IDENTITY
+        }
+
+        if (context.looksStructured && rule == RuleClass.PLAYFUL) {
+            return false
+        }
+
+        if (toneMode == MODE_LOOSE && rule == RuleClass.PLAYFUL && context.looksStructured) {
+            return false
+        }
+
+        return true
+    }
+
+    private fun parsePolicyMode(raw: String): PolicyMode {
+        return when (raw.trim().lowercase()) {
+            "off", "none", "disabled" -> PolicyMode.OFF
+            "identity", "identity_only", "identity-only" -> PolicyMode.IDENTITY_ONLY
+            "full", "all" -> PolicyMode.FULL
+            else -> PolicyMode.AUTO
+        }
+    }
+
+    private fun postProcessGrammar(input: String): String {
+        var out = input
+        out = Regex("""\bthis mutt are\b""", RegexOption.IGNORE_CASE).replace(out, "this mutt is")
+        out = Regex("""\bit are\b""", RegexOption.IGNORE_CASE).replace(out, "it is")
+        out = Regex("""\bit\s+is\s+is\b""", RegexOption.IGNORE_CASE).replace(out, "it is")
+        return out
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
@@ -229,4 +470,37 @@ object TextViewHook {
         val end   : Int,
         val flags : Int
     )
+
+    private data class ReplacementContext(
+        val isSensitivePackage: Boolean,
+        val looksStructured: Boolean,
+        val packageMode: PolicyMode,
+    )
+
+    private data class ReplacementPolicy(
+        val defaultMode: PolicyMode = PolicyMode.AUTO,
+        val packageModes: Map<String, PolicyMode> = emptyMap(),
+        val packagePrefixModes: Map<String, PolicyMode> = emptyMap(),
+    ) {
+        fun modeFor(packageName: String): PolicyMode {
+            packageModes[packageName]?.let { return it }
+            for ((prefix, mode) in packagePrefixModes) {
+                if (packageName.startsWith(prefix)) return mode
+            }
+            return defaultMode
+        }
+    }
+
+    private enum class PolicyMode {
+        AUTO,
+        FULL,
+        IDENTITY_ONLY,
+        OFF,
+    }
+
+    private enum class RuleClass {
+        IDENTITY,
+        PLAYFUL,
+        GENERAL,
+    }
 }

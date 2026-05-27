@@ -73,6 +73,11 @@ class FilterService : Service() {
          */
         const val PREF_TEXT_REPLACEMENT_DICT   = "text_replacement_dict"
         /**
+         * SharedPreferences key (String) for text-replacement policy overrides.
+         * JSON schema: { default_mode, packages, package_prefixes }.
+         */
+        const val PREF_TEXT_REPLACEMENT_POLICY = "text_replacement_policy"
+        /**
          * SharedPreferences key (Boolean) for the NudeNet TFLite feature flag.
          * When `false` the classifier is not initialised and all scan requests
          * return a safe (not-blocked) result, saving memory and CPU on low-end
@@ -99,6 +104,8 @@ class FilterService : Service() {
 
     /** Cached text-replacement dictionary JSON (empty string = no replacements). */
     @Volatile private var textReplacementDictJson: String = ""
+    /** Cached text-replacement policy JSON (empty string = use built-in auto policy). */
+    @Volatile private var textReplacementPolicyJson: String = ""
 
     /**
     * Cached restricted-vocabulary JSON array (empty string = no vocabulary).
@@ -147,6 +154,10 @@ class FilterService : Service() {
                 PREF_TEXT_REPLACEMENT_DICT -> {
                     textReplacementDictJson = prefs.getString(key, "") ?: ""
                     Log.i(TAG, "Text-replacement dictionary updated")
+                }
+                PREF_TEXT_REPLACEMENT_POLICY -> {
+                    textReplacementPolicyJson = prefs.getString(key, "") ?: ""
+                    Log.i(TAG, "Text-replacement policy updated")
                 }
                 PREF_NUDENET_ENABLED -> {
                     val requested = prefs.getBoolean(key, false)
@@ -228,6 +239,7 @@ class FilterService : Service() {
         }
         nudeNetEnabled = false
         textReplacementDictJson = prefs.getString(PREF_TEXT_REPLACEMENT_DICT, "") ?: ""
+        textReplacementPolicyJson = prefs.getString(PREF_TEXT_REPLACEMENT_POLICY, "") ?: ""
         restrictedVocabularyJson = prefs.getString(
             com.tpeapp.mindful.ToneEnforcementService.PREF_RESTRICTED_VOCABULARY, "") ?: ""
         strictToneModeEnabled = prefs.getBoolean(
@@ -329,6 +341,8 @@ class FilterService : Service() {
         }
 
         override fun getTextReplacementDict(): String = textReplacementDictJson
+
+        override fun getTextReplacementPolicy(): String = textReplacementPolicyJson
 
         override fun getRestrictedVocabulary(): String = restrictedVocabularyJson
 

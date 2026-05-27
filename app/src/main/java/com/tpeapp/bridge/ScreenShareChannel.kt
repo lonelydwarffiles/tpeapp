@@ -2,6 +2,8 @@ package com.tpeapp.bridge
 
 import android.content.Context
 import android.content.Intent
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
 import androidx.preference.PreferenceManager
 import com.tpeapp.review.RemoteControlService
@@ -45,6 +47,14 @@ object ScreenShareChannel {
 
     private const val TAG     = "ScreenShareChannel"
     private const val CHANNEL = "com.tpeapp/screen_share"
+    private const val PREF_TOUCH_LOCK_ENABLED = "screen_touch_lock_enabled"
+    private const val PREF_TOUCH_LOCK_MODE = "screen_touch_lock_mode"
+    private const val PREF_TOUCH_LOCK_REMOTE_INPUT = "screen_touch_lock_allow_remote_input"
+    private const val PREF_TOUCH_LOCK_SESSION_ID = "screen_touch_lock_session_id"
+    private const val PREF_TOUCH_LOCK_EXPIRES_AT = "screen_touch_lock_expires_at"
+
+    private val mainHandler = Handler(Looper.getMainLooper())
+    private var autoUnlockRunnable: Runnable? = null
 
     fun register(messenger: BinaryMessenger, context: Context) {
         val ctx = context.applicationContext
@@ -62,6 +72,38 @@ object ScreenShareChannel {
                     "stopNativeScreenShare" -> {
                         ctx.stopService(Intent(ctx, ScreencastService::class.java))
                         result.success(null)
+                    }
+
+                    "setTouchLock" -> {
+                        val enabled = call.argument<Boolean>("enabled") ?: false
+                        val mode = call.argument<String>("mode") ?: "advisory"
+                        val allowRemoteInput = call.argument<Boolean>("allowRemoteInput") ?: false
+                        val sessionId = call.argument<String>("sessionId")
+                        val ttlSec = call.argument<Int>("ttlSec") ?: 0
+
+                        if (enabled && mode == "strict" && !RootChecker.isRootAvailable()) {
+                            result.error(
+                                "ROOT_UNAVAILABLE",
+                                "Strict touch lock requires root access",
+                                null
+                            )
+                            return@setMethodCallHandler
+                        }
+
+                        persistTouchLockState(
+                            ctx = ctx,
+                            enabled = enabled,
+                            mode = mode,
+                            allowRemoteInput = allowRemoteInput,
+                            sessionId = sessionId,
+                            ttlSec = ttlSec,
+                        )
+
+                        result.success(readTouchLockState(ctx))
+                    }
+
+                    "getTouchLockState" -> {
+                        result.success(readTouchLockState(ctx))
                     }
 
                     else -> result.notImplemented()
@@ -85,6 +127,13 @@ object ScreenShareChannel {
      * | `accessibility` | Always use [RemoteControlService.dispatchGesture]             |
      */
     private fun routeInjection(ctx: Context, normX: Float, normY: Float) {
+        val lockEnabled = isTouchLockEnabled(ctx)
+        val lockAllowsRemoteInput = isTouchLockRemoteInputAllowed(ctx)
+        if (lockEnabled && !lockAllowsRemoteInput) {
+            Log.w(TAG, "Dropping injectTap while touch lock disallows remote input")
+            return
+        }
+
         val prefs = PreferenceManager.getDefaultSharedPreferences(ctx)
         val mode  = prefs.getString(
             RemoteControlChannel.PREF_INJECTION_MODE,
@@ -130,5 +179,75 @@ object ScreenShareChannel {
             put("y", normY.toDouble())
         }.toString()
         RemoteInputDispatcher.dispatch(ctx, json)
+    }
+
+    private fun persistTouchLockState(
+        ctx: Context,
+        enabled: Boolean,
+        mode: String,
+        allowRemoteInput: Boolean,
+        sessionId: String?,
+        ttlSec: Int,
+    ) {
+        val expiresAt = if (enabled && ttlSec > 0) {
+            System.currentTimeMillis() + (ttlSec * 1000L)
+        } else {
+            0L
+        }
+
+        PreferenceManager.getDefaultSharedPreferences(ctx).edit()
+            .putBoolean(PREF_TOUCH_LOCK_ENABLED, enabled)
+            .putString(PREF_TOUCH_LOCK_MODE, mode)
+            .putBoolean(PREF_TOUCH_LOCK_REMOTE_INPUT, allowRemoteInput)
+            .putString(PREF_TOUCH_LOCK_SESSION_ID, sessionId)
+            .putLong(PREF_TOUCH_LOCK_EXPIRES_AT, expiresAt)
+            .apply()
+
+        RemoteInputDispatcher.remoteControlEnabled = enabled && allowRemoteInput
+
+        scheduleAutoUnlock(ctx, expiresAt)
+    }
+
+    private fun scheduleAutoUnlock(ctx: Context, expiresAt: Long) {
+        autoUnlockRunnable?.let { mainHandler.removeCallbacks(it) }
+        autoUnlockRunnable = null
+
+        if (expiresAt <= 0L) return
+
+        val delayMs = (expiresAt - System.currentTimeMillis()).coerceAtLeast(0L)
+        val runnable = Runnable {
+            persistTouchLockState(
+                ctx = ctx,
+                enabled = false,
+                mode = "strict",
+                allowRemoteInput = false,
+                sessionId = null,
+                ttlSec = 0,
+            )
+            Log.i(TAG, "Touch lock auto-released after TTL expiry")
+        }
+        autoUnlockRunnable = runnable
+        mainHandler.postDelayed(runnable, delayMs)
+    }
+
+    private fun isTouchLockEnabled(ctx: Context): Boolean {
+        return PreferenceManager.getDefaultSharedPreferences(ctx)
+            .getBoolean(PREF_TOUCH_LOCK_ENABLED, false)
+    }
+
+    private fun isTouchLockRemoteInputAllowed(ctx: Context): Boolean {
+        return PreferenceManager.getDefaultSharedPreferences(ctx)
+            .getBoolean(PREF_TOUCH_LOCK_REMOTE_INPUT, false)
+    }
+
+    private fun readTouchLockState(ctx: Context): Map<String, Any?> {
+        val prefs = PreferenceManager.getDefaultSharedPreferences(ctx)
+        return hashMapOf(
+            "enabled" to prefs.getBoolean(PREF_TOUCH_LOCK_ENABLED, false),
+            "mode" to (prefs.getString(PREF_TOUCH_LOCK_MODE, "advisory") ?: "advisory"),
+            "allowRemoteInput" to prefs.getBoolean(PREF_TOUCH_LOCK_REMOTE_INPUT, false),
+            "sessionId" to prefs.getString(PREF_TOUCH_LOCK_SESSION_ID, null),
+            "expiresAtMs" to prefs.getLong(PREF_TOUCH_LOCK_EXPIRES_AT, 0L),
+        )
     }
 }
