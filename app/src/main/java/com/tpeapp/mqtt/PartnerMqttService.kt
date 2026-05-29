@@ -439,6 +439,10 @@ class PartnerMqttService : Service() {
             editor.putBoolean(FilterService.PREF_NUDENET_ENABLED, it)
             changeDescription += " NudeNet classifier → $it."
         }
+        data["nudity_permitted_by_handler"]?.toBooleanStrictOrNull()?.let {
+            editor.putBoolean(FilterService.PREF_NUDITY_PERMITTED_BY_HANDLER, it)
+            changeDescription += " Nudity bypass permission → $it."
+        }
 
         editor.apply()
 

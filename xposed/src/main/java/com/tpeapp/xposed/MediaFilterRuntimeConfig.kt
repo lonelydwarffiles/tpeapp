@@ -17,6 +17,7 @@ object MediaFilterRuntimeConfig {
         val censorStyle: String = "pixelate", // blackout|heavy_blur|pixelate
         val strictPackages: Set<String> = emptySet(),
         val maxInFlight: Int = 4,
+        val nudityPermittedByHandler: Boolean = false,
     )
 
     @Volatile private var lastFetchMs = 0L
@@ -63,6 +64,8 @@ object MediaFilterRuntimeConfig {
         }
     }
 
+    fun isNudityPermittedByHandler(): Boolean = current().nudityPermittedByHandler
+
     fun censorBitmapInPlace(bitmap: Bitmap) {
         val ctx = MainHook.getContext()
         val style = current().censorStyle
@@ -99,7 +102,8 @@ object MediaFilterRuntimeConfig {
             }
             val strictPackages = parsePackages(obj.optJSONArray("strict_packages") ?: JSONArray())
             val maxInFlight = obj.optInt("max_in_flight", 4).coerceIn(1, 12)
-            Config(mode, censorStyle, strictPackages, maxInFlight)
+            val nudityPermittedByHandler = obj.optBoolean("nudity_permitted_by_handler", false)
+            Config(mode, censorStyle, strictPackages, maxInFlight, nudityPermittedByHandler)
         }.getOrElse { cached }
     }
 

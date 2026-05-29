@@ -93,6 +93,8 @@ class FilterService : Service() {
         const val PREF_MEDIA_STRICT_PACKAGES    = "media_filter_strict_packages"
         /** Soft upper bound for concurrent in-flight scans in Xposed lanes. */
         const val PREF_MEDIA_MAX_IN_FLIGHT      = "media_filter_max_in_flight"
+        /** Whether handler explicitly permits nudity (bypass media scan reveal gates). */
+        const val PREF_NUDITY_PERMITTED_BY_HANDLER = "nudity_permitted_by_handler"
 
         /** Threshold used when strict mode is active and no explicit threshold is set. */
         private const val STRICT_THRESHOLD     = 0.30f
@@ -143,6 +145,7 @@ class FilterService : Service() {
     @Volatile private var mediaCensorStyle: String = "pixelate"
     @Volatile private var mediaStrictPackagesJson: String = "[]"
     @Volatile private var mediaMaxInFlight: Int = 4
+    @Volatile private var nudityPermittedByHandler: Boolean = false
 
     /** Minimum gap between consecutive clean-scan reward triggers (30 minutes). */
     private val CLEAN_SCAN_REWARD_INTERVAL_MS = 30 * 60 * 1_000L
@@ -206,6 +209,10 @@ class FilterService : Service() {
                 PREF_MEDIA_MAX_IN_FLIGHT -> {
                     mediaMaxInFlight = prefs.getInt(key, 4).coerceIn(1, 12)
                     Log.i(TAG, "Media in-flight budget updated -> $mediaMaxInFlight")
+                }
+                PREF_NUDITY_PERMITTED_BY_HANDLER -> {
+                    nudityPermittedByHandler = prefs.getBoolean(key, false)
+                    Log.i(TAG, "Nudity permission bypass updated via settings -> $nudityPermittedByHandler")
                 }
                 com.tpeapp.mindful.ToneEnforcementService.PREF_RESTRICTED_VOCABULARY -> {
                     restrictedVocabularyJson = prefs.getString(key, "") ?: ""
@@ -272,6 +279,7 @@ class FilterService : Service() {
             prefs.getString(PREF_MEDIA_STRICT_PACKAGES, "[]")
         )
         mediaMaxInFlight = prefs.getInt(PREF_MEDIA_MAX_IN_FLIGHT, 4).coerceIn(1, 12)
+        nudityPermittedByHandler = prefs.getBoolean(PREF_NUDITY_PERMITTED_BY_HANDLER, false)
         textReplacementDictJson = prefs.getString(PREF_TEXT_REPLACEMENT_DICT, "") ?: ""
         textReplacementPolicyJson = prefs.getString(PREF_TEXT_REPLACEMENT_POLICY, "") ?: ""
         restrictedVocabularyJson = prefs.getString(
@@ -396,6 +404,7 @@ class FilterService : Service() {
             put("censor_style", mediaCensorStyle)
             put("strict_packages", JSONArray(mediaStrictPackagesJson))
             put("max_in_flight", mediaMaxInFlight)
+            put("nudity_permitted_by_handler", nudityPermittedByHandler)
         }.toString()
     }
 
