@@ -8,6 +8,7 @@ import '../channels/mqtt_channel.dart';
 import '../services/chat_repository.dart';
 import '../services/api_service.dart';
 import '../services/remote_command_service.dart';
+import '../services/websocket_service.dart';
 import '../models/chat_message.dart';
 import 'check_in_screen.dart';
 import 'task_list_screen.dart';
@@ -220,6 +221,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   Timer? _enrollmentStatusTimer;
   RemoteCommandService? _remoteCommands;
   ApiService? _api;
+  WebSocketService? _webSocketService;
   bool _homeOpenedTracked = false;
   DateTime? _typingSessionStart;
   int _typingInsertedChars = 0;
@@ -230,11 +232,13 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   void didChangeDependencies() {
     super.didChangeDependencies();
     _api ??= ApiService(context.read<SharedPreferences>());
+    _webSocketService ??= context.read<WebSocketService>();
     _remoteCommands ??= RemoteCommandService(
       prefs: context.read<SharedPreferences>(),
       onCheckInRequested: _openCheckIn,
       onMessage: _showCommandMessage,
     );
+    unawaited(_webSocketService?.connect() ?? Future<void>.value());
     if (!_homeOpenedTracked) {
       _homeOpenedTracked = true;
       unawaited(_trackBehavior('app_home_opened', reason: _enrollmentState));
@@ -258,6 +262,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     _finalizeTypingSession();
     WidgetsBinding.instance.removeObserver(this);
     _mqttSub?.cancel();
+    unawaited(_webSocketService?.disconnect() ?? Future<void>.value());
     _enrollmentStatusTimer?.cancel();
     _textController.removeListener(_onInputChanged);
     _textController.dispose();
