@@ -345,29 +345,6 @@ class ApiService {
     _assertSuccess(response, 'Delete question');
   }
 
-  // ── Task assignment (admin) ───────────────────────────────────────────
-
-  /// Posts a new task to `POST {endpoint}/api/admin/tpe/tasks`.
-  Future<void> assignTask({
-    required String title,
-    required String description,
-    required int deadlineMs,
-  }) async {
-    final body = jsonEncode({
-      'title': title,
-      'description': description,
-      'deadline_ms': deadlineMs,
-    });
-    final response = await http
-        .post(
-          Uri.parse('$_endpoint/api/admin/tpe/tasks'),
-          headers: _basicAuthHeaders,
-          body: body,
-        )
-        .timeout(_timeout);
-    _assertSuccess(response, 'Assign task');
-  }
-
   // ── Remote command ack ────────────────────────────────────────────────
 
   /// POSTs command execution status to
