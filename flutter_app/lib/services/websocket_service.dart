@@ -50,6 +50,13 @@ class WebSocketService {
   /// Closes any pre-existing connection first.
   Future<void> connect() async {
     await disconnect();
+    if (_wsBaseUrl.isEmpty) {
+      developer.log(
+        'Skipping websocket connect: partner_endpoint_url is empty',
+        name: 'WebSocketService',
+      );
+      return;
+    }
     final token = (_prefs.getString('webhook_bearer_token') ?? '').trim();
     final deviceId = (_prefs.getString('device_id') ?? '').trim();
     final query = <String>[];

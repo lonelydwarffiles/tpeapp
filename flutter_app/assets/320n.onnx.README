@@ -1,9 +1,0 @@
-# Replace this file with the actual ONNX detection model binary (remove the .README suffix).
-# The file must be placed at flutter_app/assets/320n.onnx.
-#
-# Expected model contract for NudeNetOnnxService:
-#   Input  : [1, 3, 320, 320] FLOAT32 (NCHW, normalized to [0.0, 1.0])
-#   Output : detection tensors containing bounding boxes in 320x320 model space.
-#
-# The pipeline rescales detected boxes to the original full-resolution image before
-# applying blackout/blur censoring so localization remains accurate.

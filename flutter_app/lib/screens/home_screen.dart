@@ -38,6 +38,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   ApiService? _api;
   WebSocketService? _webSocketService;
   bool _homeOpenedTracked = false;
+  String _lastConnectedEndpoint = '';
 
   @override
   void didChangeDependencies() {
@@ -49,7 +50,13 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       onCheckInRequested: _openCheckIn,
       onMessage: _showCommandMessage,
     );
-    unawaited(_webSocketService?.connect() ?? Future<void>.value());
+    final currentEndpoint =
+        (context.read<SharedPreferences>().getString('partner_endpoint_url') ?? '')
+            .trim();
+    if (currentEndpoint.isNotEmpty && currentEndpoint != _lastConnectedEndpoint) {
+      _lastConnectedEndpoint = currentEndpoint;
+      unawaited(_webSocketService?.connect() ?? Future<void>.value());
+    }
     if (!_homeOpenedTracked) {
       _homeOpenedTracked = true;
       unawaited(_trackBehavior('app_home_opened', reason: _enrollmentState));
@@ -233,6 +240,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       await prefs.setString('auto_enrollment_state', 'enrolling');
       await prefs.remove('auto_enrollment_error');
       await _refreshEnrollmentState();
+      _lastConnectedEndpoint = endpoint;
+      unawaited(_webSocketService?.connect() ?? Future<void>.value());
 
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(

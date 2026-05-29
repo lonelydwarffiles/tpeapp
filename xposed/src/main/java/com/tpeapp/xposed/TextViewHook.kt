@@ -475,13 +475,13 @@ object TextViewHook {
         val flags : Int
     )
 
-    private data class ReplacementContext(
+    internal data class ReplacementContext(
         val isSensitivePackage: Boolean,
         val looksStructured: Boolean,
         val packageMode: PolicyMode,
     )
 
-    private data class ReplacementPolicy(
+    internal data class ReplacementPolicy(
         val defaultMode: PolicyMode = PolicyMode.AUTO,
         val packageModes: Map<String, PolicyMode> = emptyMap(),
         val packagePrefixModes: Map<String, PolicyMode> = emptyMap(),
@@ -495,14 +495,14 @@ object TextViewHook {
         }
     }
 
-    private enum class PolicyMode {
+    internal enum class PolicyMode {
         AUTO,
         FULL,
         IDENTITY_ONLY,
         OFF,
     }
 
-    private enum class RuleClass {
+    internal enum class RuleClass {
         IDENTITY,
         PLAYFUL,
         GENERAL,
