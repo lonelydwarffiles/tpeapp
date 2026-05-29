@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:developer' as developer;
 
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
@@ -326,6 +327,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }
 
   void _onMqttEvent(Map<String, String> data) {
+    developer.log('MQTT raw payload: $data', name: 'HomeScreen');
     final action = (data['action'] ?? data['command'] ?? '').trim();
     if (action.isNotEmpty) {
       unawaited(
