@@ -1,9 +1,12 @@
 package com.tpeapp.xposed
 
 import android.graphics.Bitmap
+import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.ColorFilter
+import android.graphics.Paint
+import android.graphics.PixelFormat
 import android.graphics.drawable.BitmapDrawable
-import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.Drawable
 import android.os.Build
 import android.os.Handler
@@ -44,7 +47,6 @@ object ImageViewHook {
     private const val JPEG_QUALITY = 70   // compress before sending over Binder
     private const val SCAN_TIMEOUT_MS = 1_200L
     private const val DECISION_CACHE_MAX = 1024
-    private val PLACEHOLDER_DRAWABLE = ColorDrawable(Color.argb(180, 24, 24, 24))
 
     private val mainHandler = Handler(Looper.getMainLooper())
     private val bgScope     = CoroutineScope(Dispatchers.IO + SupervisorJob())
@@ -233,7 +235,12 @@ object ImageViewHook {
     private fun setPlaceholder(view: ImageView) {
         inHook.set(true)
         try {
-            view.setImageDrawable(PLACEHOLDER_DRAWABLE)
+            view.setImageDrawable(
+                TextPlaceholderDrawable(
+                    text = MediaFilterRuntimeConfig.placeholderText(),
+                    density = view.resources.displayMetrics.density,
+                )
+            )
         } finally {
             inHook.set(false)
         }
@@ -313,5 +320,39 @@ object ImageViewHook {
             y += stepY
         }
         return hash
+    }
+
+    private class TextPlaceholderDrawable(
+        text: String,
+        density: Float,
+    ) : Drawable() {
+        private val displayText = text.ifBlank { "Loading..." }
+        private val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.WHITE
+            textAlign = Paint.Align.CENTER
+            textSize = 16f * density
+        }
+        private val bgPaint = Paint().apply { color = Color.BLACK }
+
+        override fun draw(canvas: Canvas) {
+            val b = bounds
+            canvas.drawRect(b, bgPaint)
+            if (b.isEmpty) return
+            val fm = textPaint.fontMetrics
+            val baseline = b.exactCenterY() - (fm.ascent + fm.descent) / 2f
+            canvas.drawText(displayText, b.exactCenterX(), baseline, textPaint)
+        }
+
+        override fun setAlpha(alpha: Int) {
+            textPaint.alpha = alpha
+            bgPaint.alpha = alpha
+        }
+
+        override fun setColorFilter(colorFilter: ColorFilter?) {
+            textPaint.colorFilter = colorFilter
+            bgPaint.colorFilter = colorFilter
+        }
+
+        override fun getOpacity(): Int = PixelFormat.OPAQUE
     }
 }

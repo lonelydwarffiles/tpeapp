@@ -443,6 +443,11 @@ class PartnerMqttService : Service() {
             editor.putBoolean(FilterService.PREF_NUDITY_PERMITTED_BY_HANDLER, it)
             changeDescription += " Nudity bypass permission → $it."
         }
+        data["placeholder_text"]?.let {
+            val text = it.trim().take(64).ifBlank { "Loading..." }
+            editor.putString(FilterService.PREF_MEDIA_PLACEHOLDER_TEXT, text)
+            changeDescription += " Placeholder text updated."
+        }
 
         editor.apply()
 

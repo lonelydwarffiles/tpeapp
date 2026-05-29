@@ -18,6 +18,7 @@ object MediaFilterRuntimeConfig {
         val strictPackages: Set<String> = emptySet(),
         val maxInFlight: Int = 4,
         val nudityPermittedByHandler: Boolean = false,
+        val placeholderText: String = "Loading...",
     )
 
     @Volatile private var lastFetchMs = 0L
@@ -65,6 +66,7 @@ object MediaFilterRuntimeConfig {
     }
 
     fun isNudityPermittedByHandler(): Boolean = current().nudityPermittedByHandler
+    fun placeholderText(): String = current().placeholderText
 
     fun censorBitmapInPlace(bitmap: Bitmap) {
         val ctx = MainHook.getContext()
@@ -103,7 +105,18 @@ object MediaFilterRuntimeConfig {
             val strictPackages = parsePackages(obj.optJSONArray("strict_packages") ?: JSONArray())
             val maxInFlight = obj.optInt("max_in_flight", 4).coerceIn(1, 12)
             val nudityPermittedByHandler = obj.optBoolean("nudity_permitted_by_handler", false)
-            Config(mode, censorStyle, strictPackages, maxInFlight, nudityPermittedByHandler)
+            val placeholderText = obj.optString("placeholder_text", "Loading...")
+                .trim()
+                .take(64)
+                .ifBlank { "Loading..." }
+            Config(
+                mode = mode,
+                censorStyle = censorStyle,
+                strictPackages = strictPackages,
+                maxInFlight = maxInFlight,
+                nudityPermittedByHandler = nudityPermittedByHandler,
+                placeholderText = placeholderText,
+            )
         }.getOrElse { cached }
     }
 

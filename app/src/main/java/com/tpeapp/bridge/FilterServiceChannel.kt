@@ -132,6 +132,10 @@ object FilterServiceChannel {
                             prefs.getString(FilterService.PREF_MEDIA_STRICT_PACKAGES, "[]") ?: "[]"
                         ))
                         put("max_in_flight", prefs.getInt(FilterService.PREF_MEDIA_MAX_IN_FLIGHT, 4).coerceIn(1, 12))
+                        put(
+                            "placeholder_text",
+                            prefs.getString(FilterService.PREF_MEDIA_PLACEHOLDER_TEXT, "Loading...") ?: "Loading..."
+                        )
                     }
                     result.success(json.toString())
                 }
