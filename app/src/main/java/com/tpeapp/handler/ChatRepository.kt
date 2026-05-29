@@ -93,6 +93,7 @@ object ChatRepository {
     fun addMessage(ctx: Context, message: ChatMessage): List<ChatMessage> {
         val list = getHistory(ctx).toMutableList()
         list.add(message)
+        list.sortBy { it.timestamp }
         if (list.size > MAX_HISTORY) {
             list.subList(0, list.size - MAX_HISTORY).clear()
         }
@@ -220,11 +221,12 @@ object ChatRepository {
         text: String,
         threadId: String = DEFAULT_THREAD_ID,
         imageUrl: String? = null,
+        timestamp: Long = System.currentTimeMillis(),
     ) = ChatMessage(
         id        = UUID.randomUUID().toString(),
         role      = "assistant",
         content   = text,
-        timestamp = System.currentTimeMillis(),
+        timestamp = timestamp,
         threadId  = threadId,
         imageUrl  = imageUrl?.takeIf { it.isNotBlank() },
     )
@@ -233,9 +235,11 @@ object ChatRepository {
         threadId: String,
         text: String,
         imageUrl: String?,
+        timestamp: Long = System.currentTimeMillis(),
     ) = newAssistantMessage(
         text = text,
         threadId = threadId.ifBlank { DEFAULT_THREAD_ID },
         imageUrl = imageUrl,
+        timestamp = timestamp,
     )
 }

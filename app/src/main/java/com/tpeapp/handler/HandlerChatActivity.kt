@@ -43,6 +43,17 @@ import org.json.JSONObject
  * behind the partner PIN.
  */
 class HandlerChatActivity : AppCompatActivity() {
+    companion object {
+        const val EXTRA_OPEN_THREAD_ID = "open_thread_id"
+
+        fun createChatIntent(
+            context: android.content.Context,
+            threadId: String = ChatRepository.DEFAULT_THREAD_ID,
+        ): Intent = Intent(context, HandlerChatActivity::class.java).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+            putExtra(EXTRA_OPEN_THREAD_ID, threadId)
+        }
+    }
 
     private lateinit var binding: ActivityHandlerChatBinding
     private lateinit var adapter: ChatAdapter
@@ -63,20 +74,12 @@ class HandlerChatActivity : AppCompatActivity() {
                 PartnerMqttService.EVENT_PROXY_SMS_INCOMING -> {
                     val threadId = intent.getStringExtra(PartnerMqttService.EXTRA_PROXY_SMS_THREAD_ID)
                         ?: ChatRepository.DEFAULT_THREAD_ID
-                    val body = intent.getStringExtra(PartnerMqttService.EXTRA_PROXY_SMS_BODY).orEmpty()
-                    val imageUrl = intent.getStringExtra(PartnerMqttService.EXTRA_PROXY_SMS_IMAGE_URL)
                     if (intent.hasExtra(PartnerMqttService.EXTRA_PROXY_SMS_CAN_REPLY)) {
                         threadCanReply[threadId] =
                             intent.getBooleanExtra(PartnerMqttService.EXTRA_PROXY_SMS_CAN_REPLY, false)
                     }
                     activeThreadId = threadId
-                    val incoming = ChatRepository.newIncomingProxySmsMessage(
-                        threadId = threadId,
-                        text = body,
-                        imageUrl = imageUrl,
-                    )
-                    val updated = ChatRepository.addMessage(this@HandlerChatActivity, incoming)
-                    adapter.submitList(updated.toList())
+                    renderActiveThreadMessages()
                     scrollToBottom()
                     updateReplyAccessUi()
                 }
@@ -140,6 +143,16 @@ class HandlerChatActivity : AppCompatActivity() {
             proxySmsReceiver,
             IntentFilter(PartnerMqttService.ACTION_PROXY_SMS_EVENT),
         )
+        handleThreadDeepLink(intent)
+        renderActiveThreadMessages()
+        updateReplyAccessUi()
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleThreadDeepLink(intent)
+        renderActiveThreadMessages()
         updateReplyAccessUi()
     }
 
@@ -194,9 +207,24 @@ class HandlerChatActivity : AppCompatActivity() {
                 threadCanReply[msg.threadId] = true
             }
         }
-        activeThreadId = history.lastOrNull()?.threadId ?: ChatRepository.DEFAULT_THREAD_ID
-        adapter.submitList(history)
-        scrollToBottom()
+        activeThreadId = history
+            .maxByOrNull { it.timestamp }
+            ?.threadId
+            ?: ChatRepository.DEFAULT_THREAD_ID
+    }
+
+    private fun handleThreadDeepLink(intent: Intent?) {
+        val deepLinkedThreadId = intent
+            ?.getStringExtra(EXTRA_OPEN_THREAD_ID)
+            ?.takeIf { it.isNotBlank() }
+            ?: return
+        activeThreadId = deepLinkedThreadId
+    }
+
+    private fun renderActiveThreadMessages() {
+        val history = ChatRepository.getHistory(this).sortedBy { it.timestamp }
+        val threadMessages = history.filter { it.threadId == activeThreadId }
+        adapter.submitList(threadMessages)
     }
 
     private fun bindComplianceHook() {
@@ -247,8 +275,8 @@ class HandlerChatActivity : AppCompatActivity() {
     private fun sendMessage(text: String) {
         if (!canReplyForActiveThread()) return
         val userMsg = ChatRepository.newUserMessage(text, threadId = activeThreadId)
-        val history = ChatRepository.addMessage(this, userMsg)
-        adapter.submitList(history.toList())
+        ChatRepository.addMessage(this, userMsg)
+        renderActiveThreadMessages()
         scrollToBottom()
 
         setInputEnabled(false)
@@ -266,8 +294,8 @@ class HandlerChatActivity : AppCompatActivity() {
                         text = reply,
                         threadId = activeThreadId,
                     )
-                    val updated = ChatRepository.addMessage(this@HandlerChatActivity, assistantMsg)
-                    adapter.submitList(updated.toList())
+                    ChatRepository.addMessage(this@HandlerChatActivity, assistantMsg)
+                    renderActiveThreadMessages()
                     scrollToBottom()
                 }.onFailure { e ->
                     Toast.makeText(
