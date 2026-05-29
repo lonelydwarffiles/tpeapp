@@ -87,7 +87,7 @@ class FilterService : Service() {
         const val PREF_NUDENET_ENABLED         = "nudenet_enabled"
         /** speed|strict — speed is non-blocking fail-open, strict is fail-closed in selected lanes. */
         const val PREF_MEDIA_FILTER_MODE        = "media_filter_mode"
-        /** pixelate|blur — blur is heavier and only available in bitmap lanes. */
+        /** pixelate|heavy_blur|blackout — style consumed by Xposed media hooks. */
         const val PREF_MEDIA_CENSOR_STYLE       = "media_censor_style"
         /** JSON array of package names that should run strict even when global mode is speed. */
         const val PREF_MEDIA_STRICT_PACKAGES    = "media_filter_strict_packages"
@@ -469,7 +469,8 @@ class FilterService : Service() {
     }
 
     private fun normalizeCensorStyle(raw: String?): String = when (raw?.trim()?.lowercase()) {
-        "blur" -> "blur"
+        "blackout" -> "blackout"
+        "heavy_blur", "heavyblur", "blur" -> "heavy_blur"
         else -> "pixelate"
     }
 

@@ -6,7 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_onnxruntime/flutter_onnxruntime.dart';
 import 'package:image/image.dart' as img;
 
-enum CensorStyle { blackout, blur }
+enum CensorStyle { blackout, heavyBlur, pixelate }
 
 class DetectionBox {
   const DetectionBox({
@@ -298,7 +298,7 @@ Map<String, dynamic> _prepareInputForOnnx(Map<String, dynamic> args) {
 Uint8List _applyLocalizedCensor(Map<String, dynamic> args) {
   final imageBytes = args['imageBytes'] as Uint8List;
   final boxes = (args['boxes'] as List).cast<List<dynamic>>();
-  final style = (args['style'] as String?) ?? CensorStyle.blackout.name;
+  final style = _resolveCensorStyle(args['style'] as String?);
 
   final source = img.decodeImage(imageBytes);
   if (source == null || boxes.isEmpty) return imageBytes;
@@ -312,32 +312,74 @@ Uint8List _applyLocalizedCensor(Map<String, dynamic> args) {
 
     if (x2 <= x1 || y2 <= y1) continue;
 
-    if (style == CensorStyle.blur.name) {
-      _blurRegion(source, x1, y1, x2, y2);
-    } else {
-      img.fillRect(
-        source,
-        x1: x1,
-        y1: y1,
-        x2: x2,
-        y2: y2,
-        color: img.ColorRgba8(0, 0, 0, 255),
-      );
+    switch (style) {
+      case CensorStyle.heavyBlur:
+        _heavyBlurRegion(source, x1, y1, x2, y2);
+        break;
+      case CensorStyle.pixelate:
+        _pixelateRegion(source, x1, y1, x2, y2);
+        break;
+      case CensorStyle.blackout:
+        img.fillRect(
+          source,
+          x1: x1,
+          y1: y1,
+          x2: x2,
+          y2: y2,
+          color: img.ColorRgba8(0, 0, 0, 255),
+        );
+        break;
     }
   }
 
   return Uint8List.fromList(img.encodeJpg(source, quality: 92));
 }
 
-void _blurRegion(img.Image source, int x1, int y1, int x2, int y2) {
+void _heavyBlurRegion(img.Image source, int x1, int y1, int x2, int y2) {
   final w = x2 - x1;
   final h = y2 - y1;
   if (w < 2 || h < 2) return;
 
   final region = img.copyCrop(source, x: x1, y: y1, width: w, height: h);
-  final smallW = math.max(1, w ~/ 12);
-  final smallH = math.max(1, h ~/ 12);
+  final smallW = math.max(1, w ~/ 18);
+  final smallH = math.max(1, h ~/ 18);
   final shrunk = img.copyResize(region, width: smallW, height: smallH, interpolation: img.Interpolation.average);
-  final blurred = img.copyResize(shrunk, width: w, height: h, interpolation: img.Interpolation.nearest);
+  final blurred = img.copyResize(shrunk, width: w, height: h, interpolation: img.Interpolation.linear);
   img.compositeImage(source, blurred, dstX: x1, dstY: y1);
+}
+
+void _pixelateRegion(img.Image source, int x1, int y1, int x2, int y2) {
+  final w = x2 - x1;
+  final h = y2 - y1;
+  if (w < 2 || h < 2) return;
+
+  final region = img.copyCrop(source, x: x1, y: y1, width: w, height: h);
+  final shrunk = img.copyResize(
+    region,
+    width: math.min(10, w),
+    height: math.min(10, h),
+    interpolation: img.Interpolation.average,
+  );
+  final pixelated = img.copyResize(
+    shrunk,
+    width: w,
+    height: h,
+    interpolation: img.Interpolation.nearest,
+  );
+  img.compositeImage(source, pixelated, dstX: x1, dstY: y1);
+}
+
+CensorStyle _resolveCensorStyle(String? raw) {
+  final normalized = raw?.trim().toLowerCase().replaceAll('-', '_') ?? '';
+  switch (normalized) {
+    case 'pixelate':
+      return CensorStyle.pixelate;
+    case 'heavy_blur':
+    case 'heavyblur':
+    case 'blur':
+      return CensorStyle.heavyBlur;
+    case 'blackout':
+    default:
+      return CensorStyle.blackout;
+  }
 }

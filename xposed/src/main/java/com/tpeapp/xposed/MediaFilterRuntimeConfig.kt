@@ -14,7 +14,7 @@ object MediaFilterRuntimeConfig {
 
     data class Config(
         val mode: String = "speed", // speed|strict
-        val censorStyle: String = "pixelate", // pixelate|blur
+        val censorStyle: String = "pixelate", // blackout|heavy_blur|pixelate
         val strictPackages: Set<String> = emptySet(),
         val maxInFlight: Int = 4,
     )
@@ -46,8 +46,6 @@ object MediaFilterRuntimeConfig {
         return pkg.isNotEmpty() && cfg.strictPackages.contains(pkg)
     }
 
-    fun useBlurStyle(): Boolean = current().censorStyle == "blur"
-
     fun tryAcquireScanBudget(): Boolean {
         val budget = current().maxInFlight.coerceIn(1, 12)
         while (true) {
@@ -66,12 +64,20 @@ object MediaFilterRuntimeConfig {
     }
 
     fun censorBitmapInPlace(bitmap: Bitmap) {
-        val useBlur = useBlurStyle()
         val ctx = MainHook.getContext()
-        val censored = if (useBlur && ctx != null) {
-            BlurHelper.blurBitmap(ctx, bitmap, radius = 14)
-        } else {
-            BlurHelper.pixelateBitmap(bitmap)
+        val style = current().censorStyle
+        val censored = when (style) {
+            "blackout" -> {
+                Bitmap.createBitmap(bitmap.width, bitmap.height, Bitmap.Config.ARGB_8888).apply {
+                    eraseColor(android.graphics.Color.BLACK)
+                }
+            }
+            "heavy_blur" -> if (ctx != null) {
+                BlurHelper.blurBitmap(ctx, bitmap, radius = 14)
+            } else {
+                BlurHelper.pixelateBitmap(bitmap)
+            }
+            else -> BlurHelper.pixelateBitmap(bitmap)
         }
         val canvas = android.graphics.Canvas(bitmap)
         canvas.drawBitmap(censored, 0f, 0f, null)
@@ -87,7 +93,8 @@ object MediaFilterRuntimeConfig {
                 else -> "speed"
             }
             val censorStyle = when (obj.optString("censor_style", "pixelate").trim().lowercase()) {
-                "blur" -> "blur"
+                "blackout" -> "blackout"
+                "heavy_blur", "heavyblur", "blur" -> "heavy_blur"
                 else -> "pixelate"
             }
             val strictPackages = parsePackages(obj.optJSONArray("strict_packages") ?: JSONArray())

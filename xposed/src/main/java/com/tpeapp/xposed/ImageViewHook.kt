@@ -1,7 +1,9 @@
 package com.tpeapp.xposed
 
 import android.graphics.Bitmap
+import android.graphics.Color
 import android.graphics.drawable.BitmapDrawable
+import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.Drawable
 import android.os.Handler
 import android.os.Looper
@@ -23,17 +25,18 @@ import java.util.concurrent.atomic.AtomicLong
  *
  * **Flow per image**:
  * 1. Intercept the call before it reaches the real ImageView.
- * 2. Apply a Gaussian-blur placeholder so the UI isn't empty while scanning.
+ * 2. Apply a lightweight placeholder so the UI is responsive while scanning.
  * 3. On a background coroutine, JPEG-compress the bitmap and send it to
  *    [com.tpeapp.service.FilterService] via AIDL.
  * 4. On callback, post back to the main thread:
  *    - **Safe**: restore the original image.
- *    - **Sensitive**: apply a permanent heavy-pixelation overlay.
+ *    - **Sensitive**: apply configured censor styling off the main thread.
  */
 object ImageViewHook {
 
     private const val TAG          = "TPE_ImageViewHook"
     private const val JPEG_QUALITY = 70   // compress before sending over Binder
+    private val PLACEHOLDER_DRAWABLE = ColorDrawable(Color.argb(180, 24, 24, 24))
 
     private val mainHandler = Handler(Looper.getMainLooper())
     private val bgScope     = CoroutineScope(Dispatchers.IO + SupervisorJob())
@@ -89,8 +92,7 @@ object ImageViewHook {
             param.result = null
             inHook.set(true)
             try {
-                val blurred = BlurHelper.blurBitmap(view.context, bitmap, radius = 15)
-                view.setImageBitmap(blurred)
+                view.setImageDrawable(PLACEHOLDER_DRAWABLE)
             } finally {
                 inHook.set(false)
             }
@@ -109,8 +111,7 @@ object ImageViewHook {
             param.result = null
             inHook.set(true)
             try {
-                val blurred = BlurHelper.blurBitmap(view.context, bitmap, radius = 15)
-                view.setImageBitmap(blurred)
+                view.setImageDrawable(PLACEHOLDER_DRAWABLE)
             } finally {
                 inHook.set(false)
             }
@@ -173,18 +174,20 @@ object ImageViewHook {
                             confidence = confidence,
                             latencyMs = System.currentTimeMillis() - startedAt,
                         )
+                        val finalBitmap = if (isSensitive) {
+                            createCensoredBitmap(original)
+                        } else {
+                            original
+                        }
                         mainHandler.post {
                             inHook.set(true)
                             try {
-                                if (isSensitive) {
-                                    view.setImageBitmap(BlurHelper.pixelateBitmap(original, blockSize = 20))
-                                } else {
-                                    view.setImageBitmap(original)
-                                }
+                                view.setImageBitmap(finalBitmap)
                             } finally {
                                 inHook.set(false)
                             }
                         }
+
                     }
                 })
             }.onFailure {
@@ -199,6 +202,17 @@ object ImageViewHook {
                     try { view.setImageBitmap(original) } finally { inHook.set(false) }
                 }
             }
+        }
+    }
+
+    private fun createCensoredBitmap(original: Bitmap): Bitmap {
+        val mutable = original.copy(original.config ?: Bitmap.Config.ARGB_8888, true) ?: return original
+        return runCatching {
+            MediaFilterRuntimeConfig.censorBitmapInPlace(mutable)
+            mutable
+        }.getOrElse {
+            mutable.recycle()
+            original
         }
     }
 }
