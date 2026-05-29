@@ -85,6 +85,10 @@ object LovenseManager {
         ble = null
     }
 
+    fun setEventListener(listener: BleManager.EventListener?) {
+        ble?.setEventListener(listener)
+    }
+
     // ------------------------------------------------------------------
     //  Toy commands
     // ------------------------------------------------------------------

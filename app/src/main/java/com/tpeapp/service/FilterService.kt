@@ -161,20 +161,20 @@ class FilterService : Service() {
                 }
                 PREF_NUDENET_ENABLED -> {
                     val requested = prefs.getBoolean(key, false)
-                    // TODO: fixing is at the bottom of the list, keep NudeNet disabled for now.
-                    if (requested) {
-                        Log.w(TAG, "Ignoring attempt to enable NudeNet; feature is locked off")
-                        prefs.edit().putBoolean(PREF_NUDENET_ENABLED, false).apply()
+                    val wasEnabled = nudeNetEnabled
+                    nudeNetEnabled = requested
+                    if (requested && !wasEnabled) {
+                        Log.i(TAG, "NudeNet enabled via settings update")
+                        initClassifierAsync()
                     }
-                    nudeNetEnabled = false
-                    // Null the field before closing so that any in-flight scan that
-                    // already holds a local reference completes safely.  The classifier
-                    // itself is @Synchronized so close() and inference are mutually
-                    // exclusive; any scan that reads nudeNetEnabled=false before
-                    // reaching awaitClassifier() returns immediately without using it.
-                    val old = classifier
-                    classifier = null
-                    old?.close()
+                    if (!requested && wasEnabled) {
+                        Log.i(TAG, "NudeNet disabled via settings update")
+                        // Null the field before closing so that any in-flight scan that
+                        // already holds a local reference completes safely.
+                        val old = classifier
+                        classifier = null
+                        old?.close()
+                    }
                 }
                 com.tpeapp.mindful.ToneEnforcementService.PREF_RESTRICTED_VOCABULARY -> {
                     restrictedVocabularyJson = prefs.getString(key, "") ?: ""
@@ -234,10 +234,7 @@ class FilterService : Service() {
         strictModeEnabled = prefs.getBoolean(PREF_STRICT_MODE, false)
         threshold = effectiveThreshold(prefs.getFloat(PREF_THRESHOLD, DEFAULT_THRESHOLD))
         val persistedNudeNetEnabled = prefs.getBoolean(PREF_NUDENET_ENABLED, false)
-        if (persistedNudeNetEnabled) {
-            prefs.edit().putBoolean(PREF_NUDENET_ENABLED, false).apply()
-        }
-        nudeNetEnabled = false
+        nudeNetEnabled = persistedNudeNetEnabled
         textReplacementDictJson = prefs.getString(PREF_TEXT_REPLACEMENT_DICT, "") ?: ""
         textReplacementPolicyJson = prefs.getString(PREF_TEXT_REPLACEMENT_POLICY, "") ?: ""
         restrictedVocabularyJson = prefs.getString(

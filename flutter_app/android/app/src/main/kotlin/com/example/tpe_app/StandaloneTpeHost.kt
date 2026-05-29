@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.provider.Settings
+import android.util.Log
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodCall
@@ -24,6 +25,7 @@ private const val WEBHOOK_URL_KEY = "webhook_url"
 private const val WEBHOOK_TOKEN_KEY = "webhook_bearer_token"
 private const val INJECTION_MODE_KEY = "remote_control_injection_mode"
 private const val TEXT_REPLACEMENT_KEY = "text_replacement_dict"
+private const val SCREEN_SHARE_TAG = "StandaloneScreenShare"
 private var cachedRootAvailable: Boolean? = null
 
 object StandaloneTpeHost {
@@ -212,7 +214,27 @@ object StandaloneTpeHost {
         MethodChannel(messenger, "com.tpeapp/screen_share").setMethodCallHandler { call, result ->
             val prefs = flutterPrefs(context)
             when (call.method) {
-                "injectTap", "stopNativeScreenShare" -> result.success(null)
+                "injectTap" -> {
+                    val x = call.argument<Double>("x")?.toFloat()
+                    val y = call.argument<Double>("y")?.toFloat()
+                    if (x == null || y == null) {
+                        result.error("INVALID", "x and y are required", null)
+                    } else if (!isRootAvailable()) {
+                        result.error(
+                            "UNAVAILABLE",
+                            "Standalone host requires root for tap injection",
+                            null,
+                        )
+                    } else {
+                        val injected = dispatchTapViaRoot(context, x, y)
+                        if (injected) {
+                            result.success(null)
+                        } else {
+                            result.error("INJECT_FAILED", "Root input tap command failed", null)
+                        }
+                    }
+                }
+                "stopNativeScreenShare" -> result.success(null)
                 "setTouchLock" -> {
                     val enabled = call.argument<Boolean>("enabled") ?: false
                     val mode = call.argument<String>("mode") ?: "advisory"
@@ -468,5 +490,26 @@ object StandaloneTpeHost {
         }.getOrDefault(false)
         cachedRootAvailable = available
         return available
+    }
+
+    private fun dispatchTapViaRoot(context: Context, normX: Float, normY: Float): Boolean {
+        val dm = context.resources.displayMetrics
+        val px = (normX.coerceIn(0f, 1f) * dm.widthPixels).toInt()
+        val py = (normY.coerceIn(0f, 1f) * dm.heightPixels).toInt()
+
+        return runCatching {
+            val process = ProcessBuilder("su", "-c", "input tap $px $py")
+                .redirectErrorStream(true)
+                .start()
+            val finished = process.waitFor(2, TimeUnit.SECONDS)
+            if (!finished) {
+                process.destroy()
+                false
+            } else {
+                process.exitValue() == 0
+            }
+        }.onFailure { err ->
+            Log.e(SCREEN_SHARE_TAG, "dispatchTapViaRoot failed", err)
+        }.getOrDefault(false)
     }
 }

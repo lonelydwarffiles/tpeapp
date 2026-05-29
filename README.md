@@ -98,12 +98,35 @@ Primary screens in `flutter_app/lib/screens`:
 
 ## Backend in this repository (important)
 
-`backend/server.js` currently exposes only:
+`backend/server.js` currently exposes:
 - `POST /api/pair`
+- `POST /api/pair/code`
 - `POST /api/audit/upload`
+- `POST /api/tpe/webhook`
+- `POST /api/tpe/upload`
+- `POST /api/vitals/sync`
+- `POST /api/handler/device-status`
 - `POST /api/settings/update`
+- `POST /api/command/open-url`
+- `POST /api/command/set-wallpaper`
+- `POST /api/command/play-audio`
+- `POST /api/command/stop-audio`
+- `POST /api/tpe/checkin`
+- `POST /api/tpe/task/status`
+- `POST /api/tpe/commands/:commandId/ack`
+- `GET /api/admin/questions`
+- `POST /api/admin/questions/:id/answer`
+- `DELETE /api/admin/questions/:id`
+- `POST /api/admin/tpe/tasks`
+- `GET /api/handler/status`
+- `GET /api/handler/devices`
+- `GET /api/handler/tpe/events`
+- `GET /api/handler/tpe/audits`
+- `GET /api/vitals/history`
+- `POST /api/handler/ws/command`
+- `WS /ws?secret=<token>&device_id=<device_id>`
 
-The mobile app also references additional partner endpoints (for check-ins, tasks, questions, vitals sync, signaling, etc.). Those routes are not implemented in `backend/server.js` in this repo snapshot.
+These routes cover the partner flows used by Flutter `ApiService`.
 
 ## High-level architecture
 

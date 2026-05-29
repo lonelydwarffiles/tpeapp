@@ -53,6 +53,10 @@ class BleManager(
     private val scanTimeout: Long = DEFAULT_SCAN_TIMEOUT_MS,
 ) {
 
+    fun interface EventListener {
+        fun onEvent(type: String, payload: Map<String, Any?>)
+    }
+
     // ------------------------------------------------------------------
     //  Companion — well-known generic UUIDs (placeholders; swap as needed)
     // ------------------------------------------------------------------
@@ -90,6 +94,7 @@ class BleManager(
     @Volatile private var gatt: BluetoothGatt? = null
     @Volatile private var targetCharacteristic: BluetoothGattCharacteristic? = null
     @Volatile private var isScanning = false
+    @Volatile private var eventListener: EventListener? = null
 
     /** Pending payload waiting to be written once the characteristic is discovered. */
     private val pendingCommands: ArrayDeque<ByteArray> = ArrayDeque()
@@ -97,6 +102,10 @@ class BleManager(
     // ------------------------------------------------------------------
     //  Public API
     // ------------------------------------------------------------------
+
+    fun setEventListener(listener: EventListener?) {
+        eventListener = listener
+    }
 
     /**
      * Starts a BLE scan for any peripheral that advertises [serviceUuid].
@@ -107,30 +116,36 @@ class BleManager(
         val adapter = bluetoothAdapter
         if (adapter == null || !adapter.isEnabled) {
             Log.w(TAG, "Bluetooth is not available or not enabled")
+            emit("scan_unavailable")
             return
         }
 
         if (!hasPermission(Manifest.permission.BLUETOOTH_SCAN)) {
             Log.w(TAG, "Missing BLUETOOTH_SCAN permission — cannot start scan")
+            emit("scan_permission_missing")
             return
         }
 
         if (isScanning) {
             Log.d(TAG, "Scan already in progress")
+            emit("scan_already_running")
             return
         }
 
         scanner = adapter.bluetoothLeScanner
         if (scanner == null) {
             Log.w(TAG, "BluetoothLeScanner not available")
+            emit("scan_unavailable")
             return
         }
 
         isScanning = true
         Log.i(TAG, "BLE scan started (timeout=${scanTimeout}ms)")
+        emit("scan_started", mapOf("timeout_ms" to scanTimeout))
         scanner?.startScan(scanCallback) ?: run {
             isScanning = false
             Log.w(TAG, "BluetoothLeScanner became null before scan could start")
+            emit("scan_failed")
             return
         }
 
@@ -143,12 +158,14 @@ class BleManager(
         if (!isScanning) return
         if (!hasPermission(Manifest.permission.BLUETOOTH_SCAN)) {
             Log.w(TAG, "Missing BLUETOOTH_SCAN permission — cannot stop scan")
+            emit("scan_permission_missing")
             return
         }
         isScanning = false
         scanner?.stopScan(scanCallback)
         scanner = null
         Log.i(TAG, "BLE scan stopped")
+        emit("scan_stopped")
     }
 
     /**
@@ -158,9 +175,11 @@ class BleManager(
     fun connect(device: BluetoothDevice) {
         if (!hasPermission(Manifest.permission.BLUETOOTH_CONNECT)) {
             Log.w(TAG, "Missing BLUETOOTH_CONNECT permission — cannot connect")
+            emit("connect_permission_missing")
             return
         }
         Log.i(TAG, "Connecting to ${device.address}")
+        emit("connecting", mapOf("address" to device.address, "name" to device.name))
         // autoConnect = false for faster initial connection
         gatt = device.connectGatt(context, false, gattCallback, BluetoothDevice.TRANSPORT_LE)
     }
@@ -178,6 +197,7 @@ class BleManager(
         if (characteristic == null) {
             Log.d(TAG, "Characteristic not ready — queuing command (${payload.size} bytes)")
             pendingCommands.addLast(payload.copyOf())
+            emit("command_queued", mapOf("bytes" to payload.size))
             return
         }
         writeCharacteristic(characteristic, payload)
@@ -187,6 +207,7 @@ class BleManager(
     fun disconnect() {
         if (!hasPermission(Manifest.permission.BLUETOOTH_CONNECT)) {
             Log.w(TAG, "Missing BLUETOOTH_CONNECT permission — cannot disconnect cleanly")
+            emit("disconnect_permission_missing")
         } else {
             gatt?.disconnect()
         }
@@ -202,6 +223,7 @@ class BleManager(
         }
         gatt = null
         Log.i(TAG, "BleManager closed")
+        emit("closed")
     }
 
     // ------------------------------------------------------------------
@@ -213,6 +235,11 @@ class BleManager(
         override fun onScanResult(callbackType: Int, result: ScanResult) {
             val device = result.device
             Log.d(TAG, "Scan result: ${device.address} rssi=${result.rssi}")
+            emit("scan_result", mapOf(
+                "address" to device.address,
+                "name" to device.name,
+                "rssi" to result.rssi,
+            ))
             // Connect to the first device found; stop scanning.
             stopScan()
             connect(device)
@@ -221,6 +248,7 @@ class BleManager(
         override fun onScanFailed(errorCode: Int) {
             isScanning = false
             Log.e(TAG, "BLE scan failed, error=$errorCode")
+            emit("scan_failed", mapOf("error_code" to errorCode))
         }
     }
 
@@ -234,14 +262,17 @@ class BleManager(
             when (newState) {
                 BluetoothProfile.STATE_CONNECTED -> {
                     Log.i(TAG, "GATT connected — discovering services")
+                    emit("connected")
                     if (hasPermission(Manifest.permission.BLUETOOTH_CONNECT)) {
                         gatt.discoverServices()
                     } else {
                         Log.w(TAG, "Missing BLUETOOTH_CONNECT — cannot discover services")
+                        emit("connect_permission_missing")
                     }
                 }
                 BluetoothProfile.STATE_DISCONNECTED -> {
                     Log.i(TAG, "GATT disconnected (status=$status)")
+                    emit("disconnected", mapOf("status" to status))
                     targetCharacteristic = null
                     if (hasPermission(Manifest.permission.BLUETOOTH_CONNECT)) {
                         gatt.close()
@@ -255,22 +286,29 @@ class BleManager(
         override fun onServicesDiscovered(gatt: BluetoothGatt, status: Int) {
             if (status != BluetoothGatt.GATT_SUCCESS) {
                 Log.w(TAG, "Service discovery failed, status=$status")
+                emit("services_discovery_failed", mapOf("status" to status))
                 return
             }
 
             val service: BluetoothGattService? = gatt.getService(serviceUuid)
             if (service == null) {
                 Log.w(TAG, "Service $serviceUuid not found on remote device")
+                emit("service_missing", mapOf("service_uuid" to serviceUuid.toString()))
                 return
             }
 
             val characteristic: BluetoothGattCharacteristic? = service.getCharacteristic(charUuid)
             if (characteristic == null) {
                 Log.w(TAG, "Characteristic $charUuid not found in service $serviceUuid")
+                emit("characteristic_missing", mapOf("characteristic_uuid" to charUuid.toString()))
                 return
             }
 
             Log.i(TAG, "Services discovered — characteristic $charUuid ready")
+            emit("ready", mapOf(
+                "service_uuid" to serviceUuid.toString(),
+                "characteristic_uuid" to charUuid.toString(),
+            ))
             targetCharacteristic = characteristic
 
             // Drain any commands that arrived before the characteristic was ready.
@@ -284,8 +322,10 @@ class BleManager(
         ) {
             if (status == BluetoothGatt.GATT_SUCCESS) {
                 Log.d(TAG, "Characteristic write succeeded (uuid=${characteristic.uuid})")
+                emit("write_ok", mapOf("characteristic_uuid" to characteristic.uuid.toString()))
             } else {
                 Log.w(TAG, "Characteristic write failed, status=$status")
+                emit("write_failed", mapOf("status" to status, "characteristic_uuid" to characteristic.uuid.toString()))
             }
         }
     }
@@ -301,12 +341,14 @@ class BleManager(
     private fun writeCharacteristic(characteristic: BluetoothGattCharacteristic, data: ByteArray) {
         if (!hasPermission(Manifest.permission.BLUETOOTH_CONNECT)) {
             Log.w(TAG, "Missing BLUETOOTH_CONNECT — cannot write characteristic")
+            emit("connect_permission_missing")
             return
         }
 
         val currentGatt = gatt
         if (currentGatt == null) {
             Log.w(TAG, "GATT is null — cannot write characteristic")
+            emit("write_failed", mapOf("reason" to "gatt_null"))
             return
         }
 
@@ -321,6 +363,7 @@ class BleManager(
             )
             if (result != BluetoothGatt.GATT_SUCCESS) {
                 Log.w(TAG, "writeCharacteristic (API33) returned $result")
+                emit("write_failed", mapOf("status" to result))
             }
         } else {
             @Suppress("DEPRECATION")
@@ -330,6 +373,7 @@ class BleManager(
             val enqueued = currentGatt.writeCharacteristic(characteristic)
             if (!enqueued) {
                 Log.w(TAG, "writeCharacteristic (legacy) returned false")
+                emit("write_failed", mapOf("reason" to "enqueue_failed"))
             }
         }
     }
@@ -344,4 +388,12 @@ class BleManager(
     /** Returns true if [permission] has been granted. */
     private fun hasPermission(permission: String): Boolean =
         ContextCompat.checkSelfPermission(context, permission) == PackageManager.PERMISSION_GRANTED
+
+    private fun emit(type: String, payload: Map<String, Any?> = emptyMap()) {
+        try {
+            eventListener?.onEvent(type, payload)
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to emit BLE event: $type", e)
+        }
+    }
 }

@@ -435,10 +435,9 @@ class PartnerMqttService : Service() {
             changeDescription += " Blocked content classes updated."
         }
 
-        // TODO: fixing is at the bottom of the list, keep NudeNet disabled for now.
         data["nudenet_enabled"]?.toBooleanStrictOrNull()?.let {
-            editor.putBoolean(FilterService.PREF_NUDENET_ENABLED, false)
-            changeDescription += " NudeNet classifier remains disabled."
+            editor.putBoolean(FilterService.PREF_NUDENET_ENABLED, it)
+            changeDescription += " NudeNet classifier → $it."
         }
 
         editor.apply()

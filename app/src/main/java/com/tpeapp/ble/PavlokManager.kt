@@ -111,6 +111,10 @@ object PavlokManager {
         ble = null
     }
 
+    fun setEventListener(listener: BleManager.EventListener?) {
+        ble?.setEventListener(listener)
+    }
+
     // ------------------------------------------------------------------
     //  Stimulus commands
     // ------------------------------------------------------------------

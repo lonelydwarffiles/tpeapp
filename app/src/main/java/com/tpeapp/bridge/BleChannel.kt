@@ -1,6 +1,8 @@
 package com.tpeapp.bridge
 
 import android.content.Context
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
 import com.tpeapp.ble.LovenseManager
 import com.tpeapp.ble.PavlokManager
@@ -106,14 +108,43 @@ object BleChannel {
             }
         }
 
-        // EventChannel — currently emits placeholder; extend with BleManager callbacks as needed.
+        val mainHandler = Handler(Looper.getMainLooper())
+
+        fun emit(
+            sink: EventChannel.EventSink?,
+            device: String,
+            type: String,
+            payload: Map<String, Any?>,
+        ) {
+            val event = HashMap<String, Any?>()
+            event["device"] = device
+            event["type"] = type
+            event.putAll(payload)
+            mainHandler.post { sink?.success(event) }
+        }
+
         EventChannel(messenger, EVENTS_CHANNEL).setStreamHandler(
             object : EventChannel.StreamHandler {
+                private var sink: EventChannel.EventSink? = null
+
                 override fun onListen(arguments: Any?, events: EventChannel.EventSink) {
-                    // Future work: forward BluetoothGattCallback connection-state changes
-                    // to the Dart layer via events.success(mapOf("device" to ..., "state" to ...))
+                    sink = events
+
+                    LovenseManager.setEventListener { type, payload ->
+                        emit(sink, "lovense", type, payload)
+                    }
+                    PavlokManager.setEventListener { type, payload ->
+                        emit(sink, "pavlok", type, payload)
+                    }
+
+                    emit(sink, "system", "listener_attached", emptyMap())
                 }
-                override fun onCancel(arguments: Any?) {}
+
+                override fun onCancel(arguments: Any?) {
+                    LovenseManager.setEventListener(null)
+                    PavlokManager.setEventListener(null)
+                    sink = null
+                }
             }
         )
     }
