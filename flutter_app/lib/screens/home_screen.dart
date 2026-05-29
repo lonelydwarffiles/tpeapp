@@ -50,12 +50,17 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       onCheckInRequested: _openCheckIn,
       onMessage: _showCommandMessage,
     );
+    _webSocketService?.onCommandEvent = _onMqttEvent;
     final currentEndpoint =
         (context.read<SharedPreferences>().getString('partner_endpoint_url') ?? '')
             .trim();
-    if (currentEndpoint.isNotEmpty && currentEndpoint != _lastConnectedEndpoint) {
-      _lastConnectedEndpoint = currentEndpoint;
-      unawaited(_webSocketService?.connect() ?? Future<void>.value());
+    if (currentEndpoint.isNotEmpty) {
+      if (currentEndpoint != _lastConnectedEndpoint) {
+        _lastConnectedEndpoint = currentEndpoint;
+        unawaited(_webSocketService?.connect() ?? Future<void>.value());
+      } else {
+        unawaited(_webSocketService?.ensureConnected() ?? Future<void>.value());
+      }
     }
     if (!_homeOpenedTracked) {
       _homeOpenedTracked = true;
@@ -78,13 +83,25 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _mqttSub?.cancel();
-    unawaited(_webSocketService?.disconnect() ?? Future<void>.value());
+    if (_webSocketService != null) {
+      _webSocketService!.onCommandEvent = null;
+    }
     _enrollmentStatusTimer?.cancel();
     super.dispose();
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed || state == AppLifecycleState.inactive) {
+      final endpoint =
+          (context.read<SharedPreferences>().getString('partner_endpoint_url') ?? '')
+              .trim();
+      if (endpoint.isNotEmpty) {
+        _lastConnectedEndpoint = endpoint;
+        unawaited(_webSocketService?.ensureConnected() ?? Future<void>.value());
+      }
+    }
+
     unawaited(
       _trackBehavior(
         'app_lifecycle',

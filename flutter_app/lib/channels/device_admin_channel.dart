@@ -40,4 +40,8 @@ class DeviceAdminChannel {
   /// Calls [DevicePolicyManager.setUninstallBlocked].
   static Future<void> blockUninstall({required bool block}) =>
       _channel.invokeMethod('blockUninstall', {'block': block});
+
+  /// Attempts to lock/sleep the device immediately.
+  static Future<bool> lockNow() async =>
+      await _channel.invokeMethod<bool>('lockNow') ?? false;
 }

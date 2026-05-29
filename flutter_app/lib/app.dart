@@ -12,6 +12,7 @@ import 'package:uuid/uuid.dart';
 import 'channels/filter_service_channel.dart';
 import 'channels/remote_control_channel.dart';
 import 'services/api_service.dart';
+import 'services/websocket_service.dart';
 import 'screens/home_screen.dart';
 import 'widgets/kiosk_task_overlay.dart';
 
@@ -258,6 +259,9 @@ class _StartupGateState extends State<_StartupGate> {
       _acknowledged = seen && !missingPermissions;
     });
 
+    // Keep command transport alive independent of individual screens.
+    unawaited(context.read<WebSocketService>().ensureConnected());
+
     _ensureAutoEnrollmentLoop(prefs);
   }
 
@@ -273,6 +277,7 @@ class _StartupGateState extends State<_StartupGate> {
     if (_autoEnrollInFlight) return;
     if (prefs.getBool('is_paired') ?? false) {
       await prefs.setString(_autoEnrollmentStateKey, 'connected');
+      unawaited(context.read<WebSocketService>().ensureConnected());
       _autoEnrollTimer?.cancel();
       _autoEnrollTimer = null;
       return;
@@ -361,6 +366,7 @@ class _StartupGateState extends State<_StartupGate> {
       await prefs.remove(_autoEnrollmentErrorKey);
       _autoEnrollTimer?.cancel();
       _autoEnrollTimer = null;
+      unawaited(context.read<WebSocketService>().ensureConnected());
       // Enrollment should not be blocked by native service startup edge cases.
       unawaited(
         FilterServiceChannel.start()

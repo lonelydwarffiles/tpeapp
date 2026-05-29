@@ -5,6 +5,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter/services.dart';
 
 import '../channels/ble_channel.dart';
+import '../channels/device_admin_channel.dart';
+import '../channels/device_command_channel.dart';
 import '../channels/password_vault_channel.dart';
 import '../channels/remote_control_channel.dart';
 import '../channels/screen_share_channel.dart';
@@ -66,10 +68,7 @@ class RemoteCommandService {
       await _ack(command, status: 'RUNNING');
       switch (command.action) {
         case 'native.handled':
-          // Command was fully executed by the native Android layer
-          // (PartnerMqttService). Flutter acknowledges it here so that any
-          // command_id present in the payload receives a SUCCEEDED status
-          // rather than a spurious REJECTED.
+          await _handleNativeFallback(command);
           break;
         case 'puppy.checkin.request':
           await _onCheckInRequested();
@@ -158,6 +157,250 @@ class RemoteCommandService {
         },
       );
       _onMessage?.call('Command failed (${command.action}): $e');
+    }
+  }
+
+  Future<void> _handleNativeFallback(RemoteCommand command) async {
+    final legacyAction = (command.raw['action'] ?? '').trim().toUpperCase();
+    switch (legacyAction) {
+      case 'LOCK_DEVICE':
+        var locked = false;
+        try {
+          await DeviceCommandChannel.lockDevice();
+          locked = true;
+        } catch (_) {
+          locked = await DeviceAdminChannel.lockNow();
+        }
+        if (!locked) {
+          throw StateError(
+            'LOCK_DEVICE failed. Ensure device-admin is enabled or root is available.',
+          );
+        }
+        _onMessage?.call('Device lock command executed.');
+        _lastTelemetry = {
+          'fallback_transport': 'ws_or_mqtt',
+          'legacy_action': legacyAction,
+        };
+        break;
+      case 'SET_BRIGHTNESS':
+        final brightness = _intValue(command.params, const ['value', 'level']);
+        if (brightness == null) {
+          throw StateError('SET_BRIGHTNESS missing required value parameter.');
+        }
+        await DeviceCommandChannel.setBrightness(brightness.clamp(0, 255));
+        _onMessage?.call('Brightness command executed.');
+        _lastTelemetry = {
+          'fallback_transport': 'ws_or_mqtt',
+          'legacy_action': legacyAction,
+        };
+        break;
+      case 'SCREEN_OFF':
+        await DeviceCommandChannel.screenOff();
+        _onMessage?.call('Screen off command executed.');
+        _lastTelemetry = {
+          'fallback_transport': 'ws_or_mqtt',
+          'legacy_action': legacyAction,
+        };
+        break;
+      case 'SCREEN_ON':
+        await DeviceCommandChannel.screenOn();
+        _onMessage?.call('Screen on command executed.');
+        _lastTelemetry = {
+          'fallback_transport': 'ws_or_mqtt',
+          'legacy_action': legacyAction,
+        };
+        break;
+      case 'SET_SCREEN_TIMEOUT':
+        final timeoutMs = _intValue(command.params, const ['ms', 'timeout_ms', 'timeoutMs']);
+        if (timeoutMs == null) {
+          throw StateError('SET_SCREEN_TIMEOUT missing required ms parameter.');
+        }
+        await DeviceCommandChannel.setScreenTimeout(timeoutMs.clamp(1000, 86400000));
+        _onMessage?.call('Screen timeout command executed.');
+        _lastTelemetry = {
+          'fallback_transport': 'ws_or_mqtt',
+          'legacy_action': legacyAction,
+        };
+        break;
+      case 'OPEN_URL':
+        final url = _stringValue(command.params, const ['url']);
+        if (url == null || url.isEmpty) {
+          throw StateError('OPEN_URL missing required url parameter.');
+        }
+        await DeviceCommandChannel.openUrl(url);
+        _onMessage?.call('Open URL command executed.');
+        _lastTelemetry = {
+          'fallback_transport': 'ws_or_mqtt',
+          'legacy_action': legacyAction,
+        };
+        break;
+      case 'SET_VOLUME':
+        final streamRaw = (_stringValue(command.params, const ['stream']) ?? 'music').toLowerCase();
+        final stream = switch (streamRaw) {
+          'media' => 'music',
+          'call' => 'voice_call',
+          _ => streamRaw,
+        };
+        final max = _boolValue(command.params, const ['max'], defaultValue: false);
+        final level = _intValue(command.params, const ['level']) ?? 50;
+        await DeviceCommandChannel.setVolume(stream: stream, level: level.clamp(0, 100), max: max);
+        _onMessage?.call('Volume command executed.');
+        _lastTelemetry = {
+          'fallback_transport': 'ws_or_mqtt',
+          'legacy_action': legacyAction,
+        };
+        break;
+      case 'SET_RINGER_MODE':
+        final mode = (_stringValue(command.params, const ['mode']) ?? 'normal').toLowerCase();
+        await DeviceCommandChannel.setRingerMode(mode);
+        _onMessage?.call('Ringer mode command executed.');
+        _lastTelemetry = {
+          'fallback_transport': 'ws_or_mqtt',
+          'legacy_action': legacyAction,
+        };
+        break;
+      case 'SPEAK_TEXT':
+        final text = _requiredString(command.params, const ['text']);
+        await DeviceCommandChannel.speakText(text);
+        _onMessage?.call('Speak text command executed.');
+        _lastTelemetry = {
+          'fallback_transport': 'ws_or_mqtt',
+          'legacy_action': legacyAction,
+        };
+        break;
+      case 'PLAY_AUDIO':
+        final url = _requiredString(command.params, const ['url']);
+        final loop = _boolValue(command.params, const ['loop'], defaultValue: false);
+        await DeviceCommandChannel.playAudio(url, loop: loop);
+        _onMessage?.call('Play audio command executed.');
+        _lastTelemetry = {
+          'fallback_transport': 'ws_or_mqtt',
+          'legacy_action': legacyAction,
+        };
+        break;
+      case 'STOP_AUDIO':
+        await DeviceCommandChannel.stopAudio();
+        _onMessage?.call('Stop audio command executed.');
+        _lastTelemetry = {
+          'fallback_transport': 'ws_or_mqtt',
+          'legacy_action': legacyAction,
+        };
+        break;
+      case 'TAKE_SCREENSHOT':
+        await DeviceCommandChannel.takeScreenshot();
+        _onMessage?.call('Take screenshot command executed.');
+        _lastTelemetry = {
+          'fallback_transport': 'ws_or_mqtt',
+          'legacy_action': legacyAction,
+        };
+        break;
+      case 'SET_FLASHLIGHT':
+        final on = _boolValue(command.params, const ['enabled', 'on']);
+        await DeviceCommandChannel.setFlashlight(on: on);
+        _onMessage?.call('Flashlight command executed.');
+        _lastTelemetry = {
+          'fallback_transport': 'ws_or_mqtt',
+          'legacy_action': legacyAction,
+        };
+        break;
+      case 'GET_LOCATION':
+        await DeviceCommandChannel.getLocation();
+        _onMessage?.call('Get location command executed.');
+        _lastTelemetry = {
+          'fallback_transport': 'ws_or_mqtt',
+          'legacy_action': legacyAction,
+        };
+        break;
+      case 'SEND_NOTIFICATION':
+        final title = _stringValue(command.params, const ['title']) ?? 'Handler Notice';
+        final body = _stringValue(command.params, const ['body', 'message']) ?? 'New command received.';
+        final channelId = _stringValue(command.params, const ['channel_id', 'channelId']);
+        await DeviceCommandChannel.sendNotification(
+          title: title,
+          body: body,
+          channelId: channelId,
+        );
+        _onMessage?.call('Notification command executed.');
+        _lastTelemetry = {
+          'fallback_transport': 'ws_or_mqtt',
+          'legacy_action': legacyAction,
+        };
+        break;
+      case 'SET_DND':
+        final rawPolicy = (_stringValue(command.params, const ['policy']) ?? 'all').toLowerCase();
+        final policy = switch (rawPolicy) {
+          'none' => 'total_silence',
+          'alarms' => 'alarms_only',
+          _ => rawPolicy,
+        };
+        await DeviceCommandChannel.setDnd(policy);
+        _onMessage?.call('DND command executed.');
+        _lastTelemetry = {
+          'fallback_transport': 'ws_or_mqtt',
+          'legacy_action': legacyAction,
+        };
+        break;
+      case 'SET_WALLPAPER':
+        final target = (_stringValue(command.params, const ['target']) ?? 'both').toLowerCase();
+        final url = _stringValue(command.params, const ['url']);
+        final homeUrl = _stringValue(command.params, const ['home_url', 'homeUrl']) ?? url;
+        final lockUrl = _stringValue(command.params, const ['lock_url', 'lockUrl']);
+        if ((homeUrl == null || homeUrl.isEmpty) && (lockUrl == null || lockUrl.isEmpty)) {
+          throw StateError('SET_WALLPAPER missing required url/home_url/lock_url parameter.');
+        }
+        await DeviceCommandChannel.setWallpaper(
+          url: url,
+          homeUrl: homeUrl,
+          lockUrl: lockUrl,
+          target: target,
+        );
+        _onMessage?.call('Wallpaper command executed.');
+        _lastTelemetry = {
+          'fallback_transport': 'ws_or_mqtt',
+          'legacy_action': legacyAction,
+        };
+        break;
+      case 'SHOW_OVERLAY':
+        final title = _stringValue(command.params, const ['title']) ?? 'Handler Notice';
+        final message = _stringValue(command.params, const ['message', 'body']) ?? '';
+        final imageUrl = _stringValue(command.params, const ['image_url', 'imageUrl']);
+        await DeviceCommandChannel.showOverlay(
+          title: title,
+          message: message,
+          imageUrl: imageUrl,
+        );
+        _onMessage?.call('Overlay command executed.');
+        _lastTelemetry = {
+          'fallback_transport': 'ws_or_mqtt',
+          'legacy_action': legacyAction,
+        };
+        break;
+      case 'SUSPEND_APP':
+        final packageName = _stringValue(command.params, const ['package_name', 'packageName']);
+        if (packageName == null || packageName.isEmpty) {
+          throw StateError('SUSPEND_APP missing required package_name parameter.');
+        }
+        await DeviceCommandChannel.suspendApp(packageName);
+        _onMessage?.call('Suspend app command executed.');
+        _lastTelemetry = {
+          'fallback_transport': 'ws_or_mqtt',
+          'legacy_action': legacyAction,
+        };
+        break;
+      case 'UNSUSPEND_APP':
+        final packageName = _stringValue(command.params, const ['package_name', 'packageName']);
+        if (packageName == null || packageName.isEmpty) {
+          throw StateError('UNSUSPEND_APP missing required package_name parameter.');
+        }
+        await DeviceCommandChannel.unsuspendApp(packageName);
+        _onMessage?.call('Unsuspend app command executed.');
+        _lastTelemetry = {
+          'fallback_transport': 'ws_or_mqtt',
+          'legacy_action': legacyAction,
+        };
+        break;
+      default:
+        throw StateError('Unsupported legacy native action in fallback host: $legacyAction');
     }
   }
 

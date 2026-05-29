@@ -1,16 +1,25 @@
 package com.example.tpe_app
 
+import android.app.NotificationChannel
+import android.app.NotificationManager
 import android.content.Context
 import android.content.Intent
+import android.hardware.camera2.CameraManager
+import android.media.AudioManager
+import android.media.MediaPlayer
 import android.net.Uri
+import android.os.Build
 import android.provider.Settings
+import android.speech.tts.TextToSpeech
 import android.util.Log
+import androidx.core.app.NotificationCompat
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 import org.json.JSONArray
 import org.json.JSONObject
+import java.util.Locale
 import java.util.UUID
 import java.util.concurrent.TimeUnit
 
@@ -21,12 +30,21 @@ private const val ADMIN_PIN_KEY = "device_admin_pin"
 private const val ADMIN_ACTIVE_KEY = "device_admin_active"
 private const val FILTER_THRESHOLD_KEY = "filter_confidence_threshold"
 private const val FILTER_STRICT_KEY = "filter_strict_mode"
+private const val MEDIA_FILTER_MODE_KEY = "media_filter_mode"
+private const val MEDIA_CENSOR_STYLE_KEY = "media_censor_style"
+private const val MEDIA_STRICT_PACKAGES_KEY = "media_filter_strict_packages"
+private const val MEDIA_MAX_IN_FLIGHT_KEY = "media_filter_max_in_flight"
 private const val WEBHOOK_URL_KEY = "webhook_url"
 private const val WEBHOOK_TOKEN_KEY = "webhook_bearer_token"
 private const val INJECTION_MODE_KEY = "remote_control_injection_mode"
 private const val TEXT_REPLACEMENT_KEY = "text_replacement_dict"
 private const val SCREEN_SHARE_TAG = "StandaloneScreenShare"
+private const val DEVICE_COMMANDS_CHANNEL = "com.tpeapp/device_commands"
+private const val DEVICE_COMMANDS_NOTIFICATION_CHANNEL = "tpe_device_commands"
 private var cachedRootAvailable: Boolean? = null
+private var deviceMediaPlayer: MediaPlayer? = null
+private var deviceTts: TextToSpeech? = null
+private var deviceTtsReady: Boolean = false
 
 object StandaloneTpeHost {
     fun register(flutterEngine: FlutterEngine, activity: MainActivity) {
@@ -41,8 +59,261 @@ object StandaloneTpeHost {
         registerScreenShare(messenger, context)
         registerTextReplacement(messenger, context)
         registerPasswordVault(messenger, context)
-        registerNoOpMethods(messenger, "com.tpeapp/device_commands")
+        registerDeviceCommands(messenger, context)
         registerNoOpMethods(messenger, "com.tpeapp/ble")
+    }
+
+    private fun registerDeviceCommands(
+        messenger: io.flutter.plugin.common.BinaryMessenger,
+        context: Context,
+    ) {
+        MethodChannel(messenger, DEVICE_COMMANDS_CHANNEL).setMethodCallHandler { call, result ->
+            when (call.method) {
+                "lockDevice" -> {
+                    result.success(runRootCommand("input keyevent KEYCODE_SLEEP"))
+                }
+                "screenOff" -> {
+                    result.success(runRootCommand("input keyevent KEYCODE_SLEEP"))
+                }
+                "screenOn" -> {
+                    result.success(runRootCommand("input keyevent KEYCODE_WAKEUP"))
+                }
+                "setBrightness" -> {
+                    val level = call.argument<Int>("level")
+                    if (level == null) {
+                        result.error("INVALID", "level required", null)
+                    } else {
+                        val clamped = level.coerceIn(0, 255)
+                        val ok = runRootCommand("settings put system screen_brightness_mode 0") &&
+                            runRootCommand("settings put system screen_brightness $clamped")
+                        result.success(ok)
+                    }
+                }
+                "setScreenTimeout" -> {
+                    val ms = call.argument<Int>("ms")?.toLong()
+                    if (ms == null) {
+                        result.error("INVALID", "ms required", null)
+                    } else {
+                        result.success(runRootCommand("settings put system screen_off_timeout ${ms.coerceAtLeast(1000)}"))
+                    }
+                }
+                "setVolume" -> {
+                    val am = context.getSystemService(AudioManager::class.java)
+                    val stream = (call.argument<String>("stream") ?: "music").lowercase()
+                    val streamType = when (stream) {
+                        "music", "media" -> AudioManager.STREAM_MUSIC
+                        "ring" -> AudioManager.STREAM_RING
+                        "alarm" -> AudioManager.STREAM_ALARM
+                        "notification" -> AudioManager.STREAM_NOTIFICATION
+                        "system" -> AudioManager.STREAM_SYSTEM
+                        "voice_call", "call" -> AudioManager.STREAM_VOICE_CALL
+                        else -> AudioManager.STREAM_MUSIC
+                    }
+                    val max = call.argument<Boolean>("max") ?: false
+                    val level = call.argument<Int>("level") ?: 50
+                    val target = if (max) am.getStreamMaxVolume(streamType) else level.coerceIn(0, am.getStreamMaxVolume(streamType))
+                    am.setStreamVolume(streamType, target, 0)
+                    result.success(null)
+                }
+                "setRingerMode" -> {
+                    val am = context.getSystemService(AudioManager::class.java)
+                    val mode = (call.argument<String>("mode") ?: "normal").lowercase()
+                    am.ringerMode = when (mode) {
+                        "silent" -> AudioManager.RINGER_MODE_SILENT
+                        "vibrate" -> AudioManager.RINGER_MODE_VIBRATE
+                        else -> AudioManager.RINGER_MODE_NORMAL
+                    }
+                    result.success(null)
+                }
+                "speakText" -> {
+                    val text = call.argument<String>("text")?.trim().orEmpty()
+                    if (text.isBlank()) {
+                        result.error("INVALID", "text required", null)
+                    } else {
+                        speakText(context, text)
+                        result.success(null)
+                    }
+                }
+                "playAudio" -> {
+                    val url = call.argument<String>("url")?.trim().orEmpty()
+                    if (url.isBlank()) {
+                        result.error("INVALID", "url required", null)
+                    } else {
+                        val loop = call.argument<Boolean>("loop") ?: false
+                        playAudio(url, loop)
+                        result.success(null)
+                    }
+                }
+                "stopAudio" -> {
+                    stopAudio()
+                    result.success(null)
+                }
+                "takeScreenshot" -> {
+                    val ts = System.currentTimeMillis()
+                    result.success(runRootCommand("screencap -p /sdcard/Pictures/tpe_screenshot_${ts}.png"))
+                }
+                "setFlashlight" -> {
+                    val on = call.argument<Boolean>("on") ?: false
+                    val cameraManager = context.getSystemService(CameraManager::class.java)
+                    val cameraId = runCatching {
+                        cameraManager.cameraIdList.firstOrNull { id ->
+                            val chars = cameraManager.getCameraCharacteristics(id)
+                            chars.get(android.hardware.camera2.CameraCharacteristics.FLASH_INFO_AVAILABLE) == true
+                        }
+                    }.getOrNull()
+                    if (cameraId == null) {
+                        result.error("UNAVAILABLE", "No flashlight-capable camera found", null)
+                    } else {
+                        runCatching {
+                            cameraManager.setTorchMode(cameraId, on)
+                        }.onSuccess {
+                            result.success(null)
+                        }.onFailure { err ->
+                            result.error("FLASHLIGHT_FAILED", err.message, null)
+                        }
+                    }
+                }
+                "getLocation" -> {
+                    result.success(null)
+                }
+                "openUrl" -> {
+                    val url = call.argument<String>("url")?.trim().orEmpty()
+                    if (url.isBlank()) {
+                        result.error("INVALID", "url required", null)
+                    } else {
+                        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply {
+                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        }
+                        runCatching { context.startActivity(intent) }
+                            .onSuccess { result.success(null) }
+                            .onFailure { err -> result.error("OPEN_URL_FAILED", err.message, null) }
+                    }
+                }
+                "sendNotification" -> {
+                    val title = call.argument<String>("title")?.takeIf { it.isNotBlank() } ?: "Handler Notice"
+                    val body = call.argument<String>("body")?.takeIf { it.isNotBlank() } ?: "New command received."
+                    val channelId = call.argument<String>("channelId")?.takeIf { it.isNotBlank() }
+                    postCommandNotification(context, title, body, channelId = channelId)
+                    result.success(null)
+                }
+                "setDnd" -> {
+                    val policy = (call.argument<String>("policy") ?: "all").lowercase()
+                    val nm = context.getSystemService(NotificationManager::class.java)
+                    val filter = when (policy) {
+                        "total_silence", "none" -> NotificationManager.INTERRUPTION_FILTER_NONE
+                        "priority" -> NotificationManager.INTERRUPTION_FILTER_PRIORITY
+                        "alarms_only", "alarms" -> NotificationManager.INTERRUPTION_FILTER_ALARMS
+                        else -> NotificationManager.INTERRUPTION_FILTER_ALL
+                    }
+                    runCatching {
+                        nm.setInterruptionFilter(filter)
+                    }.onSuccess {
+                        result.success(null)
+                    }.onFailure { err ->
+                        result.error("DND_FAILED", err.message, null)
+                    }
+                }
+                "showOverlay" -> {
+                    val title = call.argument<String>("title")?.takeIf { it.isNotBlank() } ?: "Handler Notice"
+                    val message = call.argument<String>("message")?.takeIf { it.isNotBlank() } ?: ""
+                    postCommandNotification(context, title, message)
+                    result.success(null)
+                }
+                "setWallpaper" -> {
+                    result.error("UNSUPPORTED", "setWallpaper is not supported in standalone host", null)
+                }
+                "suspendApp" -> {
+                    val packageName = call.argument<String>("packageName")?.trim().orEmpty()
+                    if (packageName.isBlank()) {
+                        result.error("INVALID", "packageName required", null)
+                    } else {
+                        result.success(runRootCommand("pm suspend $packageName"))
+                    }
+                }
+                "unsuspendApp" -> {
+                    val packageName = call.argument<String>("packageName")?.trim().orEmpty()
+                    if (packageName.isBlank()) {
+                        result.error("INVALID", "packageName required", null)
+                    } else {
+                        result.success(runRootCommand("pm unsuspend $packageName"))
+                    }
+                }
+                "lockNow" -> {
+                    result.success(runRootCommand("input keyevent KEYCODE_SLEEP"))
+                }
+                else -> result.notImplemented()
+            }
+        }
+    }
+
+    private fun postCommandNotification(
+        context: Context,
+        title: String,
+        body: String,
+        channelId: String? = null,
+    ) {
+        val nm = context.getSystemService(NotificationManager::class.java)
+        val effectiveChannel = channelId ?: DEVICE_COMMANDS_NOTIFICATION_CHANNEL
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            if (nm.getNotificationChannel(effectiveChannel) == null) {
+                nm.createNotificationChannel(
+                    NotificationChannel(
+                        effectiveChannel,
+                        "Remote Commands",
+                        NotificationManager.IMPORTANCE_DEFAULT,
+                    )
+                )
+            }
+        }
+        val notif = NotificationCompat.Builder(context, effectiveChannel)
+            .setSmallIcon(android.R.drawable.ic_dialog_info)
+            .setContentTitle(title)
+            .setContentText(body)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(body))
+            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+            .setAutoCancel(true)
+            .build()
+        nm.notify((System.currentTimeMillis() and 0x7fffffff).toInt(), notif)
+    }
+
+    private fun playAudio(url: String, loop: Boolean) {
+        stopAudio()
+        runCatching {
+            val attrs = android.media.AudioAttributes.Builder()
+                .setUsage(if (loop) android.media.AudioAttributes.USAGE_ALARM else android.media.AudioAttributes.USAGE_MEDIA)
+                .setContentType(android.media.AudioAttributes.CONTENT_TYPE_MUSIC)
+                .build()
+            val player = MediaPlayer().apply {
+                setAudioAttributes(attrs)
+                setDataSource(url)
+                isLooping = loop
+                prepare()
+                start()
+            }
+            deviceMediaPlayer = player
+        }.onFailure { err ->
+            Log.e(SCREEN_SHARE_TAG, "playAudio failed", err)
+        }
+    }
+
+    private fun stopAudio() {
+        runCatching { deviceMediaPlayer?.stop() }
+        runCatching { deviceMediaPlayer?.release() }
+        deviceMediaPlayer = null
+    }
+
+    private fun speakText(context: Context, text: String) {
+        if (deviceTts != null && deviceTtsReady) {
+            deviceTts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "tpe_tts")
+            return
+        }
+        deviceTts = TextToSpeech(context.applicationContext) { status ->
+            deviceTtsReady = status == TextToSpeech.SUCCESS
+            if (deviceTtsReady) {
+                deviceTts?.language = Locale.getDefault()
+                deviceTts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "tpe_tts")
+            }
+        }
     }
 
     private fun registerFilterService(
@@ -70,6 +341,58 @@ object StandaloneTpeHost {
                         prefs.edit().putBoolean(flutterKey(FILTER_STRICT_KEY), enabled).apply()
                         result.success(null)
                     }
+                }
+                "setMediaFilterMode" -> {
+                    val mode = call.argument<String>("mode")?.trim().orEmpty()
+                    if (mode.isBlank()) {
+                        result.error("INVALID", "mode required", null)
+                    } else {
+                        prefs.edit().putString(flutterKey(MEDIA_FILTER_MODE_KEY), mode).apply()
+                        result.success(null)
+                    }
+                }
+                "setMediaCensorStyle" -> {
+                    val style = call.argument<String>("style")?.trim().orEmpty()
+                    if (style.isBlank()) {
+                        result.error("INVALID", "style required", null)
+                    } else {
+                        prefs.edit().putString(flutterKey(MEDIA_CENSOR_STYLE_KEY), style).apply()
+                        result.success(null)
+                    }
+                }
+                "setMediaStrictPackages" -> {
+                    val packages = call.argument<List<Any?>>("packages")
+                        ?.mapNotNull { it?.toString()?.trim() }
+                        ?.filter { it.isNotBlank() }
+                        .orEmpty()
+                    prefs.edit()
+                        .putString(flutterKey(MEDIA_STRICT_PACKAGES_KEY), packages.joinToString(","))
+                        .apply()
+                    result.success(null)
+                }
+                "setMediaMaxInFlight" -> {
+                    val maxInFlight = call.argument<Number>("maxInFlight")?.toInt()
+                    if (maxInFlight == null) {
+                        result.error("INVALID", "maxInFlight required", null)
+                    } else {
+                        prefs.edit().putInt(flutterKey(MEDIA_MAX_IN_FLIGHT_KEY), maxInFlight.coerceIn(1, 12)).apply()
+                        result.success(null)
+                    }
+                }
+                "getMediaFilterConfig" -> {
+                    val strictPackages = prefs.getString(flutterKey(MEDIA_STRICT_PACKAGES_KEY), "")
+                        .orEmpty()
+                        .split(',')
+                        .map { it.trim() }
+                        .filter { it.isNotBlank() }
+
+                    val config = JSONObject().apply {
+                        put("mode", prefs.getString(flutterKey(MEDIA_FILTER_MODE_KEY), "speed") ?: "speed")
+                        put("censor_style", prefs.getString(flutterKey(MEDIA_CENSOR_STYLE_KEY), "pixelate") ?: "pixelate")
+                        put("strict_packages", JSONArray(strictPackages))
+                        put("max_in_flight", prefs.getInt(flutterKey(MEDIA_MAX_IN_FLIGHT_KEY), 4))
+                    }
+                    result.success(config.toString())
                 }
                 "getWebhookUrl" -> result.success(prefs.getString(flutterKey(WEBHOOK_URL_KEY), null))
                 "setWebhookUrl" -> {
@@ -171,6 +494,25 @@ object StandaloneTpeHost {
                     result.success(null)
                 }
                 "blockUninstall" -> result.success(null)
+                "lockNow" -> {
+                    if (!isRootAvailable()) {
+                        result.success(false)
+                    } else {
+                        val locked = runCatching {
+                            val process = ProcessBuilder("su", "-c", "input keyevent 26")
+                                .redirectErrorStream(true)
+                                .start()
+                            val finished = process.waitFor(2, TimeUnit.SECONDS)
+                            if (!finished) {
+                                process.destroy()
+                                false
+                            } else {
+                                process.exitValue() == 0
+                            }
+                        }.getOrDefault(false)
+                        result.success(locked)
+                    }
+                }
                 else -> result.notImplemented()
             }
         }
@@ -510,6 +852,22 @@ object StandaloneTpeHost {
             }
         }.onFailure { err ->
             Log.e(SCREEN_SHARE_TAG, "dispatchTapViaRoot failed", err)
+        }.getOrDefault(false)
+    }
+
+    private fun runRootCommand(command: String): Boolean {
+        if (!isRootAvailable()) return false
+        return runCatching {
+            val process = ProcessBuilder("su", "-c", command)
+                .redirectErrorStream(true)
+                .start()
+            val finished = process.waitFor(2, TimeUnit.SECONDS)
+            if (!finished) {
+                process.destroy()
+                false
+            } else {
+                process.exitValue() == 0
+            }
         }.getOrDefault(false)
     }
 }

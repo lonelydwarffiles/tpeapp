@@ -24,16 +24,25 @@ import 'tts_service.dart';
 class WebSocketService {
   WebSocketService(this._prefs);
 
+  static const Duration _initialReconnectDelay = Duration(seconds: 2);
+  static const Duration _maxReconnectDelay = Duration(seconds: 30);
+
   final SharedPreferences _prefs;
 
   WebSocket? _socket;
   StreamSubscription<dynamic>? _socketSub;
   AudioRecorder? _recorder;
   StreamSubscription<List<int>>? _audioSub;
+  Timer? _reconnectTimer;
+  Duration _reconnectDelay = _initialReconnectDelay;
+  bool _manualDisconnect = false;
+  bool _connecting = false;
+  bool _closingSocket = false;
   // Guards against concurrent _startHotMic() calls before _recorder is assigned.
   bool _startingHotMic = false;
 
   final TtsService _tts = TtsService();
+  void Function(Map<String, String> event)? onCommandEvent;
 
   // ── Connection management ────────────────────────────────────────────
 
@@ -46,10 +55,20 @@ class WebSocketService {
         .replaceFirst(RegExp(r'^http://'), 'ws://');
   }
 
+  bool get isConnected => _socket?.readyState == WebSocket.open;
+
+  Future<void> ensureConnected() async {
+    if (isConnected || _connecting) return;
+    await connect();
+  }
+
   /// Opens the WebSocket connection to `{endpoint}/ws`.
   /// Closes any pre-existing connection first.
   Future<void> connect() async {
-    await disconnect();
+    if (_connecting || isConnected) return;
+    _manualDisconnect = false;
+    _reconnectTimer?.cancel();
+    _reconnectTimer = null;
     if (_wsBaseUrl.isEmpty) {
       developer.log(
         'Skipping websocket connect: partner_endpoint_url is empty',
@@ -57,29 +76,46 @@ class WebSocketService {
       );
       return;
     }
-    final token = (_prefs.getString('webhook_bearer_token') ?? '').trim();
-    final deviceId = (_prefs.getString('device_id') ?? '').trim();
-    final query = <String>[];
-    if (token.isNotEmpty) query.add('secret=${Uri.encodeQueryComponent(token)}');
-    if (deviceId.isNotEmpty) query.add('device_id=${Uri.encodeQueryComponent(deviceId)}');
-    final suffix = query.isEmpty ? '' : '?${query.join('&')}';
-    final url = '$_wsBaseUrl/ws$suffix';
-    _socket = await WebSocket.connect(url);
-    _socketSub = _socket!.listen(
-      _onMessage,
-      onError: _onError,
-      onDone: _onDone,
-    );
+    _connecting = true;
+    try {
+      await _closeSocket();
+      final token = (_prefs.getString('webhook_bearer_token') ?? '').trim();
+      final deviceId = (_prefs.getString('device_id') ?? '').trim();
+      final query = <String>[];
+      if (token.isNotEmpty) query.add('secret=${Uri.encodeQueryComponent(token)}');
+      if (deviceId.isNotEmpty) query.add('device_id=${Uri.encodeQueryComponent(deviceId)}');
+      final suffix = query.isEmpty ? '' : '?${query.join('&')}';
+      final url = '$_wsBaseUrl/ws$suffix';
+      developer.log('Connecting websocket: $url', name: 'WebSocketService');
+      _socket = await WebSocket.connect(url);
+      _socketSub = _socket!.listen(
+        _onMessage,
+        onError: _onError,
+        onDone: _onDone,
+      );
+      developer.log('Websocket connected', name: 'WebSocketService');
+      _reconnectDelay = _initialReconnectDelay;
+    } catch (error) {
+      developer.log(
+        'WebSocket connect failed: $error',
+        name: 'WebSocketService',
+      );
+      _scheduleReconnect();
+    } finally {
+      _connecting = false;
+    }
   }
 
   /// Stops any active recording, disposes TTS, and closes the WebSocket.
-  Future<void> disconnect() async {
+  Future<void> disconnect({bool disposeTts = true}) async {
+    _manualDisconnect = true;
+    _reconnectTimer?.cancel();
+    _reconnectTimer = null;
     await _stopHotMic();
-    await _tts.dispose();
-    await _socketSub?.cancel();
-    _socketSub = null;
-    await _socket?.close();
-    _socket = null;
+    if (disposeTts) {
+      await _tts.dispose();
+    }
+    await _closeSocket();
   }
 
   // ── Incoming message handling ────────────────────────────────────────
@@ -117,11 +153,39 @@ class WebSocketService {
           _tts.handleCommand(text: text, forceSpeaker: forceSpeaker);
         }
       default:
-        developer.log(
-          'Ignoring unsupported WS command: $command',
-          name: 'WebSocketService',
-        );
+        final event = _toCommandEvent(payload);
+        if (event != null && onCommandEvent != null) {
+          onCommandEvent!.call(event);
+          developer.log(
+            'Forwarded WS command payload to command pipeline: $event',
+            name: 'WebSocketService',
+          );
+        } else {
+          developer.log(
+            'Ignoring unsupported WS command: $command',
+            name: 'WebSocketService',
+          );
+        }
     }
+  }
+
+  Map<String, String>? _toCommandEvent(Map<String, dynamic> payload) {
+    final hasCommandEnvelope =
+        payload.containsKey('action') || payload.containsKey('command');
+    if (!hasCommandEnvelope) return null;
+
+    final mapped = <String, String>{};
+    payload.forEach((key, value) {
+      if (value == null) return;
+      if (value is String) {
+        mapped[key] = value;
+      } else if (value is num || value is bool) {
+        mapped[key] = value.toString();
+      } else {
+        mapped[key] = jsonEncode(value);
+      }
+    });
+    return mapped;
   }
 
   String _commandFromPayload(Map<String, dynamic> payload) {
@@ -169,13 +233,55 @@ class WebSocketService {
   }
 
   void _onError(Object error) {
+    developer.log(
+      'WebSocket stream error: $error',
+      name: 'WebSocketService',
+    );
     _stopHotMic();
+    if (!_manualDisconnect && !_closingSocket) {
+      _scheduleReconnect();
+    }
   }
 
   void _onDone() {
     _stopHotMic();
     _socket = null;
     _socketSub = null;
+    developer.log('WebSocket closed', name: 'WebSocketService');
+    if (!_manualDisconnect && !_closingSocket) {
+      _scheduleReconnect();
+    }
+  }
+
+  void _scheduleReconnect() {
+    if (_manualDisconnect || _connecting) return;
+    if (_reconnectTimer != null) return;
+    developer.log(
+      'Scheduling websocket reconnect in ${_reconnectDelay.inSeconds}s',
+      name: 'WebSocketService',
+    );
+    _reconnectTimer = Timer(_reconnectDelay, () async {
+      _reconnectTimer = null;
+      await connect();
+    });
+    final doubled = _reconnectDelay.inMilliseconds * 2;
+    _reconnectDelay = Duration(
+      milliseconds: doubled > _maxReconnectDelay.inMilliseconds
+          ? _maxReconnectDelay.inMilliseconds
+          : doubled,
+    );
+  }
+
+  Future<void> _closeSocket() async {
+    _closingSocket = true;
+    try {
+      await _socketSub?.cancel();
+      _socketSub = null;
+      await _socket?.close();
+      _socket = null;
+    } finally {
+      _closingSocket = false;
+    }
   }
 
   // ── Live Hot Mic ─────────────────────────────────────────────────────
