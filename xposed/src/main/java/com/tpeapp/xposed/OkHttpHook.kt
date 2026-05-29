@@ -153,6 +153,10 @@ object OkHttpHook {
             return imageBytes
         }
 
+        if (MediaFilterRuntimeConfig.isStrictForCurrentPackage()) {
+            return scanAndCensorStrict(service, imageBytes)
+        }
+
         val key = fingerprint(imageBytes)
         val cachedDecision = getCachedDecision(key)
         if (cachedDecision == true) {
@@ -167,12 +171,71 @@ object OkHttpHook {
         return imageBytes
     }
 
+    private fun scanAndCensorStrict(
+        service: com.tpeapp.filter.IFilterService,
+        imageBytes: ByteArray,
+    ): ByteArray {
+        if (!MediaFilterRuntimeConfig.tryAcquireScanBudget()) {
+            return imageBytes
+        }
+
+        val requestId = requestSeq.incrementAndGet()
+        val startedAt = System.currentTimeMillis()
+        val deferred = CompletableDeferred<Pair<Boolean, Float>>()
+
+        val result = runCatching {
+            service.scanImageBytes(requestId, imageBytes, object : IFilterCallback.Stub() {
+                override fun onScanResult(id: Long, isSensitive: Boolean, confidence: Float) {
+                    if (!deferred.isCompleted) {
+                        deferred.complete(isSensitive to confidence)
+                    }
+                }
+            })
+        }
+        if (result.isFailure) {
+            MediaFilterRuntimeConfig.releaseScanBudget()
+            return imageBytes
+        }
+
+        val outcome = runCatching {
+            kotlinx.coroutines.runBlocking {
+                withTimeoutOrNull(SCAN_TIMEOUT_MS) { deferred.await() }
+            }
+        }.getOrNull()
+
+        MediaFilterRuntimeConfig.releaseScanBudget()
+
+        if (outcome == null) {
+            CoverageTelemetry.report(
+                lane = CoverageTelemetry.LANE_OKHTTP,
+                stage = CoverageTelemetry.STAGE_SCAN_TIMEOUT,
+                latencyMs = System.currentTimeMillis() - startedAt,
+                reason = "strict_timeout"
+            )
+            return imageBytes
+        }
+
+        val (isSensitive, confidence) = outcome
+        CoverageTelemetry.report(
+            lane = CoverageTelemetry.LANE_OKHTTP,
+            stage = CoverageTelemetry.STAGE_SCAN_RESULT,
+            sensitive = isSensitive,
+            confidence = confidence,
+            latencyMs = System.currentTimeMillis() - startedAt,
+        )
+        return if (isSensitive) BlurHelper.pixelateBytes(context = null, imageBytes) else imageBytes
+    }
+
     private fun maybeScheduleAsyncScan(
         service: com.tpeapp.filter.IFilterService,
         key: Int,
         imageBytes: ByteArray,
     ) {
         if (inFlight.putIfAbsent(key, Unit) != null) return
+        if (!MediaFilterRuntimeConfig.tryAcquireScanBudget()) {
+            inFlight.remove(key)
+            return
+        }
 
         val requestId = requestSeq.incrementAndGet()
         val startedAt = System.currentTimeMillis()
@@ -188,6 +251,7 @@ object OkHttpHook {
                 }
             })
         }.onFailure {
+            MediaFilterRuntimeConfig.releaseScanBudget()
             inFlight.remove(key)
             CoverageTelemetry.report(
                 lane = CoverageTelemetry.LANE_OKHTTP,
@@ -221,6 +285,7 @@ object OkHttpHook {
                     Log.d(TAG, "OkHttp: cached sensitive image [$requestId] score=$confidence")
                 }
             }
+            MediaFilterRuntimeConfig.releaseScanBudget()
             inFlight.remove(key)
         }
     }

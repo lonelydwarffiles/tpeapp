@@ -60,6 +60,43 @@ object FilterServiceChannel {
                         .apply()
                     result.success(null)
                 }
+                "setMediaFilterMode" -> {
+                    val mode = call.argument<String>("mode")
+                        ?: return@setMethodCallHandler result.error("INVALID", "mode required", null)
+                    PreferenceManager.getDefaultSharedPreferences(ctx).edit()
+                        .putString(FilterService.PREF_MEDIA_FILTER_MODE, mode)
+                        .apply()
+                    result.success(null)
+                }
+                "setMediaCensorStyle" -> {
+                    val style = call.argument<String>("style")
+                        ?: return@setMethodCallHandler result.error("INVALID", "style required", null)
+                    PreferenceManager.getDefaultSharedPreferences(ctx).edit()
+                        .putString(FilterService.PREF_MEDIA_CENSOR_STYLE, style)
+                        .apply()
+                    result.success(null)
+                }
+                "setMediaStrictPackages" -> {
+                    val packages = call.argument<List<String>>("packages") ?: emptyList()
+                    val arr = org.json.JSONArray()
+                    packages
+                        .map { it.trim() }
+                        .filter { it.isNotEmpty() }
+                        .distinct()
+                        .forEach { arr.put(it) }
+                    PreferenceManager.getDefaultSharedPreferences(ctx).edit()
+                        .putString(FilterService.PREF_MEDIA_STRICT_PACKAGES, arr.toString())
+                        .apply()
+                    result.success(null)
+                }
+                "setMediaMaxInFlight" -> {
+                    val maxInFlight = call.argument<Int>("maxInFlight")
+                        ?: return@setMethodCallHandler result.error("INVALID", "maxInFlight required", null)
+                    PreferenceManager.getDefaultSharedPreferences(ctx).edit()
+                        .putInt(FilterService.PREF_MEDIA_MAX_IN_FLIGHT, maxInFlight.coerceIn(1, 12))
+                        .apply()
+                    result.success(null)
+                }
                 "getWebhookUrl" -> {
                     val url = PreferenceManager.getDefaultSharedPreferences(ctx)
                         .getString(FilterService.PREF_WEBHOOK_URL, null)
@@ -85,6 +122,18 @@ object FilterServiceChannel {
                         .putString(FilterService.PREF_WEBHOOK_BEARER_TOKEN, token)
                         .apply()
                     result.success(null)
+                }
+                "getMediaFilterConfig" -> {
+                    val prefs = PreferenceManager.getDefaultSharedPreferences(ctx)
+                    val json = org.json.JSONObject().apply {
+                        put("mode", prefs.getString(FilterService.PREF_MEDIA_FILTER_MODE, "speed") ?: "speed")
+                        put("censor_style", prefs.getString(FilterService.PREF_MEDIA_CENSOR_STYLE, "pixelate") ?: "pixelate")
+                        put("strict_packages", org.json.JSONArray(
+                            prefs.getString(FilterService.PREF_MEDIA_STRICT_PACKAGES, "[]") ?: "[]"
+                        ))
+                        put("max_in_flight", prefs.getInt(FilterService.PREF_MEDIA_MAX_IN_FLIGHT, 4).coerceIn(1, 12))
+                    }
+                    result.success(json.toString())
                 }
                 else -> result.notImplemented()
             }

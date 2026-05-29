@@ -124,6 +124,11 @@ object GlideHook {
             return
         }
 
+        if (MediaFilterRuntimeConfig.isStrictForCurrentPackage()) {
+            scanAndReplaceStrict(service, bitmap)
+            return
+        }
+
         val key = fingerprint(bitmap)
         val cached = getCachedDecision(key)
         if (cached == true) {
@@ -132,6 +137,10 @@ object GlideHook {
         }
         if (cached == false) return
         if (inFlight.putIfAbsent(key, Unit) != null) return
+        if (!MediaFilterRuntimeConfig.tryAcquireScanBudget()) {
+            inFlight.remove(key)
+            return
+        }
 
         val requestId = requestSeq.incrementAndGet()
         val startedAt = System.currentTimeMillis()
@@ -139,6 +148,7 @@ object GlideHook {
         bgScope.launch {
             val bytes = encodeForScan(bitmap)
             if (bytes == null) {
+                MediaFilterRuntimeConfig.releaseScanBudget()
                 inFlight.remove(key)
                 return@launch
             }
@@ -157,6 +167,7 @@ object GlideHook {
                     latencyMs = System.currentTimeMillis() - startedAt,
                     reason = it.javaClass.simpleName,
                 )
+                MediaFilterRuntimeConfig.releaseScanBudget()
                 inFlight.remove(key)
                 return@launch
             }
@@ -181,11 +192,67 @@ object GlideHook {
                 )
                 if (isSensitive) {
                     Log.d(TAG, "Glide: replacing sensitive bitmap [$requestId]")
-                    censorBitmapInPlace(bitmap)
+                    MediaFilterRuntimeConfig.censorBitmapInPlace(bitmap)
                 }
             }
+            MediaFilterRuntimeConfig.releaseScanBudget()
             inFlight.remove(key)
         }
+    }
+
+    private fun scanAndReplaceStrict(
+        service: com.tpeapp.filter.IFilterService,
+        bitmap: Bitmap,
+    ) {
+        if (!MediaFilterRuntimeConfig.tryAcquireScanBudget()) return
+        val requestId = requestSeq.incrementAndGet()
+        val startedAt = System.currentTimeMillis()
+        val bytes = encodeForScan(bitmap)
+        if (bytes == null) {
+            MediaFilterRuntimeConfig.releaseScanBudget()
+            return
+        }
+
+        val deferred = CompletableDeferred<Pair<Boolean, Float>>()
+        val submitted = runCatching {
+            service.scanImageBytes(requestId, bytes, object : IFilterCallback.Stub() {
+                override fun onScanResult(id: Long, isSensitive: Boolean, confidence: Float) {
+                    if (!deferred.isCompleted) deferred.complete(isSensitive to confidence)
+                }
+            })
+        }.isSuccess
+        if (!submitted) {
+            MediaFilterRuntimeConfig.releaseScanBudget()
+            return
+        }
+
+        val outcome = runCatching {
+            kotlinx.coroutines.runBlocking {
+                withTimeoutOrNull(SCAN_TIMEOUT_MS) { deferred.await() }
+            }
+        }.getOrNull()
+
+        MediaFilterRuntimeConfig.releaseScanBudget()
+
+        if (outcome == null) {
+            CoverageTelemetry.report(
+                lane = CoverageTelemetry.LANE_GLIDE,
+                stage = CoverageTelemetry.STAGE_SCAN_TIMEOUT,
+                latencyMs = System.currentTimeMillis() - startedAt,
+                reason = "strict_timeout",
+            )
+            return
+        }
+
+        val (isSensitive, confidence) = outcome
+        CoverageTelemetry.report(
+            lane = CoverageTelemetry.LANE_GLIDE,
+            stage = CoverageTelemetry.STAGE_SCAN_RESULT,
+            sensitive = isSensitive,
+            confidence = confidence,
+            latencyMs = System.currentTimeMillis() - startedAt,
+        )
+        if (isSensitive) MediaFilterRuntimeConfig.censorBitmapInPlace(bitmap)
     }
 
     private fun encodeForScan(bitmap: Bitmap): ByteArray? = runCatching {
@@ -206,10 +273,7 @@ object GlideHook {
     }.getOrNull()
 
     private fun censorBitmapInPlace(bitmap: Bitmap) {
-        val pixelated = BlurHelper.pixelateBitmap(bitmap)
-        val canvas = android.graphics.Canvas(bitmap)
-        canvas.drawBitmap(pixelated, 0f, 0f, null)
-        pixelated.recycle()
+        MediaFilterRuntimeConfig.censorBitmapInPlace(bitmap)
     }
 
     private fun getCachedDecision(key: Int): Boolean? = synchronized(cacheLock) {

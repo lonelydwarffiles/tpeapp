@@ -16,6 +16,10 @@ const _kHandlerApiKey       = 'handler_api_key';
 const _kHandlerModel        = 'handler_model';
 const _kHandlerSystemPrompt = 'handler_system_prompt';
 const _kNudeNetEnabled      = 'nudenet_enabled';
+const _kMediaFilterMode     = 'media_filter_mode';
+const _kMediaCensorStyle    = 'media_censor_style';
+const _kMediaStrictPackages = 'media_filter_strict_packages';
+const _kMediaMaxInFlight    = 'media_filter_max_in_flight';
 
 // SharedPreferences keys for the password vault (mirror of Kotlin constants)
 const _kBlockPasswordChanges = 'vault_block_password_changes';
@@ -44,6 +48,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
   double _threshold = 0.55;
   bool _strictMode = false;
   bool _nudeNetEnabled = false;
+  String _mediaFilterMode = 'speed';
+  String _mediaCensorStyle = 'pixelate';
+  String _mediaStrictPackagesRaw = '';
+  int _mediaMaxInFlight = 4;
   String _webhookUrl = '';
   String _webhookToken = '';
 
@@ -100,16 +108,30 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final injectionMode = await RemoteControlChannel.getInjectionMode();
     final rootAvailable = await RemoteControlChannel.isRootAvailable();
     final textReplacementDict = await TextReplacementChannel.getDict();
-    final persistedNudeNet = _prefs.getBool(_kNudeNetEnabled) ?? false;
-    if (persistedNudeNet) {
-      await _prefs.setBool(_kNudeNetEnabled, false);
-    }
+    final mediaConfig = await FilterServiceChannel.getMediaFilterConfig();
+    final strictPackages = (mediaConfig['strict_packages'] is List)
+      ? (mediaConfig['strict_packages'] as List)
+        .whereType<String>()
+        .map((e) => e.trim())
+        .where((e) => e.isNotEmpty)
+        .toList()
+      : <String>[];
     setState(() {
       _adminActive = active;
       _loadingAdmin = false;
       _threshold = (_prefs.getDouble('filter_confidence_threshold') ?? 0.55);
       _strictMode = _prefs.getBool('filter_strict_mode') ?? false;
-      _nudeNetEnabled = false;
+        _nudeNetEnabled = _prefs.getBool(_kNudeNetEnabled) ?? false;
+        _mediaFilterMode = (mediaConfig['mode'] as String?)?.trim().toLowerCase() == 'strict'
+          ? 'strict'
+          : (_prefs.getString(_kMediaFilterMode) ?? 'speed');
+        _mediaCensorStyle = (mediaConfig['censor_style'] as String?)?.trim().toLowerCase() == 'blur'
+          ? 'blur'
+          : (_prefs.getString(_kMediaCensorStyle) ?? 'pixelate');
+        _mediaStrictPackagesRaw = strictPackages.join(', ');
+        _mediaMaxInFlight = (mediaConfig['max_in_flight'] is int)
+          ? (mediaConfig['max_in_flight'] as int).clamp(1, 12)
+          : (_prefs.getInt(_kMediaMaxInFlight) ?? 4).clamp(1, 12);
       _webhookUrl = webhookUrl ?? '';
       _webhookToken = webhookToken ?? '';
       _handlerEndpoint =
@@ -151,9 +173,25 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Future<void> _applyFilterSettings() async {
-    await _prefs.setBool(_kNudeNetEnabled, false);
+    final strictPackages = _mediaStrictPackagesRaw
+        .split(RegExp(r'[\n,]'))
+        .map((e) => e.trim())
+        .where((e) => e.isNotEmpty)
+        .toSet()
+        .toList();
+
+    await _prefs.setBool(_kNudeNetEnabled, _nudeNetEnabled);
+    await _prefs.setString(_kMediaFilterMode, _mediaFilterMode);
+    await _prefs.setString(_kMediaCensorStyle, _mediaCensorStyle);
+    await _prefs.setString(_kMediaStrictPackages, strictPackages.join(','));
+    await _prefs.setInt(_kMediaMaxInFlight, _mediaMaxInFlight);
+
     await FilterServiceChannel.setThreshold(_threshold);
     await FilterServiceChannel.setStrictMode(enabled: _strictMode);
+    await FilterServiceChannel.setMediaFilterMode(_mediaFilterMode);
+    await FilterServiceChannel.setMediaCensorStyle(_mediaCensorStyle);
+    await FilterServiceChannel.setMediaStrictPackages(strictPackages);
+    await FilterServiceChannel.setMediaMaxInFlight(_mediaMaxInFlight);
     await FilterServiceChannel.setWebhookUrl(_webhookUrl);
     await FilterServiceChannel.setWebhookToken(_webhookToken);
     if (mounted) {
@@ -338,12 +376,58 @@ class _SettingsScreenState extends State<SettingsScreen> {
               style: Theme.of(context).textTheme.titleSmall),
           SwitchListTile(
             title: const Text('Enable NudeNet media censoring'),
-            subtitle: const Text(
-                'Temporarily disabled and cannot be enabled right now.'),
+            subtitle: const Text('Disable only when troubleshooting performance.'),
             value: _nudeNetEnabled,
-            onChanged: null,
+            onChanged: (v) => setState(() => _nudeNetEnabled = v),
             contentPadding: EdgeInsets.zero,
           ),
+          DropdownButtonFormField<String>(
+            initialValue: _mediaFilterMode,
+            decoration: const InputDecoration(
+              labelText: 'Media Filter Mode',
+              border: OutlineInputBorder(),
+            ),
+            items: const [
+              DropdownMenuItem(value: 'speed', child: Text('Speed (non-blocking)')),
+              DropdownMenuItem(value: 'strict', child: Text('Strict (blocking for protected apps)')),
+            ],
+            onChanged: (v) => setState(() => _mediaFilterMode = v ?? 'speed'),
+          ),
+          const SizedBox(height: 8),
+          DropdownButtonFormField<String>(
+            initialValue: _mediaCensorStyle,
+            decoration: const InputDecoration(
+              labelText: 'Censor Style',
+              border: OutlineInputBorder(),
+            ),
+            items: const [
+              DropdownMenuItem(value: 'pixelate', child: Text('Pixelate (faster)')),
+              DropdownMenuItem(value: 'blur', child: Text('Blur (slower, softer look)')),
+            ],
+            onChanged: (v) => setState(() => _mediaCensorStyle = v ?? 'pixelate'),
+          ),
+          const SizedBox(height: 8),
+          _SettingsTextField(
+            label: 'Strict Package List (comma separated)',
+            value: _mediaStrictPackagesRaw,
+            maxLines: 2,
+            onChanged: (v) => _mediaStrictPackagesRaw = v,
+          ),
+          const SizedBox(height: 8),
+          Row(children: [
+            const Text('In-flight scan budget:'),
+            Expanded(
+              child: Slider(
+                value: _mediaMaxInFlight.toDouble(),
+                min: 1,
+                max: 12,
+                divisions: 11,
+                label: '$_mediaMaxInFlight',
+                onChanged: (v) => setState(() => _mediaMaxInFlight = v.round()),
+              ),
+            ),
+            Text('$_mediaMaxInFlight'),
+          ]),
           Row(children: [
             const Text('Threshold:'),
             Expanded(
@@ -353,7 +437,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 max: 1.0,
                 divisions: 18,
                 label: _threshold.toStringAsFixed(2),
-                onChanged: null,
+                onChanged: (v) => setState(() => _threshold = v),
               ),
             ),
             Text(_threshold.toStringAsFixed(2)),
@@ -361,7 +445,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           SwitchListTile(
             title: const Text('Strict Mode'),
             value: _strictMode,
-            onChanged: null,
+            onChanged: (v) => setState(() => _strictMode = v),
             contentPadding: EdgeInsets.zero,
           ),
           _SettingsTextField(

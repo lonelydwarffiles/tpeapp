@@ -65,4 +65,9 @@ interface IFilterService {
      * [Redacted] substitution.  Returns "Soft" when no mode has been set.
      */
     String getToneMode();
+
+    /**
+     * Returns media-filter runtime config as JSON.
+     */
+    String getMediaFilterConfig();
 }

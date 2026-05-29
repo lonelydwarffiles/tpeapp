@@ -1,4 +1,5 @@
 import 'package:flutter/services.dart';
+import 'dart:convert';
 
 /// Dart client for the `com.tpeapp/filter_service` MethodChannel.
 ///
@@ -20,6 +21,26 @@ class FilterServiceChannel {
   /// Enables or disables strict-mode content filtering.
   static Future<void> setStrictMode({required bool enabled}) =>
       _channel.invokeMethod('setStrictMode', {'enabled': enabled});
+
+  static Future<void> setMediaFilterMode(String mode) =>
+      _channel.invokeMethod('setMediaFilterMode', {'mode': mode});
+
+  static Future<void> setMediaCensorStyle(String style) =>
+      _channel.invokeMethod('setMediaCensorStyle', {'style': style});
+
+  static Future<void> setMediaStrictPackages(List<String> packages) =>
+      _channel.invokeMethod('setMediaStrictPackages', {'packages': packages});
+
+  static Future<void> setMediaMaxInFlight(int maxInFlight) =>
+      _channel.invokeMethod('setMediaMaxInFlight', {'maxInFlight': maxInFlight});
+
+  static Future<Map<String, dynamic>> getMediaFilterConfig() async {
+    final raw = await _channel.invokeMethod<String>('getMediaFilterConfig');
+    if (raw == null || raw.trim().isEmpty) return <String, dynamic>{};
+    final decoded = jsonDecode(raw);
+    if (decoded is Map<String, dynamic>) return decoded;
+    return <String, dynamic>{};
+  }
 
   /// Returns the currently configured webhook URL, or null if not set.
   static Future<String?> getWebhookUrl() =>

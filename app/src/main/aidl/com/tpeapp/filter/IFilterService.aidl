@@ -85,4 +85,17 @@ interface IFilterService {
      * [Redacted] substitution.  Returns "Soft" when no mode has been set.
      */
     String getToneMode();
+
+    /**
+     * Returns media-filter runtime config as JSON.
+     *
+     * Example:
+     * {
+     *   "mode": "speed",
+     *   "censor_style": "pixelate",
+     *   "strict_packages": ["com.example.app"],
+     *   "max_in_flight": 4
+     * }
+     */
+    String getMediaFilterConfig();
 }

@@ -25,6 +25,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
+import org.json.JSONArray
 import org.json.JSONObject
 import java.io.FileInputStream
 
@@ -84,6 +85,14 @@ class FilterService : Service() {
          * or non-rooted devices.  Defaults to `false` (disabled).
          */
         const val PREF_NUDENET_ENABLED         = "nudenet_enabled"
+        /** speed|strict — speed is non-blocking fail-open, strict is fail-closed in selected lanes. */
+        const val PREF_MEDIA_FILTER_MODE        = "media_filter_mode"
+        /** pixelate|blur — blur is heavier and only available in bitmap lanes. */
+        const val PREF_MEDIA_CENSOR_STYLE       = "media_censor_style"
+        /** JSON array of package names that should run strict even when global mode is speed. */
+        const val PREF_MEDIA_STRICT_PACKAGES    = "media_filter_strict_packages"
+        /** Soft upper bound for concurrent in-flight scans in Xposed lanes. */
+        const val PREF_MEDIA_MAX_IN_FLIGHT      = "media_filter_max_in_flight"
 
         /** Threshold used when strict mode is active and no explicit threshold is set. */
         private const val STRICT_THRESHOLD     = 0.30f
@@ -130,6 +139,10 @@ class FilterService : Service() {
     * Updated live via MQTT command payloads → SharedPreferences listener.
      */
     @Volatile private var nudeNetEnabled: Boolean = false
+    @Volatile private var mediaFilterMode: String = "speed"
+    @Volatile private var mediaCensorStyle: String = "pixelate"
+    @Volatile private var mediaStrictPackagesJson: String = "[]"
+    @Volatile private var mediaMaxInFlight: Int = 4
 
     /** Minimum gap between consecutive clean-scan reward triggers (30 minutes). */
     private val CLEAN_SCAN_REWARD_INTERVAL_MS = 30 * 60 * 1_000L
@@ -177,6 +190,22 @@ class FilterService : Service() {
                         classifier = null
                         old?.close()
                     }
+                }
+                PREF_MEDIA_FILTER_MODE -> {
+                    mediaFilterMode = normalizeMode(prefs.getString(key, "speed"))
+                    Log.i(TAG, "Media filter mode updated via settings -> $mediaFilterMode")
+                }
+                PREF_MEDIA_CENSOR_STYLE -> {
+                    mediaCensorStyle = normalizeCensorStyle(prefs.getString(key, "pixelate"))
+                    Log.i(TAG, "Media censor style updated via settings -> $mediaCensorStyle")
+                }
+                PREF_MEDIA_STRICT_PACKAGES -> {
+                    mediaStrictPackagesJson = normalizeStrictPackagesJson(prefs.getString(key, "[]"))
+                    Log.i(TAG, "Media strict package list updated")
+                }
+                PREF_MEDIA_MAX_IN_FLIGHT -> {
+                    mediaMaxInFlight = prefs.getInt(key, 4).coerceIn(1, 12)
+                    Log.i(TAG, "Media in-flight budget updated -> $mediaMaxInFlight")
                 }
                 com.tpeapp.mindful.ToneEnforcementService.PREF_RESTRICTED_VOCABULARY -> {
                     restrictedVocabularyJson = prefs.getString(key, "") ?: ""
@@ -237,6 +266,12 @@ class FilterService : Service() {
         threshold = effectiveThreshold(prefs.getFloat(PREF_THRESHOLD, DEFAULT_THRESHOLD))
         val persistedNudeNetEnabled = prefs.getBoolean(PREF_NUDENET_ENABLED, false)
         nudeNetEnabled = persistedNudeNetEnabled
+        mediaFilterMode = normalizeMode(prefs.getString(PREF_MEDIA_FILTER_MODE, "speed"))
+        mediaCensorStyle = normalizeCensorStyle(prefs.getString(PREF_MEDIA_CENSOR_STYLE, "pixelate"))
+        mediaStrictPackagesJson = normalizeStrictPackagesJson(
+            prefs.getString(PREF_MEDIA_STRICT_PACKAGES, "[]")
+        )
+        mediaMaxInFlight = prefs.getInt(PREF_MEDIA_MAX_IN_FLIGHT, 4).coerceIn(1, 12)
         textReplacementDictJson = prefs.getString(PREF_TEXT_REPLACEMENT_DICT, "") ?: ""
         textReplacementPolicyJson = prefs.getString(PREF_TEXT_REPLACEMENT_POLICY, "") ?: ""
         restrictedVocabularyJson = prefs.getString(
@@ -355,6 +390,13 @@ class FilterService : Service() {
         override fun getRestrictedVocabulary(): String = restrictedVocabularyJson
 
         override fun getToneMode(): String = if (strictToneModeEnabled) "Strict" else "Soft"
+
+        override fun getMediaFilterConfig(): String = JSONObject().apply {
+            put("mode", mediaFilterMode)
+            put("censor_style", mediaCensorStyle)
+            put("strict_packages", JSONArray(mediaStrictPackagesJson))
+            put("max_in_flight", mediaMaxInFlight)
+        }.toString()
     }
 
     // ------------------------------------------------------------------
@@ -420,6 +462,29 @@ class FilterService : Service() {
      */
     private fun effectiveThreshold(base: Float): Float =
         if (strictModeEnabled) minOf(base, STRICT_THRESHOLD) else base
+
+    private fun normalizeMode(raw: String?): String = when (raw?.trim()?.lowercase()) {
+        "strict" -> "strict"
+        else -> "speed"
+    }
+
+    private fun normalizeCensorStyle(raw: String?): String = when (raw?.trim()?.lowercase()) {
+        "blur" -> "blur"
+        else -> "pixelate"
+    }
+
+    private fun normalizeStrictPackagesJson(raw: String?): String {
+        if (raw.isNullOrBlank()) return "[]"
+        return runCatching {
+            val inArr = JSONArray(raw)
+            val outArr = JSONArray()
+            for (i in 0 until inArr.length()) {
+                val pkg = inArr.optString(i).trim()
+                if (pkg.isNotEmpty()) outArr.put(pkg)
+            }
+            outArr.toString()
+        }.getOrDefault("[]")
+    }
 
     /**
      * Waits (with yields) for the classifier to be initialised and returns a
