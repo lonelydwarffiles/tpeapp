@@ -39,6 +39,21 @@ object ImageViewHook {
     private val bgScope     = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private val requestSeq  = AtomicLong(0)
 
+    /**
+     * Re-entrancy guard for the main thread.
+     *
+     * LSPosed's built-in guard only suppresses re-entry while the hook's
+     * [XC_MethodHook.beforeHookedMethod] call-stack is still active.  Once we
+     * return from [XC_MethodHook.beforeHookedMethod] and later post a
+     * `view.setImageBitmap(…)` callback onto the main thread, the hook fires
+     * again, creating an infinite scan–blur loop.
+     *
+     * Setting this flag to `true` before any internal [ImageView.setImageBitmap]
+     * or [ImageView.setImageDrawable] call we initiate prevents the hooks from
+     * treating those calls as new user-initiated images to censor.
+     */
+    private val inHook = ThreadLocal<Boolean>()
+
     fun install(loader: ClassLoader) {
         try {
             XposedHelpers.findAndHookMethod(
@@ -63,6 +78,7 @@ object ImageViewHook {
 
     private val setBitmapHook = object : XC_MethodHook() {
         override fun beforeHookedMethod(param: MethodHookParam) {
+            if (inHook.get() == true) return  // our own internal call — let original proceed
             val bitmap = param.args[0] as? Bitmap ?: return
             val view   = param.thisObject as? ImageView ?: return
 
@@ -71,8 +87,13 @@ object ImageViewHook {
             // setImageBitmap returns Unit (void); any non-null boxed value would work
             // equally well, but null avoids an unnecessary allocation.
             param.result = null
-            val blurred = BlurHelper.blurBitmap(view.context, bitmap, radius = 15)
-            view.setImageBitmap(blurred)  // safe recursive call (already a blurred copy)
+            inHook.set(true)
+            try {
+                val blurred = BlurHelper.blurBitmap(view.context, bitmap, radius = 15)
+                view.setImageBitmap(blurred)
+            } finally {
+                inHook.set(false)
+            }
 
             submitForScan(view, bitmap)
         }
@@ -80,13 +101,19 @@ object ImageViewHook {
 
     private val setDrawableHook = object : XC_MethodHook() {
         override fun beforeHookedMethod(param: MethodHookParam) {
+            if (inHook.get() == true) return  // our own internal call — let original proceed
             val drawable = param.args[0] as? BitmapDrawable ?: return  // only handle BitmapDrawable
             val bitmap   = drawable.bitmap ?: return
             val view     = param.thisObject as? ImageView ?: return
 
             param.result = null
-            val blurred = BlurHelper.blurBitmap(view.context, bitmap, radius = 15)
-            view.setImageBitmap(blurred)
+            inHook.set(true)
+            try {
+                val blurred = BlurHelper.blurBitmap(view.context, bitmap, radius = 15)
+                view.setImageBitmap(blurred)
+            } finally {
+                inHook.set(false)
+            }
 
             submitForScan(view, bitmap)
         }
@@ -106,7 +133,10 @@ object ImageViewHook {
                 stage = CoverageTelemetry.STAGE_SERVICE_UNAVAILABLE,
                 reason = "filter_service_not_bound"
             )
-            mainHandler.post { view.setImageBitmap(original) }
+            mainHandler.post {
+                inHook.set(true)
+                try { view.setImageBitmap(original) } finally { inHook.set(false) }
+            }
             return
         }
 
@@ -125,7 +155,10 @@ object ImageViewHook {
                     stage = CoverageTelemetry.STAGE_ENCODE_FAILED,
                     reason = "jpeg_compress_failed"
                 )
-                mainHandler.post { view.setImageBitmap(original) }
+                mainHandler.post {
+                    inHook.set(true)
+                    try { view.setImageBitmap(original) } finally { inHook.set(false) }
+                }
                 return@launch
             }
 
@@ -141,10 +174,15 @@ object ImageViewHook {
                             latencyMs = System.currentTimeMillis() - startedAt,
                         )
                         mainHandler.post {
-                            if (isSensitive) {
-                                view.setImageBitmap(BlurHelper.pixelateBitmap(original, blockSize = 20))
-                            } else {
-                                view.setImageBitmap(original)
+                            inHook.set(true)
+                            try {
+                                if (isSensitive) {
+                                    view.setImageBitmap(BlurHelper.pixelateBitmap(original, blockSize = 20))
+                                } else {
+                                    view.setImageBitmap(original)
+                                }
+                            } finally {
+                                inHook.set(false)
                             }
                         }
                     }
@@ -156,7 +194,10 @@ object ImageViewHook {
                     latencyMs = System.currentTimeMillis() - startedAt,
                     reason = it.javaClass.simpleName
                 )
-                mainHandler.post { view.setImageBitmap(original) }
+                mainHandler.post {
+                    inHook.set(true)
+                    try { view.setImageBitmap(original) } finally { inHook.set(false) }
+                }
             }
         }
     }

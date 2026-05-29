@@ -296,7 +296,7 @@ class FilterService : Service() {
                 classifier = NudeNetClassifier(applicationContext)
                 Log.i(TAG, "NudeNetClassifier ready")
             } catch (e: Exception) {
-                Log.e(TAG, "Failed to load TFLite model", e)
+                Log.e(TAG, "NudeNet classifier initialization failed", e)
                 // Fail open: do not leave callers waiting for a classifier that never comes up.
                 nudeNetEnabled = false
                 classifier = null
