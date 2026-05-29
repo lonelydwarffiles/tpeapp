@@ -273,6 +273,46 @@ class ApiService {
     }
   }
 
+  // ── Device status heartbeat ──────────────────────────────────────────
+
+  /// POSTs device presence/status (including optional location) to
+  /// `{endpoint}/api/handler/device-status`.
+  Future<void> postDeviceStatus({
+    int? batteryPct,
+    double? lat,
+    double? lon,
+    bool? aiAlert,
+    String? aiLabel,
+    double? aiScore,
+  }) async {
+    final payload = {
+      if (_deviceId != null) 'device_id': _deviceId,
+      if (_deviceName != null) 'device_name': _deviceName,
+      if (batteryPct != null) 'battery_pct': batteryPct,
+      if (lat != null) 'lat': lat,
+      if (lon != null) 'lon': lon,
+      if (aiAlert != null) 'ai_alert': aiAlert,
+      if (aiLabel != null && aiLabel.trim().isNotEmpty) 'ai_label': aiLabel.trim(),
+      if (aiScore != null) 'ai_score': aiScore,
+    };
+
+    await _flushOfflineQueue();
+    try {
+      final response = await http
+          .post(
+            Uri.parse('$_endpoint/api/handler/device-status'),
+            headers: _bearerHeaders,
+            body: jsonEncode(payload),
+          )
+          .timeout(_timeout);
+      _assertSuccess(response, 'Device status');
+    } on SocketException catch (_) {
+      await _enqueueOfflinePost(path: '/api/handler/device-status', payload: payload);
+    } on TimeoutException catch (_) {
+      await _enqueueOfflinePost(path: '/api/handler/device-status', payload: payload);
+    }
+  }
+
   // ── Task status upload ────────────────────────────────────────────────
 
   /// Reports task completion to `{endpoint}/api/tpe/task/status`.

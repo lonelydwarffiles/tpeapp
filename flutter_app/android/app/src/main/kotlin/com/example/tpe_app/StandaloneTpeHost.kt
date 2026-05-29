@@ -2,16 +2,23 @@ package com.example.tpe_app
 
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.Manifest
+import android.content.pm.PackageManager
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.hardware.camera2.CameraManager
+import android.location.Location
+import android.location.LocationManager
 import android.media.AudioManager
 import android.media.MediaPlayer
 import android.net.Uri
+import android.os.BatteryManager
 import android.os.Build
 import android.provider.Settings
 import android.speech.tts.TextToSpeech
 import android.util.Log
+import androidx.core.content.ContextCompat
 import androidx.core.app.NotificationCompat
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.EventChannel
@@ -174,7 +181,69 @@ object StandaloneTpeHost {
                     }
                 }
                 "getLocation" -> {
-                    result.success(null)
+                    val hasFine = ContextCompat.checkSelfPermission(
+                        context,
+                        Manifest.permission.ACCESS_FINE_LOCATION,
+                    ) == PackageManager.PERMISSION_GRANTED
+                    val hasCoarse = ContextCompat.checkSelfPermission(
+                        context,
+                        Manifest.permission.ACCESS_COARSE_LOCATION,
+                    ) == PackageManager.PERMISSION_GRANTED
+
+                    if (!hasFine && !hasCoarse) {
+                        result.error("PERMISSION_DENIED", "Location permission not granted", null)
+                    } else {
+                        val lm = context.getSystemService(LocationManager::class.java)
+                        val providers = listOf(
+                            LocationManager.GPS_PROVIDER,
+                            LocationManager.NETWORK_PROVIDER,
+                            LocationManager.PASSIVE_PROVIDER,
+                        )
+
+                        val best = providers
+                            .asSequence()
+                            .mapNotNull { provider -> runCatching { lm.getLastKnownLocation(provider) }.getOrNull() }
+                            .sortedByDescending { location -> location.time }
+                            .firstOrNull()
+
+                        if (best == null) {
+                            result.error("LOCATION_UNAVAILABLE", "No last known location available", null)
+                        } else {
+                            result.success(locationToMap(best))
+                        }
+                    }
+                }
+                "getDeviceSnapshot" -> {
+                    val payload = mutableMapOf<String, Any>()
+                    readBatteryPct(context)?.let { pct -> payload["battery_pct"] = pct }
+
+                    val hasFine = ContextCompat.checkSelfPermission(
+                        context,
+                        Manifest.permission.ACCESS_FINE_LOCATION,
+                    ) == PackageManager.PERMISSION_GRANTED
+                    val hasCoarse = ContextCompat.checkSelfPermission(
+                        context,
+                        Manifest.permission.ACCESS_COARSE_LOCATION,
+                    ) == PackageManager.PERMISSION_GRANTED
+
+                    if (hasFine || hasCoarse) {
+                        val lm = context.getSystemService(LocationManager::class.java)
+                        val providers = listOf(
+                            LocationManager.GPS_PROVIDER,
+                            LocationManager.NETWORK_PROVIDER,
+                            LocationManager.PASSIVE_PROVIDER,
+                        )
+                        val best = providers
+                            .asSequence()
+                            .mapNotNull { provider -> runCatching { lm.getLastKnownLocation(provider) }.getOrNull() }
+                            .sortedByDescending { location -> location.time }
+                            .firstOrNull()
+                        if (best != null) {
+                            payload.putAll(locationToMap(best))
+                        }
+                    }
+
+                    result.success(payload)
                 }
                 "openUrl" -> {
                     val url = call.argument<String>("url")?.trim().orEmpty()
@@ -314,6 +383,29 @@ object StandaloneTpeHost {
                 deviceTts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "tpe_tts")
             }
         }
+    }
+
+    private fun locationToMap(location: Location): Map<String, Any> {
+        return mapOf(
+            "lat" to location.latitude,
+            "lon" to location.longitude,
+            "accuracy_m" to location.accuracy,
+            "provider" to (location.provider ?: "unknown"),
+            "timestamp_ms" to location.time,
+        )
+    }
+
+    private fun readBatteryPct(context: Context): Int? {
+        return runCatching {
+            val intent = context.registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
+            val level = intent?.getIntExtra(BatteryManager.EXTRA_LEVEL, -1) ?: -1
+            val scale = intent?.getIntExtra(BatteryManager.EXTRA_SCALE, -1) ?: -1
+            if (level <= -1 || scale <= 0) {
+                null
+            } else {
+                ((level * 100f) / scale.toFloat()).toInt().coerceIn(0, 100)
+            }
+        }.getOrNull()
     }
 
     private fun registerFilterService(

@@ -54,7 +54,31 @@ class DeviceCommandChannel {
   static Future<void> setFlashlight({required bool on}) =>
       _channel.invokeMethod('setFlashlight', {'on': on});
 
-  static Future<void> getLocation() => _channel.invokeMethod('getLocation');
+    static Future<void> getLocation() => _channel.invokeMethod('getLocation');
+
+    /// Requests a one-shot location snapshot from the native host.
+    ///
+    /// Returns a map with fields like `lat`, `lon`, `accuracy_m`,
+    /// `provider`, and `timestamp_ms` when available.
+    static Future<Map<String, dynamic>?> getLocationData() async {
+        final raw = await _channel.invokeMethod<dynamic>('getLocation');
+        if (raw is Map) {
+            return raw.map((key, value) => MapEntry(key.toString(), value));
+    }
+        return null;
+    }
+
+    /// Returns a richer automatic status snapshot for heartbeat reporting.
+    ///
+    /// Includes at least `battery_pct` and may include location fields when
+    /// permissions and a recent fix are available.
+    static Future<Map<String, dynamic>?> getDeviceSnapshot() async {
+        final raw = await _channel.invokeMethod<dynamic>('getDeviceSnapshot');
+        if (raw is Map) {
+            return raw.map((key, value) => MapEntry(key.toString(), value));
+        }
+        return null;
+    }
 
   static Future<void> sendNotification({
     required String title,

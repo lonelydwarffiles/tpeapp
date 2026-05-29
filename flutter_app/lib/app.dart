@@ -11,6 +11,7 @@ import 'package:uuid/uuid.dart';
 
 import 'channels/filter_service_channel.dart';
 import 'channels/remote_control_channel.dart';
+import 'channels/device_command_channel.dart';
 import 'services/api_service.dart';
 import 'services/websocket_service.dart';
 import 'screens/home_screen.dart';
@@ -19,6 +20,9 @@ import 'widgets/kiosk_task_overlay.dart';
 const _permissionsBootstrapCompleteKey = 'permissions_bootstrap_complete';
 const _autoEnrollmentStateKey = 'auto_enrollment_state';
 const _autoEnrollmentErrorKey = 'auto_enrollment_error';
+const _lastLatKey = 'last_status_lat';
+const _lastLonKey = 'last_status_lon';
+const _lastBatteryPctKey = 'last_status_battery_pct';
 
 /// Root widget for the Flutter app shell.
 class TpeApp extends StatelessWidget {
@@ -211,8 +215,11 @@ class _StartupGateState extends State<_StartupGate> {
   bool _rootAvailable = false;
   bool _rootCheckFailed = false;
   bool _autoEnrollInFlight = false;
+  bool _deviceStatusInFlight = false;
   Timer? _autoEnrollTimer;
+  Timer? _deviceStatusTimer;
   final Map<Permission, PermissionStatus> _statuses = {};
+  static const Duration _deviceStatusInterval = Duration(seconds: 75);
 
   static const _requiredPermissions = [
     Permission.camera,
@@ -261,8 +268,63 @@ class _StartupGateState extends State<_StartupGate> {
 
     // Keep command transport alive independent of individual screens.
     unawaited(context.read<WebSocketService>().ensureConnected());
+    _ensureDeviceStatusLoop(prefs);
 
     _ensureAutoEnrollmentLoop(prefs);
+  }
+
+  void _ensureDeviceStatusLoop(SharedPreferences prefs) {
+    _deviceStatusTimer?.cancel();
+    unawaited(_pushDeviceStatus(prefs));
+    _deviceStatusTimer = Timer.periodic(_deviceStatusInterval, (_) {
+      unawaited(_pushDeviceStatus(prefs));
+    });
+  }
+
+  Future<void> _pushDeviceStatus(SharedPreferences prefs) async {
+    if (_deviceStatusInFlight) return;
+    if (!(prefs.getBool('is_paired') ?? false)) return;
+    final endpoint = (prefs.getString('partner_endpoint_url') ?? '').trim();
+    if (endpoint.isEmpty) return;
+
+    _deviceStatusInFlight = true;
+    try {
+      double? lat;
+      double? lon;
+      int? batteryPct;
+      try {
+        final snapshot = await DeviceCommandChannel.getDeviceSnapshot();
+        final rawLat = snapshot?['lat'];
+        final rawLon = snapshot?['lon'];
+        final rawBattery = snapshot?['battery_pct'];
+        if (rawLat is num && rawLon is num) {
+          lat = rawLat.toDouble();
+          lon = rawLon.toDouble();
+          await prefs.setDouble(_lastLatKey, lat);
+          await prefs.setDouble(_lastLonKey, lon);
+        }
+        if (rawBattery is num) {
+          batteryPct = rawBattery.toInt().clamp(0, 100);
+          await prefs.setInt(_lastBatteryPctKey, batteryPct);
+        }
+      } catch (_) {
+        // Keep heartbeat path alive even if native snapshot is unavailable.
+      }
+
+      lat ??= prefs.getDouble(_lastLatKey);
+      lon ??= prefs.getDouble(_lastLonKey);
+      batteryPct ??= prefs.getInt(_lastBatteryPctKey);
+
+      await ApiService(prefs).postDeviceStatus(
+        batteryPct: batteryPct,
+        lat: lat,
+        lon: lon,
+      );
+    } catch (_) {
+      // Best-effort heartbeat; failures are retried by timer.
+    } finally {
+      _deviceStatusInFlight = false;
+    }
   }
 
   void _ensureAutoEnrollmentLoop(SharedPreferences prefs) {
@@ -278,6 +340,7 @@ class _StartupGateState extends State<_StartupGate> {
     if (prefs.getBool('is_paired') ?? false) {
       await prefs.setString(_autoEnrollmentStateKey, 'connected');
       unawaited(context.read<WebSocketService>().ensureConnected());
+      unawaited(_pushDeviceStatus(prefs));
       _autoEnrollTimer?.cancel();
       _autoEnrollTimer = null;
       return;
@@ -367,6 +430,7 @@ class _StartupGateState extends State<_StartupGate> {
       _autoEnrollTimer?.cancel();
       _autoEnrollTimer = null;
       unawaited(context.read<WebSocketService>().ensureConnected());
+      unawaited(_pushDeviceStatus(prefs));
       // Enrollment should not be blocked by native service startup edge cases.
       unawaited(
         FilterServiceChannel.start()
@@ -434,6 +498,7 @@ class _StartupGateState extends State<_StartupGate> {
   @override
   void dispose() {
     _autoEnrollTimer?.cancel();
+    _deviceStatusTimer?.cancel();
     super.dispose();
   }
 

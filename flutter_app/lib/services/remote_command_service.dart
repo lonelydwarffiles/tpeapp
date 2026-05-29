@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 import '../channels/ble_channel.dart';
 import '../channels/device_admin_channel.dart';
 import '../channels/device_command_channel.dart';
+import '../channels/filter_service_channel.dart';
 import '../channels/password_vault_channel.dart';
 import '../channels/remote_control_channel.dart';
 import '../channels/screen_share_channel.dart';
@@ -304,11 +305,26 @@ class RemoteCommandService {
         };
         break;
       case 'GET_LOCATION':
-        await DeviceCommandChannel.getLocation();
+        final location = await DeviceCommandChannel.getLocationData();
         _onMessage?.call('Get location command executed.');
         _lastTelemetry = {
           'fallback_transport': 'ws_or_mqtt',
           'legacy_action': legacyAction,
+          if (location != null) 'location': location,
+        };
+        break;
+      case 'UPDATE_TONE_COMPLIANCE':
+        final enabled = _boolValue(
+          command.params,
+          const ['strict_tone_mode', 'strictToneMode', 'strict', 'enabled'],
+          defaultValue: true,
+        );
+        await FilterServiceChannel.setStrictMode(enabled: enabled);
+        _onMessage?.call('Tone compliance updated.');
+        _lastTelemetry = {
+          'fallback_transport': 'ws_or_mqtt',
+          'legacy_action': legacyAction,
+          'strict_tone_mode': enabled,
         };
         break;
       case 'SEND_NOTIFICATION':
