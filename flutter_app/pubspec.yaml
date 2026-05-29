@@ -54,7 +54,7 @@ dependencies:
   workmanager: ^0.9.0+3
 
   # Audio recording — used by WebSocketService for the Live Hot Mic feature
-  record: ^7.0.0
+  record: ^6.2.1
 
   # WebRTC — Flutter-side screen sharing and remote control via DataChannel
   flutter_webrtc: ^1.4.1

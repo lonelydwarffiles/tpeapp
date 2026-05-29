@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -15,6 +16,7 @@ import 'screens/home_screen.dart';
 
 const _permissionsBootstrapCompleteKey = 'permissions_bootstrap_complete';
 const _autoEnrollmentStateKey = 'auto_enrollment_state';
+const _autoEnrollmentErrorKey = 'auto_enrollment_error';
 
 /// Root widget for the Flutter app shell.
 class TpeApp extends StatelessWidget {
@@ -189,7 +191,10 @@ class _StartupGate extends StatefulWidget {
 
 class _StartupGateState extends State<_StartupGate> {
   static const String _defaultEndpoint =
-      String.fromEnvironment('TPE_DEFAULT_ENDPOINT');
+      String.fromEnvironment('TPE_DEFAULT_ENDPOINT', defaultValue: 'https://mochii.live');
+    static const String _defaultAutoPairKey =
+      String.fromEnvironment('TPE_AUTO_PAIR_KEY');
+  static const String _fallbackLiveEndpoint = 'https://mochii.live';
 
   bool _bootstrapping = true;
   bool _acknowledged = false;
@@ -268,17 +273,32 @@ class _StartupGateState extends State<_StartupGate> {
         .trim()
         .replaceAll(RegExp(r'/$'), '');
     if (endpoint.isEmpty) {
-      endpoint = _defaultEndpoint.trim().replaceAll(RegExp(r'/$'), '');
+      endpoint = (_defaultEndpoint.trim().isNotEmpty
+              ? _defaultEndpoint
+              : _fallbackLiveEndpoint)
+          .trim()
+          .replaceAll(RegExp(r'/$'), '');
       if (endpoint.isNotEmpty) {
         await prefs.setString('partner_endpoint_url', endpoint);
       }
     }
-    if (!endpoint.startsWith('https://')) {
+    if (endpoint.isNotEmpty &&
+        !endpoint.startsWith('https://') &&
+        !endpoint.startsWith('http://')) {
+      endpoint = 'https://$endpoint';
+      await prefs.setString('partner_endpoint_url', endpoint);
+    }
+    if (!_isAllowedEnrollmentEndpoint(endpoint)) {
       await prefs.setString(_autoEnrollmentStateKey, 'retrying');
+      await prefs.setString(
+        _autoEnrollmentErrorKey,
+        'Endpoint must be HTTPS (or local HTTP in debug). Current: ${endpoint.isEmpty ? '(empty)' : endpoint}',
+      );
       return;
     }
 
     await prefs.setString(_autoEnrollmentStateKey, 'enrolling');
+    await prefs.remove(_autoEnrollmentErrorKey);
     _autoEnrollInFlight = true;
     try {
       final deviceId = prefs.getString('device_id')?.trim().isNotEmpty == true
@@ -287,7 +307,13 @@ class _StartupGateState extends State<_StartupGate> {
       await prefs.setString('device_id', deviceId);
       await prefs.setString('mqtt_client_id', deviceId);
 
-      final autoPairKey = (prefs.getString('auto_pair_key') ?? '').trim();
+      var autoPairKey = (prefs.getString('auto_pair_key') ?? '').trim();
+      if (autoPairKey.isEmpty) {
+        autoPairKey = _defaultAutoPairKey.trim();
+        if (autoPairKey.isNotEmpty) {
+          await prefs.setString('auto_pair_key', autoPairKey);
+        }
+      }
       final api = ApiService(prefs);
       final result = await api.pairAuto(
         endpoint: endpoint,
@@ -322,16 +348,51 @@ class _StartupGateState extends State<_StartupGate> {
         await prefs.setString('webhook_bearer_token', webhookSecret);
       }
 
-      await FilterServiceChannel.start();
       await prefs.setString(_autoEnrollmentStateKey, 'connected');
+      await prefs.remove(_autoEnrollmentErrorKey);
       _autoEnrollTimer?.cancel();
       _autoEnrollTimer = null;
-    } catch (_) {
+      // Enrollment should not be blocked by native service startup edge cases.
+      unawaited(
+        FilterServiceChannel.start()
+            .timeout(const Duration(seconds: 6))
+            .catchError((_) {}),
+      );
+    } catch (e) {
       await prefs.setString(_autoEnrollmentStateKey, 'retrying');
+      await prefs.setString(_autoEnrollmentErrorKey, _compactEnrollmentError(e));
       // Keep retry loop running until backend/endpoint becomes available.
     } finally {
       _autoEnrollInFlight = false;
     }
+  }
+
+  bool _isAllowedEnrollmentEndpoint(String endpoint) {
+    final uri = Uri.tryParse(endpoint);
+    if (uri == null || uri.host.trim().isEmpty) return false;
+    if (uri.scheme == 'https') return true;
+    if (uri.scheme != 'http' || !kDebugMode) return false;
+
+    final host = uri.host.toLowerCase().trim();
+    if (host == 'localhost' || host == '127.0.0.1' || host == '10.0.2.2') {
+      return true;
+    }
+    if (host.startsWith('192.168.') || host.startsWith('10.')) {
+      return true;
+    }
+    if (RegExp(r'^172\.(1[6-9]|2\d|3[0-1])\.').hasMatch(host)) {
+      return true;
+    }
+    return false;
+  }
+
+  String _compactEnrollmentError(Object error) {
+    final raw = error.toString().trim();
+    if (raw.isEmpty) return 'Enrollment request failed';
+    final singleLine = raw.replaceAll(RegExp(r'\s+'), ' ');
+    return singleLine.length <= 180
+        ? singleLine
+        : '${singleLine.substring(0, 180)}...';
   }
 
   Future<Map<Permission, PermissionStatus>>

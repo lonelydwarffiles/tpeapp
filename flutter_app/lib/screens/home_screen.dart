@@ -249,10 +249,12 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
+  static const String _fallbackLiveEndpoint = 'https://mochii.live';
   final _textController = TextEditingController();
   final _scrollController = ScrollController();
   bool _sending = false;
   String _enrollmentState = 'enrolling';
+  String _enrollmentError = '';
   StreamSubscription<Map<String, String>>? _mqttSub;
   Timer? _enrollmentStatusTimer;
   RemoteCommandService? _remoteCommands;
@@ -322,10 +324,17 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     final prefs = context.read<SharedPreferences>();
     final paired = prefs.getBool('is_paired') ?? false;
     final state = (prefs.getString('auto_enrollment_state') ?? '').trim();
+    final error = (prefs.getString('auto_enrollment_error') ?? '').trim();
     final normalized =
         paired ? 'connected' : (state.isEmpty ? 'enrolling' : state);
-    if (!mounted || normalized == _enrollmentState) return;
-    setState(() => _enrollmentState = normalized);
+    if (!mounted ||
+        (normalized == _enrollmentState && error == _enrollmentError)) {
+      return;
+    }
+    setState(() {
+      _enrollmentState = normalized;
+      _enrollmentError = error;
+    });
   }
 
   String _enrollmentLabel() {
@@ -377,6 +386,94 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       context,
       MaterialPageRoute(builder: (_) => const CheckInScreen()),
     );
+  }
+
+  Future<void> _openEnrollmentSetup() async {
+    final prefs = context.read<SharedPreferences>();
+    final currentEndpoint =
+        (prefs.getString('partner_endpoint_url') ?? '').trim();
+    final currentAutoPairKey = (prefs.getString('auto_pair_key') ?? '').trim();
+
+    final endpointCtrl = TextEditingController(
+      text: currentEndpoint.isEmpty ? _fallbackLiveEndpoint : currentEndpoint,
+    );
+    final keyCtrl = TextEditingController(text: currentAutoPairKey);
+
+    try {
+      final shouldApply = await showDialog<bool>(
+            context: context,
+            builder: (ctx) => AlertDialog(
+              title: const Text('Enrollment Setup'),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  TextField(
+                    controller: endpointCtrl,
+                    decoration: const InputDecoration(
+                      labelText: 'Backend Endpoint',
+                      hintText: 'https://mochii.live',
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  TextField(
+                    controller: keyCtrl,
+                    decoration: const InputDecoration(
+                      labelText: 'Auto Pair Key (optional)',
+                    ),
+                  ),
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(ctx, false),
+                  child: const Text('Cancel'),
+                ),
+                FilledButton(
+                  onPressed: () => Navigator.pop(ctx, true),
+                  child: const Text('Save & Reconnect'),
+                ),
+              ],
+            ),
+          ) ??
+          false;
+
+      if (!shouldApply || !mounted) return;
+
+      var endpoint = endpointCtrl.text.trim();
+      if (endpoint.isNotEmpty && !endpoint.contains('://')) {
+        endpoint = 'https://$endpoint';
+      }
+      endpoint = endpoint.replaceAll(RegExp(r'/$'), '');
+      final autoPairKey = keyCtrl.text.trim();
+
+      if (endpoint.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Please enter a backend endpoint.')),
+        );
+        return;
+      }
+
+      await prefs.setString('partner_endpoint_url', endpoint);
+      if (autoPairKey.isEmpty) {
+        await prefs.remove('auto_pair_key');
+      } else {
+        await prefs.setString('auto_pair_key', autoPairKey);
+      }
+
+      // Force the startup enrollment loop to re-run using new values.
+      await prefs.setBool('is_paired', false);
+      await prefs.setString('auto_enrollment_state', 'enrolling');
+      await prefs.remove('auto_enrollment_error');
+      await _refreshEnrollmentState();
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Enrollment updated. Reconnecting...')),
+      );
+    } finally {
+      endpointCtrl.dispose();
+      keyCtrl.dispose();
+    }
   }
 
   void _showCommandMessage(String message) {
@@ -611,12 +708,16 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 case 'vault':
                   _navigate(const PasswordVaultScreen());
                   return;
+                case 'enrollment':
+                  _openEnrollmentSetup();
+                  return;
                 case 'relationships':
                   _navigateWithPin(const RelationshipCenterScreen());
                   return;
               }
             },
             itemBuilder: (_) => const [
+              PopupMenuItem(value: 'enrollment', child: Text('Enrollment Setup')),
               PopupMenuItem(value: 'checkin', child: Text('Daily Check-In')),
               PopupMenuItem(value: 'tasks', child: Text('My Tasks')),
               PopupMenuItem(
@@ -663,6 +764,23 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           ),
           Column(
             children: [
+              if (_enrollmentState == 'retrying' && _enrollmentError.isNotEmpty)
+                Container(
+                  width: double.infinity,
+                  margin: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: cs.surfaceContainerHighest.withOpacity(0.7),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: cs.outlineVariant.withOpacity(0.45)),
+                  ),
+                  child: Text(
+                    _enrollmentError,
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: cs.onSurfaceVariant,
+                        ),
+                  ),
+                ),
               Expanded(
                 child: history.isEmpty
                     ? _EmptyChat(cs: cs)
