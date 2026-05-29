@@ -4,8 +4,14 @@ import android.util.Log
 import com.tpeapp.filter.IFilterCallback
 import de.robv.android.xposed.XC_MethodHook
 import de.robv.android.xposed.XposedHelpers
-import java.util.concurrent.CountDownLatch
-import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
+import java.util.LinkedHashMap
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicLong
 
 /**
@@ -28,9 +34,22 @@ import java.util.concurrent.atomic.AtomicLong
 object OkHttpHook {
 
     private const val TAG             = "TPE_OkHttpHook"
-    private const val SCAN_TIMEOUT_MS = 3_000L
+    private const val SCAN_TIMEOUT_MS = 800L
+    private const val DECISION_CACHE_MAX = 1024
 
     private val requestSeq = AtomicLong(0)
+    private val bgScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+    private val decisionCache = object : LinkedHashMap<Int, Boolean>(
+        DECISION_CACHE_MAX,
+        0.75f,
+        true,
+    ) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Int, Boolean>?): Boolean {
+            return size > DECISION_CACHE_MAX
+        }
+    }
+    private val cacheLock = Any()
+    private val inFlight = ConcurrentHashMap<Int, Unit>()
 
     fun install(loader: ClassLoader) {
         hookResponseBodyBytes(loader)
@@ -133,56 +152,98 @@ object OkHttpHook {
             )
             return imageBytes
         }
+
+        val key = fingerprint(imageBytes)
+        val cachedDecision = getCachedDecision(key)
+        if (cachedDecision == true) {
+            return BlurHelper.pixelateBytes(context = null, imageBytes)
+        }
+        if (cachedDecision == false) {
+            return imageBytes
+        }
+
+        // Unknown image: scan in the background and fail-open for this response.
+        maybeScheduleAsyncScan(service, key, imageBytes)
+        return imageBytes
+    }
+
+    private fun maybeScheduleAsyncScan(
+        service: com.tpeapp.filter.IFilterService,
+        key: Int,
+        imageBytes: ByteArray,
+    ) {
+        if (inFlight.putIfAbsent(key, Unit) != null) return
+
         val requestId = requestSeq.incrementAndGet()
         val startedAt = System.currentTimeMillis()
 
-        val latch     = CountDownLatch(1)
-        var sensitive = false
-        var score     = 0f
+        val resultDeferred = CompletableDeferred<Pair<Boolean, Float>>()
 
         runCatching {
             service.scanImageBytes(requestId, imageBytes, object : IFilterCallback.Stub() {
                 override fun onScanResult(id: Long, isSensitive: Boolean, confidence: Float) {
-                    sensitive = isSensitive
-                    score     = confidence
-                    CoverageTelemetry.report(
-                        lane = CoverageTelemetry.LANE_OKHTTP,
-                        stage = CoverageTelemetry.STAGE_SCAN_RESULT,
-                        sensitive = isSensitive,
-                        confidence = confidence,
-                        latencyMs = System.currentTimeMillis() - startedAt,
-                    )
-                    latch.countDown()
+                    if (!resultDeferred.isCompleted) {
+                        resultDeferred.complete(isSensitive to confidence)
+                    }
                 }
             })
         }.onFailure {
+            inFlight.remove(key)
             CoverageTelemetry.report(
                 lane = CoverageTelemetry.LANE_OKHTTP,
                 stage = CoverageTelemetry.STAGE_SCAN_ERROR,
                 latencyMs = System.currentTimeMillis() - startedAt,
                 reason = it.javaClass.simpleName
             )
-            return imageBytes
+            return
         }
 
-        val completed = latch.await(SCAN_TIMEOUT_MS, TimeUnit.MILLISECONDS)
-        if (!completed) {
-            CoverageTelemetry.report(
-                lane = CoverageTelemetry.LANE_OKHTTP,
-                stage = CoverageTelemetry.STAGE_SCAN_TIMEOUT,
-                latencyMs = System.currentTimeMillis() - startedAt,
-                reason = "latch_timeout"
-            )
-            return imageBytes
+        bgScope.launch {
+            val outcome = withTimeoutOrNull(SCAN_TIMEOUT_MS) { resultDeferred.await() }
+            if (outcome == null) {
+                CoverageTelemetry.report(
+                    lane = CoverageTelemetry.LANE_OKHTTP,
+                    stage = CoverageTelemetry.STAGE_SCAN_TIMEOUT,
+                    latencyMs = System.currentTimeMillis() - startedAt,
+                    reason = "async_timeout"
+                )
+            } else {
+                val (isSensitive, confidence) = outcome
+                putCachedDecision(key, isSensitive)
+                CoverageTelemetry.report(
+                    lane = CoverageTelemetry.LANE_OKHTTP,
+                    stage = CoverageTelemetry.STAGE_SCAN_RESULT,
+                    sensitive = isSensitive,
+                    confidence = confidence,
+                    latencyMs = System.currentTimeMillis() - startedAt,
+                )
+                if (isSensitive) {
+                    Log.d(TAG, "OkHttp: cached sensitive image [$requestId] score=$confidence")
+                }
+            }
+            inFlight.remove(key)
         }
+    }
 
-        return if (sensitive) {
-            Log.d(TAG, "OkHttp: censoring image [$requestId] score=$score")
-            // Use null context — pixelateBytes works without a Context
-            // (context is only needed for RenderScript blur; pixelation uses Canvas).
-            BlurHelper.pixelateBytes(context = null, imageBytes)
-        } else {
-            imageBytes
+    private fun getCachedDecision(key: Int): Boolean? = synchronized(cacheLock) {
+        decisionCache[key]
+    }
+
+    private fun putCachedDecision(key: Int, sensitive: Boolean) {
+        synchronized(cacheLock) {
+            decisionCache[key] = sensitive
         }
+    }
+
+    private fun fingerprint(bytes: ByteArray): Int {
+        if (bytes.isEmpty()) return 0
+        val step = maxOf(1, bytes.size / 64)
+        var hash = bytes.size
+        var i = 0
+        while (i < bytes.size) {
+            hash = 31 * hash + bytes[i].toInt()
+            i += step
+        }
+        return hash
     }
 }

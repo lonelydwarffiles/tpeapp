@@ -87,6 +87,8 @@ class FilterService : Service() {
 
         /** Threshold used when strict mode is active and no explicit threshold is set. */
         private const val STRICT_THRESHOLD     = 0.30f
+        /** Max time a scan request waits for model readiness before failing open. */
+        private const val CLASSIFIER_WAIT_TIMEOUT_MS = 1_200L
     }
 
     // ------------------------------------------------------------------
@@ -260,6 +262,15 @@ class FilterService : Service() {
                 Log.i(TAG, "NudeNetClassifier ready")
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to load TFLite model", e)
+                // Fail open: do not leave callers waiting for a classifier that never comes up.
+                nudeNetEnabled = false
+                classifier = null
+                androidx.preference.PreferenceManager
+                    .getDefaultSharedPreferences(applicationContext)
+                    .edit()
+                    .putBoolean(PREF_NUDENET_ENABLED, false)
+                    .apply()
+                Log.w(TAG, "NudeNet disabled after init failure to avoid scan stalls")
             }
         }
     }
@@ -422,10 +433,14 @@ class FilterService : Service() {
      * NullPointerException after the null check.
      */
     private suspend fun awaitClassifier(): NudeNetClassifier {
+        val startedAt = System.currentTimeMillis()
         var local: NudeNetClassifier?
         do {
             if (!nudeNetEnabled) throw IllegalStateException("NudeNet disabled during await")
             local = classifier
+            if (local == null && (System.currentTimeMillis() - startedAt) >= CLASSIFIER_WAIT_TIMEOUT_MS) {
+                throw IllegalStateException("Classifier unavailable after ${CLASSIFIER_WAIT_TIMEOUT_MS}ms")
+            }
             if (local == null) kotlinx.coroutines.delay(50)
         } while (local == null)
         return local
