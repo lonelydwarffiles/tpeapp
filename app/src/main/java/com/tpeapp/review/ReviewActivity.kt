@@ -33,6 +33,8 @@ class ReviewActivity : AppCompatActivity() {
 
     companion object {
         private const val TAG = "ReviewActivity"
+        private const val PREF_REMOTE_CONTROL_CONSENT_GRANTED =
+            "review_remote_control_consent_granted"
     }
 
     // ------------------------------------------------------------------
@@ -114,11 +116,12 @@ class ReviewActivity : AppCompatActivity() {
 
     private fun onRemoteControlToggled(isChecked: Boolean) {
         if (!isChecked) return  // No confirmation needed to disable.
+        if (hasRemoteControlConsentGranted()) return
         AlertDialog.Builder(this)
             .setTitle(getString(R.string.review_remote_control_confirm_title))
             .setMessage(getString(R.string.review_remote_control_confirm_message))
             .setPositiveButton(getString(R.string.review_remote_control_confirm_allow)) { _, _ ->
-                // Confirmed — leave the switch on.
+                setRemoteControlConsentGranted()
             }
             .setNegativeButton(android.R.string.cancel) { _, _ ->
                 // Reverted — silently uncheck without re-triggering the listener.
@@ -129,6 +132,18 @@ class ReviewActivity : AppCompatActivity() {
                 }
             }
             .show()
+    }
+
+    private fun hasRemoteControlConsentGranted(): Boolean {
+        return PreferenceManager.getDefaultSharedPreferences(this)
+            .getBoolean(PREF_REMOTE_CONTROL_CONSENT_GRANTED, false)
+    }
+
+    private fun setRemoteControlConsentGranted() {
+        PreferenceManager.getDefaultSharedPreferences(this)
+            .edit()
+            .putBoolean(PREF_REMOTE_CONTROL_CONSENT_GRANTED, true)
+            .apply()
     }
 
     private fun startScreencastService(

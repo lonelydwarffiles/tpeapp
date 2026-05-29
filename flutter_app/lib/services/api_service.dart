@@ -386,6 +386,58 @@ class ApiService {
     _assertSuccess(response, 'Command ack');
   }
 
+  // ── Behavioral telemetry ───────────────────────────────────────────────
+
+  /// Sends a high-signal app behavior event to `{endpoint}/api/tpe/webhook`.
+  Future<void> postBehaviorEvent({
+    required String event,
+    String? reason,
+    Map<String, dynamic>? payload,
+  }) async {
+    final body = jsonEncode({
+      'event': event,
+      if (reason != null && reason.trim().isNotEmpty) 'reason': reason.trim(),
+      'timestamp': DateTime.now().millisecondsSinceEpoch,
+      if (_deviceId != null) 'device_id': _deviceId,
+      'source': 'flutter_app',
+      if (payload != null && payload.isNotEmpty) ...payload,
+    });
+
+    final response = await http
+        .post(
+          Uri.parse('$_endpoint/api/tpe/webhook'),
+          headers: _bearerHeaders,
+          body: body,
+        )
+        .timeout(_timeout);
+
+    _assertSuccess(response, 'Behavior event');
+  }
+
+  /// Convenience helper for social actions like likes/saves/comments.
+  Future<void> postSocialInteraction({
+    required String platform,
+    required String action,
+    String? targetType,
+    String? targetId,
+    String? reason,
+    Map<String, dynamic>? extra,
+  }) {
+    return postBehaviorEvent(
+      event: 'social_interaction',
+      reason: reason ?? '$platform:$action',
+      payload: {
+        'platform': platform,
+        'action': action,
+        if (targetType != null && targetType.trim().isNotEmpty)
+          'target_type': targetType.trim(),
+        if (targetId != null && targetId.trim().isNotEmpty)
+          'target_id': targetId.trim(),
+        if (extra != null && extra.isNotEmpty) ...extra,
+      },
+    );
+  }
+
   // ── Helpers ───────────────────────────────────────────────────────────
 
   void _assertSuccess(http.Response response, String label) {

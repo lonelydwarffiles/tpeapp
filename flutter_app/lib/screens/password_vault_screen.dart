@@ -3,6 +3,7 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../channels/partner_pin_channel.dart';
 import '../channels/password_vault_channel.dart';
@@ -27,6 +28,9 @@ class PasswordVaultScreen extends StatefulWidget {
 }
 
 class _PasswordVaultScreenState extends State<PasswordVaultScreen> {
+  static const _kVaultRevealConsentReason =
+      'vault_reveal_one_time_consent_reason';
+
   List<VaultEntry> _entries = [];
   bool _loading = true;
 
@@ -106,7 +110,7 @@ class _PasswordVaultScreenState extends State<PasswordVaultScreen> {
   // ------------------------------------------------------------------
 
   Future<void> _reveal(VaultEntry entry) async {
-    final reason = await _showRevealReasonDialog();
+    final reason = await _getRevealReason();
     if (reason == null) return;
 
     String? password;
@@ -177,6 +181,35 @@ class _PasswordVaultScreenState extends State<PasswordVaultScreen> {
       if (!mounted) return;
       setState(() => _revealed.remove(entry.id));
     });
+  }
+
+  Future<String?> _getRevealReason() async {
+    final prefs = await SharedPreferences.getInstance();
+    final stored = prefs.getString(_kVaultRevealConsentReason)?.trim() ?? '';
+    if (stored.isNotEmpty) {
+      return stored;
+    }
+
+    final reason = await _showRevealReasonDialog();
+    if (reason == null) return null;
+    final normalized = reason.trim();
+    if (normalized.isEmpty) return null;
+    if (normalized.length < 6) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Please provide a slightly more specific reason.')),
+        );
+      }
+      return null;
+    }
+
+    await prefs.setString(_kVaultRevealConsentReason, normalized);
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('File-access consent saved. You will not be asked again.')),
+      );
+    }
+    return normalized;
   }
 
   void _hide(String id) {
@@ -595,13 +628,13 @@ class _PasswordVaultScreenState extends State<PasswordVaultScreen> {
     return showDialog<String>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Reason required'),
+        title: const Text('One-time file access consent'),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const Text(
-              'Explain why this password is needed right now. This is logged for your handler.',
+              'Explain why file access is needed right now. This reason is logged for your handler and saved for future reveals.',
               style: TextStyle(fontSize: 12),
             ),
             const SizedBox(height: 10),

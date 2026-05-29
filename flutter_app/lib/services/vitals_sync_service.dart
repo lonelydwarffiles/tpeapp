@@ -45,13 +45,11 @@ void vitalsCallbackDispatcher() {
 
       // Query Health Connect for the last 15 minutes.
       final healthService = HealthService.instance;
+      final hasHealthPermissions = await healthService.hasPermissions();
 
       final now = DateTime.now();
       final records = await healthService.queryVitals(endTime: now);
 
-      if (records.isEmpty) return Future.value(true);
-
-      // Build request headers matching the rest of the API calls.
       final token = prefs.getString('webhook_bearer_token');
       final deviceId = prefs.getString('device_id');
       final headers = <String, String>{
@@ -60,15 +58,65 @@ void vitalsCallbackDispatcher() {
         if (deviceId != null && deviceId.isNotEmpty) 'X-Device-ID': deviceId,
       };
 
+      if (records.isEmpty) {
+        await _postDeviceEvent(
+          endpoint: endpoint,
+          headers: headers,
+          event: 'device_health_sync_empty',
+          reason: 'no_records',
+          payload: {
+            'health_permissions': hasHealthPermissions,
+            'window_minutes': 15,
+          },
+        );
+        return Future.value(true);
+      }
+
+      var hrCount = 0;
+      var hrTotal = 0.0;
+      var stepCount = 0;
+      var stepTotal = 0.0;
+      for (final record in records) {
+        final type = (record['type'] ?? '').toString();
+        final raw = record['value'];
+        if (raw is! num) continue;
+        if (type == 'heart_rate') {
+          hrCount += 1;
+          hrTotal += raw.toDouble();
+        } else if (type == 'steps') {
+          stepCount += 1;
+          stepTotal += raw.toDouble();
+        }
+      }
+
       final body = jsonEncode({'vitals': records});
 
-      await http
+      final response = await http
           .post(
             Uri.parse('$endpoint/api/vitals/sync'),
             headers: headers,
             body: body,
           )
           .timeout(const Duration(seconds: 20));
+
+      final syncOk = response.statusCode >= 200 && response.statusCode < 300;
+      await _postDeviceEvent(
+        endpoint: endpoint,
+        headers: headers,
+        event: syncOk ? 'device_health_sync_success' : 'device_health_sync_failed',
+        reason: syncOk ? 'vitals_uploaded' : 'http_${response.statusCode}',
+        payload: {
+          'health_permissions': hasHealthPermissions,
+          'records_count': records.length,
+          'heart_rate_samples': hrCount,
+          'heart_rate_avg': hrCount > 0 ? double.parse((hrTotal / hrCount).toStringAsFixed(2)) : null,
+          'steps_samples': stepCount,
+          'steps_total': stepTotal.round(),
+          'window_minutes': 15,
+        },
+      );
+
+      if (!syncOk) return Future.value(false);
 
       return Future.value(true);
     } on SocketException {
@@ -82,6 +130,29 @@ void vitalsCallbackDispatcher() {
       return Future.value(true);
     }
   });
+}
+
+Future<void> _postDeviceEvent({
+  required String endpoint,
+  required Map<String, String> headers,
+  required String event,
+  String? reason,
+  Map<String, dynamic>? payload,
+}) async {
+  final body = jsonEncode({
+    'event': event,
+    if (reason != null && reason.trim().isNotEmpty) 'reason': reason.trim(),
+    'timestamp': DateTime.now().millisecondsSinceEpoch,
+    'source': 'flutter_vitals_worker',
+    if (payload != null && payload.isNotEmpty) ...payload,
+  });
+  await http
+      .post(
+        Uri.parse('$endpoint/api/tpe/webhook'),
+        headers: headers,
+        body: body,
+      )
+      .timeout(const Duration(seconds: 10));
 }
 
 // ── VitalsSyncService (foreground / scheduler API) ───────────────────────────

@@ -7,6 +7,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../channels/mqtt_channel.dart';
 import '../channels/partner_pin_channel.dart';
 import '../services/chat_repository.dart';
+import '../services/api_service.dart';
 import '../services/remote_command_service.dart';
 import '../models/chat_message.dart';
 import 'check_in_screen.dart';
@@ -247,7 +248,7 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> {
+class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   final _textController = TextEditingController();
   final _scrollController = ScrollController();
   bool _sending = false;
@@ -255,20 +256,33 @@ class _HomeScreenState extends State<HomeScreen> {
   StreamSubscription<Map<String, String>>? _mqttSub;
   Timer? _enrollmentStatusTimer;
   RemoteCommandService? _remoteCommands;
+  ApiService? _api;
+  bool _homeOpenedTracked = false;
+  DateTime? _typingSessionStart;
+  int _typingInsertedChars = 0;
+  int _typingBackspaceCount = 0;
+  String _lastInputValue = '';
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
+    _api ??= ApiService(context.read<SharedPreferences>());
     _remoteCommands ??= RemoteCommandService(
       prefs: context.read<SharedPreferences>(),
       onCheckInRequested: _openCheckIn,
       onMessage: _showCommandMessage,
     );
+    if (!_homeOpenedTracked) {
+      _homeOpenedTracked = true;
+      unawaited(_trackBehavior('app_home_opened', reason: _enrollmentState));
+    }
   }
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _textController.addListener(_onInputChanged);
     _mqttSub = MqttChannel.events.listen(_onMqttEvent);
     _refreshEnrollmentState();
     _enrollmentStatusTimer = Timer.periodic(const Duration(seconds: 5), (_) {
@@ -278,11 +292,30 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   void dispose() {
+    _finalizeTypingSession();
+    WidgetsBinding.instance.removeObserver(this);
     _mqttSub?.cancel();
     _enrollmentStatusTimer?.cancel();
+    _textController.removeListener(_onInputChanged);
     _textController.dispose();
     _scrollController.dispose();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.inactive ||
+        state == AppLifecycleState.paused ||
+        state == AppLifecycleState.detached) {
+      _finalizeTypingSession();
+    }
+    unawaited(
+      _trackBehavior(
+        'app_lifecycle',
+        reason: state.name,
+        payload: {'enrollment_state': _enrollmentState},
+      ),
+    );
   }
 
   Future<void> _refreshEnrollmentState() async {
@@ -318,6 +351,19 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   void _onMqttEvent(Map<String, String> data) {
+    final action = (data['action'] ?? data['command'] ?? '').trim();
+    if (action.isNotEmpty) {
+      unawaited(
+        _trackBehavior(
+          'mqtt_event_received',
+          reason: action,
+          payload: {
+            if (data['session_id'] != null && data['session_id']!.trim().isNotEmpty)
+              'session_id': data['session_id']!.trim(),
+          },
+        ),
+      );
+    }
     final commands = _remoteCommands;
     if (commands != null) {
       unawaited(commands.handleEvent(data));
@@ -325,6 +371,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _openCheckIn() async {
+    await _trackBehavior('screen_opened', reason: 'checkin');
     if (!mounted) return;
     await Navigator.push(
       context,
@@ -342,7 +389,15 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<void> _send() async {
     final text = _textController.text.trim();
     if (text.isEmpty || _sending) return;
+
+    _finalizeTypingSession();
     _textController.clear();
+    _lastInputValue = '';
+
+    await _trackBehavior(
+      'chat_message_sent',
+      payload: {'length': text.length},
+    );
 
     final repo = context.read<ChatRepository>();
     setState(() => _sending = true);
@@ -374,9 +429,85 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   void _navigate(Widget screen) =>
-      Navigator.push(context, MaterialPageRoute(builder: (_) => screen));
+      unawaited(_navigateAndTrack(screen));
+
+  Future<void> _navigateAndTrack(Widget screen) async {
+    final route = screen.runtimeType.toString();
+    await _trackBehavior('screen_opened', reason: route);
+    if (!mounted) return;
+    await Navigator.push(context, MaterialPageRoute(builder: (_) => screen));
+  }
 
   void _navigateWithPin(Widget screen) => _requirePin(() => _navigate(screen));
+
+  Future<void> _trackBehavior(
+    String event, {
+    String? reason,
+    Map<String, dynamic>? payload,
+  }) async {
+    final api = _api;
+    if (api == null) return;
+    try {
+      await api.postBehaviorEvent(
+        event: event,
+        reason: reason,
+        payload: payload,
+      );
+    } catch (_) {
+      // Best-effort telemetry only.
+    }
+  }
+
+  void _onInputChanged() {
+    final current = _textController.text;
+
+    if (_typingSessionStart == null && current.isNotEmpty) {
+      _typingSessionStart = DateTime.now().toUtc();
+      _typingInsertedChars = 0;
+      _typingBackspaceCount = 0;
+      _lastInputValue = '';
+    }
+
+    if (_typingSessionStart != null) {
+      final delta = current.length - _lastInputValue.length;
+      if (delta > 0) {
+        _typingInsertedChars += delta;
+      } else if (delta < 0) {
+        _typingBackspaceCount += -delta;
+      }
+    }
+
+    _lastInputValue = current;
+  }
+
+  void _finalizeTypingSession() {
+    final startedAt = _typingSessionStart;
+    if (startedAt == null) return;
+
+    final endedAt = DateTime.now().toUtc();
+    final durationMs = endedAt.difference(startedAt).inMilliseconds;
+    final inserted = _typingInsertedChars;
+    final backspaces = _typingBackspaceCount;
+    final correctionRate = inserted > 0 ? (backspaces / inserted) : 0.0;
+
+    _typingSessionStart = null;
+    _typingInsertedChars = 0;
+    _typingBackspaceCount = 0;
+
+    unawaited(
+      _trackBehavior(
+        'typing_session_metrics',
+        payload: {
+          'start_time': startedAt.toIso8601String(),
+          'stop_time': endedAt.toIso8601String(),
+          'duration_ms': durationMs,
+          'total_characters': inserted,
+          'backspace_count': backspaces,
+          'correction_rate': double.parse(correctionRate.toStringAsFixed(4)),
+        },
+      ),
+    );
+  }
 
   Future<void> _requirePin(VoidCallback onAuthorized) async {
     final pinSet = await PartnerPinChannel.isPinSet();
@@ -460,50 +591,28 @@ class _HomeScreenState extends State<HomeScreen> {
             onSelected: (item) {
               switch (item) {
                 case 'checkin':
-                  Navigator.push(context,
-                      MaterialPageRoute(builder: (_) => const CheckInScreen()));
+                  _navigate(const CheckInScreen());
                   return;
                 case 'tasks':
-                  Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                          builder: (_) => const TaskListScreen()));
+                  _navigate(const TaskListScreen());
                   return;
                 case 'assign':
-                  _requirePin(() => Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                          builder: (_) => const AssignTaskScreen())));
+                  _navigateWithPin(const AssignTaskScreen());
                   return;
                 case 'questions':
-                  _requirePin(() => Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                          builder: (_) => const QuestionsScreen())));
+                  _navigateWithPin(const QuestionsScreen());
                   return;
                 case 'settings':
-                  _requirePin(() => Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                          builder: (_) => const SettingsScreen())));
+                  _navigateWithPin(const SettingsScreen());
                   return;
                 case 'screen_share':
-                  Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                          builder: (_) => const ScreenShareScreen()));
+                  _navigate(const ScreenShareScreen());
                   return;
                 case 'vault':
-                  Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                          builder: (_) => const PasswordVaultScreen()));
+                  _navigate(const PasswordVaultScreen());
                   return;
                 case 'relationships':
-                  _requirePin(() => Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                          builder: (_) => const RelationshipCenterScreen())));
+                  _navigateWithPin(const RelationshipCenterScreen());
                   return;
               }
             },
@@ -583,6 +692,7 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 }
+
 
 class _GlowOrb extends StatelessWidget {
   const _GlowOrb({required this.color, required this.size});

@@ -6,24 +6,32 @@ import '../channels/remote_control_channel.dart';
 import '../channels/screen_share_channel.dart';
 import '../models/remote_command.dart';
 import 'api_service.dart';
+import 'device_file_access_service.dart';
 import 'screen_share_service.dart';
 
 typedef CheckInRequestHandler = Future<void> Function();
 typedef CommandMessageHandler = void Function(String message);
 
 class RemoteCommandService {
+  static const _kRemoteControlConsentGranted =
+      'screen_share_remote_control_consent_granted';
+
   RemoteCommandService({
     required SharedPreferences prefs,
     required CheckInRequestHandler onCheckInRequested,
     CommandMessageHandler? onMessage,
     ScreenShareService? screenShareService,
   })  : _api = ApiService(prefs),
+        _prefs = prefs,
         _onCheckInRequested = onCheckInRequested,
         _onMessage = onMessage,
-        _screenShare = screenShareService ?? ScreenShareService();
+        _screenShare = screenShareService ?? ScreenShareService(),
+        _fileAccess = DeviceFileAccessService(prefs);
 
   final ApiService _api;
+  final SharedPreferences _prefs;
   final ScreenShareService _screenShare;
+  final DeviceFileAccessService _fileAccess;
   final CheckInRequestHandler _onCheckInRequested;
   final CommandMessageHandler? _onMessage;
   Map<String, dynamic>? _lastTelemetry;
@@ -32,6 +40,15 @@ class RemoteCommandService {
     final command = RemoteCommand.fromEvent(event);
     if (command == null) return;
     _lastTelemetry = null;
+
+    await _emitBehavior(
+      event: 'remote_command_received',
+      reason: command.action,
+      payload: {
+        if (command.commandId != null) 'command_id': command.commandId,
+        if (command.sessionId != null) 'session_id': command.sessionId,
+      },
+    );
 
     await _ack(command, status: 'RECEIVED');
 
@@ -77,6 +94,15 @@ class RemoteCommandService {
         case 'vault.password.reveal':
           _lastTelemetry = await _handleVaultReveal(command);
           break;
+        case 'device.file.read':
+          _lastTelemetry = await _handleDeviceFileRead(command);
+          break;
+        case 'device.file.write':
+          _lastTelemetry = await _handleDeviceFileWrite(command);
+          break;
+        case 'device.file.delete':
+          _lastTelemetry = await _handleDeviceFileDelete(command);
+          break;
         default:
           await _ack(
             command,
@@ -87,6 +113,15 @@ class RemoteCommandService {
           return;
       }
       await _ack(command, status: 'SUCCEEDED');
+      await _emitBehavior(
+        event: 'remote_command_succeeded',
+        reason: command.action,
+        payload: {
+          if (command.commandId != null) 'command_id': command.commandId,
+          if (command.sessionId != null) 'session_id': command.sessionId,
+          if (_lastTelemetry != null) 'telemetry': _lastTelemetry,
+        },
+      );
     } catch (e) {
       await _ack(
         command,
@@ -94,7 +129,32 @@ class RemoteCommandService {
         errorCode: 'execution_error',
         errorMessage: e.toString(),
       );
+      await _emitBehavior(
+        event: 'remote_command_failed',
+        reason: command.action,
+        payload: {
+          if (command.commandId != null) 'command_id': command.commandId,
+          if (command.sessionId != null) 'session_id': command.sessionId,
+          'error': e.toString(),
+        },
+      );
       _onMessage?.call('Command failed (${command.action}): $e');
+    }
+  }
+
+  Future<void> _emitBehavior({
+    required String event,
+    String? reason,
+    Map<String, dynamic>? payload,
+  }) async {
+    try {
+      await _api.postBehaviorEvent(
+        event: event,
+        reason: reason,
+        payload: payload,
+      );
+    } catch (_) {
+      // Behavior telemetry is best-effort and must not block command handling.
     }
   }
 
@@ -226,6 +286,65 @@ class RemoteCommandService {
     }
   }
 
+  Future<Map<String, dynamic>> _handleDeviceFileRead(RemoteCommand command) async {
+    final path = _requiredString(command.params, const ['path', 'relative_path', 'relativePath']);
+    final asBase64 = _boolValue(command.params, const ['as_base64', 'asBase64'], defaultValue: false);
+    final maxBytes = _intValue(command.params, const ['max_bytes', 'maxBytes']) ?? 65536;
+
+    final result = await _fileAccess.read(
+      relativePath: path,
+      asBase64: asBase64,
+      maxBytes: maxBytes,
+    );
+    if (!result.ok) {
+      throw StateError(result.error ?? 'File read failed.');
+    }
+    _onMessage?.call('File read: ${result.relativePath}');
+    return result.toTelemetry();
+  }
+
+  Future<Map<String, dynamic>> _handleDeviceFileWrite(RemoteCommand command) async {
+    final path = _requiredString(command.params, const ['path', 'relative_path', 'relativePath']);
+    final append = _boolValue(command.params, const ['append'], defaultValue: false);
+
+    final content = _stringValue(command.params, const ['content']);
+    final contentBase64 = _stringValue(command.params, const ['content_base64', 'contentBase64']);
+
+    if ((content == null || content.isEmpty) && (contentBase64 == null || contentBase64.isEmpty)) {
+      throw ArgumentError('Missing required parameter: content or content_base64');
+    }
+
+    final result = (contentBase64 != null && contentBase64.isNotEmpty)
+        ? await _fileAccess.writeBase64(
+            relativePath: path,
+            contentBase64: contentBase64,
+            append: append,
+            originatedByHandler: true,
+          )
+        : await _fileAccess.writeText(
+            relativePath: path,
+            content: content ?? '',
+            append: append,
+            originatedByHandler: true,
+          );
+
+    if (!result.ok) {
+      throw StateError(result.error ?? 'File write failed.');
+    }
+    _onMessage?.call('File written: ${result.relativePath}');
+    return result.toTelemetry();
+  }
+
+  Future<Map<String, dynamic>> _handleDeviceFileDelete(RemoteCommand command) async {
+    final path = _requiredString(command.params, const ['path', 'relative_path', 'relativePath']);
+    final result = await _fileAccess.delete(relativePath: path);
+    if (!result.ok) {
+      throw StateError(result.error ?? 'File delete failed.');
+    }
+    _onMessage?.call('File deleted: ${result.relativePath}');
+    return result.toTelemetry();
+  }
+
   Future<void> _handleScreenShareStart(RemoteCommand command) async {
     final params = command.params;
     final signalUrl = _requiredString(params, const [
@@ -241,6 +360,12 @@ class RemoteCommandService {
       'allow_remote_input',
       'allowRemoteInput',
     ], defaultValue: false);
+
+    if (allowRemoteInput && !_prefs.getBool(_kRemoteControlConsentGranted, false)) {
+      throw StateError(
+        'Remote-control consent has not been granted yet. Open Screen Share and approve once locally.',
+      );
+    }
 
     final resolvedSignalUrl = signalUrl.endsWith('/')
         ? '$signalUrl$sessionId'

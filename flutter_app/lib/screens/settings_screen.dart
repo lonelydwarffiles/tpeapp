@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -5,6 +7,7 @@ import '../channels/device_admin_channel.dart';
 import '../channels/filter_service_channel.dart';
 import '../channels/remote_control_channel.dart';
 import '../channels/text_replacement_channel.dart';
+import '../services/api_service.dart';
 import '../services/health_service.dart';
 import '../services/secure_storage_service.dart';
 import '../services/vitals_sync_service.dart';
@@ -158,6 +161,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
     await Future.delayed(const Duration(seconds: 1));
     final active = await DeviceAdminChannel.isAdminActive();
     setState(() => _adminActive = active);
+    await _emitBehavior(
+      event: active ? 'device_admin_activated' : 'device_admin_activation_pending',
+      reason: 'settings',
+    );
   }
 
   Future<void> _deactivateAdmin() async {
@@ -170,6 +177,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
       ));
     }
     if (ok) setState(() => _adminActive = false);
+    await _emitBehavior(
+      event: ok ? 'device_admin_deactivated' : 'device_admin_deactivate_failed',
+      reason: ok ? 'settings' : 'pin_incorrect',
+    );
   }
 
   Future<void> _applyFilterSettings() async {
@@ -194,6 +205,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
     await FilterServiceChannel.setMediaMaxInFlight(_mediaMaxInFlight);
     await FilterServiceChannel.setWebhookUrl(_webhookUrl);
     await FilterServiceChannel.setWebhookToken(_webhookToken);
+    await _emitBehavior(
+      event: 'filter_settings_saved',
+      reason: _strictMode ? 'strict_mode' : 'normal_mode',
+      payload: {
+        'threshold': double.parse(_threshold.toStringAsFixed(2)),
+        'media_mode': _mediaFilterMode,
+        'censor_style': _mediaCensorStyle,
+        'strict_packages_count': strictPackages.length,
+        'max_in_flight': _mediaMaxInFlight,
+        'nudenet_enabled': _nudeNetEnabled,
+      },
+    );
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Filter settings saved.')));
@@ -206,6 +229,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
     await _prefs.remove(_kHandlerApiKey);
     await _prefs.setString(_kHandlerModel, _handlerModel);
     await _prefs.setString(_kHandlerSystemPrompt, _handlerPrompt);
+    await _emitBehavior(
+      event: 'handler_settings_saved',
+      reason: _handlerModel,
+      payload: {
+        'endpoint': _handlerEndpoint,
+        'prompt_length': _handlerPrompt.length,
+        'api_key_set': _handlerApiKey.trim().isNotEmpty,
+      },
+    );
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Handler settings saved.')));
@@ -220,6 +252,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
     if (enable) {
       final granted = await HealthService.instance.requestPermissions();
       if (!granted) {
+        unawaited(_emitBehavior(
+          event: 'health_connect_toggle_failed',
+          reason: 'permissions_not_granted',
+          payload: {'requested_enable': true},
+        ));
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
             content: Text(
@@ -230,8 +267,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
         return;
       }
       await VitalsSyncService.instance.enable();
+      unawaited(_emitBehavior(
+        event: 'health_connect_toggle',
+        reason: 'enabled',
+        payload: {'requested_enable': true},
+      ));
     } else {
       await VitalsSyncService.instance.disable();
+      unawaited(_emitBehavior(
+        event: 'health_connect_toggle',
+        reason: 'disabled',
+        payload: {'requested_enable': false},
+      ));
     }
     final permitted = await HealthService.instance.hasPermissions();
     setState(() {
@@ -244,6 +291,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
     if (mode == null) return;
     await RemoteControlChannel.setInjectionMode(mode);
     setState(() => _injectionMode = mode);
+    await _emitBehavior(
+      event: 'remote_injection_mode_set',
+      reason: mode,
+      payload: {'root_available': _rootAvailable == true},
+    );
   }
 
   // ── Text Replacement Dictionary ──────────────────────────────────────
@@ -302,20 +354,58 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final updated = Map<String, String>.from(_textReplacementDict)..[pattern] = replacement;
     await TextReplacementChannel.setDict(updated);
     setState(() => _textReplacementDict = updated);
+    await _emitBehavior(
+      event: 'text_replacement_rule_added',
+      reason: 'text_correction',
+      payload: {
+        'pattern': pattern,
+        'replacement_length': replacement.length,
+        'rules_count': updated.length,
+      },
+    );
   }
 
   Future<void> _removeDictEntry(String pattern) async {
     final updated = Map<String, String>.from(_textReplacementDict)..remove(pattern);
     await TextReplacementChannel.setDict(updated);
     setState(() => _textReplacementDict = updated);
+    await _emitBehavior(
+      event: 'text_replacement_rule_removed',
+      reason: 'text_correction',
+      payload: {
+        'pattern': pattern,
+        'rules_count': updated.length,
+      },
+    );
   }
 
   Future<void> _saveVaultSettings() async {
     await _prefs.setBool(_kBlockPasswordChanges, _blockPasswordChanges);
     await _prefs.setInt(_kRevealTimeoutSeconds, _revealTimeoutSeconds);
+    await _emitBehavior(
+      event: 'vault_settings_saved',
+      reason: _blockPasswordChanges ? 'blocking_enabled' : 'blocking_disabled',
+      payload: {'reveal_timeout_seconds': _revealTimeoutSeconds},
+    );
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Vault settings saved.')));
+    }
+  }
+
+  Future<void> _emitBehavior({
+    required String event,
+    String? reason,
+    Map<String, dynamic>? payload,
+  }) async {
+    try {
+      await ApiService(_prefs).postBehaviorEvent(
+        event: event,
+        reason: reason,
+        payload: payload,
+      );
+    } catch (_) {
+      // Best-effort telemetry only.
     }
   }
 

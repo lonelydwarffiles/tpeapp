@@ -23,11 +23,15 @@ class ScreenShareScreen extends StatefulWidget {
 }
 
 class _ScreenShareScreenState extends State<ScreenShareScreen> {
+  static const _kRemoteControlConsentGranted =
+      'screen_share_remote_control_consent_granted';
+
   final _sessionController = TextEditingController();
   final _signalingController = TextEditingController();
   final _service = ScreenShareService();
 
   bool _remoteControlEnabled = false;
+  bool _remoteControlConsentGranted = false;
   bool _isRunning = false;
   bool _isBusy = false;
   String? _statusMessage;
@@ -42,17 +46,21 @@ class _ScreenShareScreenState extends State<ScreenShareScreen> {
   Future<void> _loadSavedEndpoint() async {
     final prefs = await SharedPreferences.getInstance();
     final endpoint = prefs.getString('partner_endpoint_url') ?? '';
-    if (endpoint.isNotEmpty && mounted) {
-      // Derive default signaling URL from partner endpoint.
-      // Session ID is left blank for the user to fill in.
-      setState(() {
-        // Convert http(s) scheme to ws(s) for WebSocket URL.
-        final wsEndpoint = endpoint
-            .replaceFirst('https://', 'wss://')
-            .replaceFirst('http://', 'ws://');
+    final consentGranted =
+        prefs.getBool(_kRemoteControlConsentGranted) ?? false;
+    if (!mounted) return;
+
+    // Derive default signaling URL from partner endpoint.
+    // Session ID is left blank for the user to fill in.
+    final wsEndpoint = endpoint
+        .replaceFirst('https://', 'wss://')
+        .replaceFirst('http://', 'ws://');
+    setState(() {
+      _remoteControlConsentGranted = consentGranted;
+      if (endpoint.isNotEmpty) {
         _signalingController.text = '$wsEndpoint/api/tpe/signal/';
-      });
-    }
+      }
+    });
   }
 
   @override
@@ -88,8 +96,15 @@ class _ScreenShareScreenState extends State<ScreenShareScreen> {
     }
 
     if (_remoteControlEnabled) {
-      final confirmed = await _showRemoteControlConsent();
-      if (!confirmed) return;
+      if (!_remoteControlConsentGranted) {
+        final confirmed = await _showRemoteControlConsent();
+        if (!confirmed) return;
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setBool(_kRemoteControlConsentGranted, true);
+        if (mounted) {
+          setState(() => _remoteControlConsentGranted = true);
+        }
+      }
     }
 
     // Build full signaling URL: base already ends with '/api/tpe/signal/'
@@ -196,9 +211,10 @@ class _ScreenShareScreenState extends State<ScreenShareScreen> {
             SwitchListTile(
               contentPadding: EdgeInsets.zero,
               title: const Text('Allow partner to control my screen'),
-              subtitle: const Text(
-                'Enables the remote-control DataChannel so your partner '
-                'can inject taps and other gestures.',
+              subtitle: Text(
+                _remoteControlConsentGranted
+                    ? 'Consent already saved. Remote control can be enabled without re-confirming.'
+                    : 'Enables the remote-control DataChannel so your partner can inject taps and other gestures.',
               ),
               value: _remoteControlEnabled,
               onChanged: (_isRunning || _isBusy)

@@ -115,6 +115,74 @@ This document defines the canonical command/ack/session contract for a device ap
 - device.wallpaper.set
 - device.url.open
 
+### Device file access
+
+- device.file.read
+- device.file.write
+- device.file.delete
+
+Delete policy:
+
+- Device must deny deletes for files that were not created by handler-originated write commands.
+- Device must allow delete only when file metadata marks it as handler-originated.
+
+### device.file.read params
+
+```json
+{
+  "path": "notes/session.txt",
+  "as_base64": false,
+  "max_bytes": 65536
+}
+```
+
+Success ACK telemetry may include:
+
+- path
+- relative_path
+- size_bytes
+- content (UTF-8 text when `as_base64=false`, truncated to `max_bytes`)
+- content_base64 (when `as_base64=true`, truncated to `max_bytes`)
+
+### device.file.write params
+
+```json
+{
+  "path": "notes/session.txt",
+  "content": "handler note",
+  "append": false
+}
+```
+
+Or binary payload:
+
+```json
+{
+  "path": "bin/blob.dat",
+  "content_base64": "AAEC...",
+  "append": false
+}
+```
+
+Success ACK telemetry may include:
+
+- path
+- relative_path
+- size_bytes
+
+### device.file.delete params
+
+```json
+{
+  "path": "notes/session.txt"
+}
+```
+
+Behavior:
+
+- Fails when target file is not marked handler-originated.
+- Succeeds only for handler-originated files created via `device.file.write`.
+
 ### Vault controls (website-managed)
 
 - vault.entries.list
