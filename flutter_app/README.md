@@ -49,8 +49,7 @@ tpeapp/
             ├── check_in_screen.dart      CheckInActivity
             ├── task_list_screen.dart     TaskListActivity
             ├── task_verification_screen.dart  TaskVerificationActivity
-            ├── assign_task_screen.dart   AssignTaskActivity (partner)
-            ├── questions_screen.dart     QuestionsActivity (partner)
+            ├── questions_screen.dart     QuestionsActivity
             ├── ritual_checklist_screen.dart   RitualChecklistActivity
             └── settings_screen.dart      MainActivity (admin settings)
 ```

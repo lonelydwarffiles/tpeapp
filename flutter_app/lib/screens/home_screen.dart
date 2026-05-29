@@ -5,7 +5,6 @@ import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../channels/mqtt_channel.dart';
-import '../channels/partner_pin_channel.dart';
 import '../services/chat_repository.dart';
 import '../services/api_service.dart';
 import '../services/remote_command_service.dart';
@@ -15,18 +14,15 @@ import 'task_list_screen.dart';
 import 'screen_share_screen.dart';
 import 'password_vault_screen.dart';
 import 'intiface_screen.dart';
-import 'assign_task_screen.dart';
 import 'questions_screen.dart';
-import 'relationship_center_screen.dart';
 import 'settings_screen.dart';
 
 // ── Navigation drawer ─────────────────────────────────────────────────────────
 
 class _AppDrawer extends StatelessWidget {
-  const _AppDrawer({required this.onNavigate, required this.onNavigateWithPin});
+  const _AppDrawer({required this.onNavigate});
 
   final void Function(Widget) onNavigate;
-  final void Function(Widget) onNavigateWithPin;
 
   @override
   Widget build(BuildContext context) {
@@ -82,40 +78,15 @@ class _AppDrawer extends StatelessWidget {
                   onTap: () => _open(context, const TaskListScreen()),
                 ),
                 const Divider(),
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
-                  child: Text(
-                    'PARTNER',
-                    style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                          color: cs.onSurfaceVariant,
-                          letterSpacing: 1.2,
-                        ),
-                  ),
-                ),
-                _DrawerItem(
-                  icon: Icons.assignment_rounded,
-                  label: 'Assign Task',
-                  locked: true,
-                  onTap: () => _openWithPin(context, const AssignTaskScreen()),
-                ),
                 _DrawerItem(
                   icon: Icons.quiz_rounded,
                   label: 'Questions',
-                  locked: true,
-                  onTap: () => _openWithPin(context, const QuestionsScreen()),
-                ),
-                _DrawerItem(
-                  icon: Icons.favorite_rounded,
-                  label: 'Relationship Center',
-                  locked: true,
-                  onTap: () =>
-                      _openWithPin(context, const RelationshipCenterScreen()),
+                  onTap: () => _open(context, const QuestionsScreen()),
                 ),
                 _DrawerItem(
                   icon: Icons.settings_rounded,
                   label: 'Settings',
-                  locked: true,
-                  onTap: () => _openWithPin(context, const SettingsScreen()),
+                  onTap: () => _open(context, const SettingsScreen()),
                 ),
                 const Divider(),
                 Padding(
@@ -155,11 +126,6 @@ class _AppDrawer extends StatelessWidget {
     Navigator.pop(context);
     onNavigate(screen);
   }
-
-  void _openWithPin(BuildContext context, Widget screen) {
-    Navigator.pop(context);
-    onNavigateWithPin(screen);
-  }
 }
 
 class _DrawerItem extends StatelessWidget {
@@ -167,13 +133,11 @@ class _DrawerItem extends StatelessWidget {
     required this.icon,
     required this.label,
     required this.onTap,
-    this.locked = false,
   });
 
   final IconData icon;
   final String label;
   final VoidCallback onTap;
-  final bool locked;
 
   @override
   Widget build(BuildContext context) {
@@ -181,9 +145,6 @@ class _DrawerItem extends StatelessWidget {
     return ListTile(
       leading: Icon(icon, color: cs.onSurfaceVariant),
       title: Text(label),
-      trailing: locked
-          ? Icon(Icons.lock_outline_rounded, size: 16, color: cs.outlineVariant)
-          : null,
       onTap: onTap,
     );
   }
@@ -535,8 +496,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     await Navigator.push(context, MaterialPageRoute(builder: (_) => screen));
   }
 
-  void _navigateWithPin(Widget screen) => _requirePin(() => _navigate(screen));
-
   Future<void> _trackBehavior(
     String event, {
     String? reason,
@@ -606,63 +565,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     );
   }
 
-  Future<void> _requirePin(VoidCallback onAuthorized) async {
-    final pinSet = await PartnerPinChannel.isPinSet();
-    if (!mounted) return;
-
-    if (!pinSet) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Set a partner PIN first in Settings.')),
-      );
-      return;
-    }
-
-    final pin = await _showPinDialog('Partner PIN required');
-    if (!mounted || pin == null) return;
-
-    final ok = await PartnerPinChannel.verifyPin(pin);
-    if (!mounted) return;
-    if (!ok) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Incorrect PIN.')),
-      );
-      return;
-    }
-
-    onAuthorized();
-  }
-
-  Future<String?> _showPinDialog(String title) async {
-    final pinCtrl = TextEditingController();
-    try {
-      return await showDialog<String>(
-        context: context,
-        builder: (ctx) => AlertDialog(
-          title: Text(title),
-          content: TextField(
-            controller: pinCtrl,
-            autofocus: true,
-            obscureText: true,
-            keyboardType: TextInputType.number,
-            decoration: const InputDecoration(hintText: 'Enter partner PIN'),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: const Text('Cancel'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.pop(ctx, pinCtrl.text.trim()),
-              child: const Text('Verify'),
-            ),
-          ],
-        ),
-      );
-    } finally {
-      pinCtrl.dispose();
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     final history = context.watch<ChatRepository>().history;
@@ -693,14 +595,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 case 'tasks':
                   _navigate(const TaskListScreen());
                   return;
-                case 'assign':
-                  _navigateWithPin(const AssignTaskScreen());
-                  return;
                 case 'questions':
-                  _navigateWithPin(const QuestionsScreen());
+                  _navigate(const QuestionsScreen());
                   return;
                 case 'settings':
-                  _navigateWithPin(const SettingsScreen());
+                  _navigate(const SettingsScreen());
                   return;
                 case 'screen_share':
                   _navigate(const ScreenShareScreen());
@@ -711,26 +610,16 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 case 'enrollment':
                   _openEnrollmentSetup();
                   return;
-                case 'relationships':
-                  _navigateWithPin(const RelationshipCenterScreen());
-                  return;
               }
             },
             itemBuilder: (_) => const [
               PopupMenuItem(value: 'enrollment', child: Text('Enrollment Setup')),
               PopupMenuItem(value: 'checkin', child: Text('Daily Check-In')),
               PopupMenuItem(value: 'tasks', child: Text('My Tasks')),
-              PopupMenuItem(
-                  value: 'assign', child: Text('Assign Task (Partner)')),
-              PopupMenuItem(
-                  value: 'questions', child: Text('Questions (Partner)')),
-              PopupMenuItem(
-                  value: 'settings', child: Text('Settings (Partner)')),
+              PopupMenuItem(value: 'questions', child: Text('Questions')),
+              PopupMenuItem(value: 'settings', child: Text('Settings')),
               PopupMenuItem(value: 'screen_share', child: Text('Screen Share')),
               PopupMenuItem(value: 'vault', child: Text('Password Vault')),
-              PopupMenuItem(
-                  value: 'relationships',
-                  child: Text('Relationship Center (Partner)')),
             ],
           ),
         ],
