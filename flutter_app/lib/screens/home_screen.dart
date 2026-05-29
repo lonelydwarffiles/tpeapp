@@ -1,207 +1,23 @@
 import 'dart:async';
+import 'dart:developer' as developer;
 
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../channels/filter_service_channel.dart';
 import '../channels/mqtt_channel.dart';
-import '../services/chat_repository.dart';
 import '../services/api_service.dart';
 import '../services/remote_command_service.dart';
-import '../models/chat_message.dart';
+import '../services/websocket_service.dart';
 import 'check_in_screen.dart';
-import 'task_list_screen.dart';
-import 'screen_share_screen.dart';
-import 'password_vault_screen.dart';
 import 'intiface_screen.dart';
 import 'questions_screen.dart';
+import 'screen_share_screen.dart';
 import 'settings_screen.dart';
+import 'task_list_screen.dart';
 
-// ── Navigation drawer ─────────────────────────────────────────────────────────
-
-class _AppDrawer extends StatelessWidget {
-  const _AppDrawer({required this.onNavigate});
-
-  final void Function(Widget) onNavigate;
-
-  @override
-  Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
-
-    return Drawer(
-      child: Column(
-        children: [
-          DrawerHeader(
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                colors: [cs.primaryContainer, cs.secondaryContainer],
-              ),
-            ),
-            child: Align(
-              alignment: Alignment.bottomLeft,
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  CircleAvatar(
-                    radius: 26,
-                    backgroundColor: cs.primary,
-                    child: Icon(Icons.smart_toy_outlined,
-                        color: cs.onPrimary, size: 28),
-                  ),
-                  const SizedBox(height: 10),
-                  Text(
-                    'TPE',
-                    style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                          color: cs.onPrimaryContainer,
-                          fontWeight: FontWeight.bold,
-                        ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-          Expanded(
-            child: ListView(
-              padding: EdgeInsets.zero,
-              children: [
-                _DrawerItem(
-                  icon: Icons.checklist_rounded,
-                  label: 'Daily Check-In',
-                  onTap: () => _open(context, const CheckInScreen()),
-                ),
-                _DrawerItem(
-                  icon: Icons.task_alt_rounded,
-                  label: 'My Tasks',
-                  onTap: () => _open(context, const TaskListScreen()),
-                ),
-                const Divider(),
-                _DrawerItem(
-                  icon: Icons.quiz_rounded,
-                  label: 'Questions',
-                  onTap: () => _open(context, const QuestionsScreen()),
-                ),
-                _DrawerItem(
-                  icon: Icons.settings_rounded,
-                  label: 'Settings',
-                  onTap: () => _open(context, const SettingsScreen()),
-                ),
-                const Divider(),
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
-                  child: Text(
-                    'FEATURES',
-                    style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                          color: cs.onSurfaceVariant,
-                          letterSpacing: 1.2,
-                        ),
-                  ),
-                ),
-                _DrawerItem(
-                  icon: Icons.screen_share_rounded,
-                  label: 'Screen Share',
-                  onTap: () => _open(context, const ScreenShareScreen()),
-                ),
-                _DrawerItem(
-                  icon: Icons.lock_rounded,
-                  label: 'Password Vault',
-                  onTap: () => _open(context, const PasswordVaultScreen()),
-                ),
-                _DrawerItem(
-                  icon: Icons.vibration_rounded,
-                  label: 'Toy Control',
-                  onTap: () => _open(context, const IntifaceScreen()),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _open(BuildContext context, Widget screen) {
-    Navigator.pop(context);
-    onNavigate(screen);
-  }
-}
-
-class _DrawerItem extends StatelessWidget {
-  const _DrawerItem({
-    required this.icon,
-    required this.label,
-    required this.onTap,
-  });
-
-  final IconData icon;
-  final String label;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
-    return ListTile(
-      leading: Icon(icon, color: cs.onSurfaceVariant),
-      title: Text(label),
-      onTap: onTap,
-    );
-  }
-}
-
-// ── Empty chat placeholder ────────────────────────────────────────────────────
-
-class _EmptyChat extends StatelessWidget {
-  const _EmptyChat({required this.cs});
-  final ColorScheme cs;
-
-  @override
-  Widget build(BuildContext context) {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 32),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              width: 80,
-              height: 80,
-              decoration: BoxDecoration(
-                color: cs.primaryContainer,
-                shape: BoxShape.circle,
-              ),
-              child: Icon(Icons.smart_toy_outlined,
-                  size: 40, color: cs.onPrimaryContainer),
-            ),
-            const SizedBox(height: 20),
-            Text(
-              'Handler',
-              style: Theme.of(context)
-                  .textTheme
-                  .headlineSmall
-                  ?.copyWith(fontWeight: FontWeight.w600),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              'Start a conversation with your AI accountability partner.',
-              textAlign: TextAlign.center,
-              style: Theme.of(context)
-                  .textTheme
-                  .bodyMedium
-                  ?.copyWith(color: cs.onSurfaceVariant),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-/// Main screen — the "Handler" AI chat interface.
-///
-/// Dart equivalent of [HandlerChatActivity].  Also listens to [MqttChannel]
-/// events so the UI can react to partner pushes (REQUEST_CHECKIN, etc.).
+/// Main screen showing a flat, modern dashboard of available app features.
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
 
@@ -211,30 +27,28 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   static const String _fallbackLiveEndpoint = 'https://mochii.live';
-  final _textController = TextEditingController();
-  final _scrollController = ScrollController();
-  bool _sending = false;
+
   String _enrollmentState = 'enrolling';
   String _enrollmentError = '';
+
   StreamSubscription<Map<String, String>>? _mqttSub;
   Timer? _enrollmentStatusTimer;
   RemoteCommandService? _remoteCommands;
   ApiService? _api;
+  WebSocketService? _webSocketService;
   bool _homeOpenedTracked = false;
-  DateTime? _typingSessionStart;
-  int _typingInsertedChars = 0;
-  int _typingBackspaceCount = 0;
-  String _lastInputValue = '';
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
     _api ??= ApiService(context.read<SharedPreferences>());
+    _webSocketService ??= context.read<WebSocketService>();
     _remoteCommands ??= RemoteCommandService(
       prefs: context.read<SharedPreferences>(),
       onCheckInRequested: _openCheckIn,
       onMessage: _showCommandMessage,
     );
+    unawaited(_webSocketService?.connect() ?? Future<void>.value());
     if (!_homeOpenedTracked) {
       _homeOpenedTracked = true;
       unawaited(_trackBehavior('app_home_opened', reason: _enrollmentState));
@@ -245,7 +59,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    _textController.addListener(_onInputChanged);
     _mqttSub = MqttChannel.events.listen(_onMqttEvent);
     _refreshEnrollmentState();
     _enrollmentStatusTimer = Timer.periodic(const Duration(seconds: 5), (_) {
@@ -255,23 +68,15 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   @override
   void dispose() {
-    _finalizeTypingSession();
     WidgetsBinding.instance.removeObserver(this);
     _mqttSub?.cancel();
+    unawaited(_webSocketService?.disconnect() ?? Future<void>.value());
     _enrollmentStatusTimer?.cancel();
-    _textController.removeListener(_onInputChanged);
-    _textController.dispose();
-    _scrollController.dispose();
     super.dispose();
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.inactive ||
-        state == AppLifecycleState.paused ||
-        state == AppLifecycleState.detached) {
-      _finalizeTypingSession();
-    }
     unawaited(
       _trackBehavior(
         'app_lifecycle',
@@ -321,6 +126,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }
 
   void _onMqttEvent(Map<String, String> data) {
+    developer.log('MQTT raw payload: $data', name: 'HomeScreen');
     final action = (data['action'] ?? data['command'] ?? '').trim();
     if (action.isNotEmpty) {
       unawaited(
@@ -421,7 +227,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         await prefs.setString('auto_pair_key', autoPairKey);
       }
 
-      // Force the startup enrollment loop to re-run using new values.
       await prefs.setBool('is_paired', false);
       await prefs.setString('auto_enrollment_state', 'enrolling');
       await prefs.remove('auto_enrollment_error');
@@ -443,51 +248,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       SnackBar(content: Text(message)),
     );
   }
-
-  Future<void> _send() async {
-    final text = _textController.text.trim();
-    if (text.isEmpty || _sending) return;
-
-    _finalizeTypingSession();
-    _textController.clear();
-    _lastInputValue = '';
-
-    await _trackBehavior(
-      'chat_message_sent',
-      payload: {'length': text.length},
-    );
-
-    final repo = context.read<ChatRepository>();
-    setState(() => _sending = true);
-
-    await repo.addUserMessage(text);
-    _scrollToBottom();
-
-    try {
-      final reply = await repo.sendMessage(text);
-      await repo.addAssistantMessage(reply);
-    } catch (e) {
-      await repo.addAssistantMessage('⚠️ ${e.toString()}');
-    } finally {
-      if (mounted) setState(() => _sending = false);
-      _scrollToBottom();
-    }
-  }
-
-  void _scrollToBottom() {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (_scrollController.hasClients) {
-        _scrollController.animateTo(
-          _scrollController.position.maxScrollExtent,
-          duration: const Duration(milliseconds: 250),
-          curve: Curves.easeOut,
-        );
-      }
-    });
-  }
-
-  void _navigate(Widget screen) =>
-      unawaited(_navigateAndTrack(screen));
 
   Future<void> _navigateAndTrack(Widget screen) async {
     final route = screen.runtimeType.toString();
@@ -514,69 +274,60 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     }
   }
 
-  void _onInputChanged() {
-    final current = _textController.text;
-
-    if (_typingSessionStart == null && current.isNotEmpty) {
-      _typingSessionStart = DateTime.now().toUtc();
-      _typingInsertedChars = 0;
-      _typingBackspaceCount = 0;
-      _lastInputValue = '';
-    }
-
-    if (_typingSessionStart != null) {
-      final delta = current.length - _lastInputValue.length;
-      if (delta > 0) {
-        _typingInsertedChars += delta;
-      } else if (delta < 0) {
-        _typingBackspaceCount += -delta;
-      }
-    }
-
-    _lastInputValue = current;
-  }
-
-  void _finalizeTypingSession() {
-    final startedAt = _typingSessionStart;
-    if (startedAt == null) return;
-
-    final endedAt = DateTime.now().toUtc();
-    final durationMs = endedAt.difference(startedAt).inMilliseconds;
-    final inserted = _typingInsertedChars;
-    final backspaces = _typingBackspaceCount;
-    final correctionRate = inserted > 0 ? (backspaces / inserted) : 0.0;
-
-    _typingSessionStart = null;
-    _typingInsertedChars = 0;
-    _typingBackspaceCount = 0;
-
-    unawaited(
-      _trackBehavior(
-        'typing_session_metrics',
-        payload: {
-          'start_time': startedAt.toIso8601String(),
-          'stop_time': endedAt.toIso8601String(),
-          'duration_ms': durationMs,
-          'total_characters': inserted,
-          'backspace_count': backspaces,
-          'correction_rate': double.parse(correctionRate.toStringAsFixed(4)),
-        },
-      ),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
-    final history = context.watch<ChatRepository>().history;
     final cs = Theme.of(context).colorScheme;
-    final bg = Theme.of(context).scaffoldBackgroundColor;
+    final width = MediaQuery.sizeOf(context).width;
+    final crossAxisCount = width >= 900
+        ? 4
+        : width >= 600
+            ? 3
+            : 2;
+
+    final features = <_DashboardFeature>[
+      _DashboardFeature(
+        title: 'Questions',
+        icon: Icons.quiz_outlined,
+        screenBuilder: () => const QuestionsScreen(),
+      ),
+      _DashboardFeature(
+        title: 'Settings',
+        icon: Icons.settings_outlined,
+        screenBuilder: () => const SettingsScreen(),
+      ),
+      _DashboardFeature(
+        title: 'NudeNet Blocker',
+        icon: Icons.shield_outlined,
+        screenBuilder: () => const NudeNetBlockerScreen(),
+      ),
+      _DashboardFeature(
+        title: 'WebRTC Video',
+        icon: Icons.videocam_outlined,
+        screenBuilder: () => const ScreenShareScreen(),
+      ),
+      _DashboardFeature(
+        title: 'Daily Check-In',
+        icon: Icons.fact_check_outlined,
+        screenBuilder: () => const CheckInScreen(),
+      ),
+      _DashboardFeature(
+        title: 'Tasks',
+        icon: Icons.task_outlined,
+        screenBuilder: () => const TaskListScreen(),
+      ),
+      _DashboardFeature(
+        title: 'Toy Control',
+        icon: Icons.vibration_outlined,
+        screenBuilder: () => const IntifaceScreen(),
+      ),
+    ];
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Handler'),
+        title: const Text('Dashboard'),
         actions: [
-          Container(
-            margin: const EdgeInsets.only(right: 6),
+          Padding(
+            padding: const EdgeInsets.only(right: 6),
             child: Chip(
               avatar: Icon(
                 Icons.circle,
@@ -586,265 +337,223 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               label: Text(_enrollmentLabel()),
             ),
           ),
-          PopupMenuButton<String>(
-            onSelected: (item) {
-              switch (item) {
-                case 'checkin':
-                  _navigate(const CheckInScreen());
-                  return;
-                case 'tasks':
-                  _navigate(const TaskListScreen());
-                  return;
-                case 'questions':
-                  _navigate(const QuestionsScreen());
-                  return;
-                case 'settings':
-                  _navigate(const SettingsScreen());
-                  return;
-                case 'screen_share':
-                  _navigate(const ScreenShareScreen());
-                  return;
-                case 'vault':
-                  _navigate(const PasswordVaultScreen());
-                  return;
-                case 'enrollment':
-                  _openEnrollmentSetup();
-                  return;
-              }
-            },
-            itemBuilder: (_) => const [
-              PopupMenuItem(value: 'enrollment', child: Text('Enrollment Setup')),
-              PopupMenuItem(value: 'checkin', child: Text('Daily Check-In')),
-              PopupMenuItem(value: 'tasks', child: Text('My Tasks')),
-              PopupMenuItem(value: 'questions', child: Text('Questions')),
-              PopupMenuItem(value: 'settings', child: Text('Settings')),
-              PopupMenuItem(value: 'screen_share', child: Text('Screen Share')),
-              PopupMenuItem(value: 'vault', child: Text('Password Vault')),
-            ],
+          IconButton(
+            onPressed: _openEnrollmentSetup,
+            tooltip: 'Enrollment Setup',
+            icon: const Icon(Icons.link_outlined),
           ),
         ],
       ),
-      body: Stack(
-        children: [
-          Positioned.fill(
-            child: DecoratedBox(
-              decoration: BoxDecoration(
-                color: bg,
-                gradient: LinearGradient(
-                  begin: Alignment.topCenter,
-                  end: Alignment.bottomCenter,
-                  colors: [
-                    cs.surface.withOpacity(0.92),
-                    bg,
-                  ],
+      body: CustomScrollView(
+        slivers: [
+          if (_enrollmentState == 'retrying' && _enrollmentError.isNotEmpty)
+            SliverToBoxAdapter(
+              child: Container(
+                width: double.infinity,
+                margin: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                decoration: BoxDecoration(
+                  color: cs.surfaceContainerHighest.withOpacity(0.7),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: cs.outlineVariant.withOpacity(0.45)),
                 ),
-              ),
-            ),
-          ),
-          Positioned(
-            top: -60,
-            right: -40,
-            child: _GlowOrb(color: cs.primary.withOpacity(0.22), size: 220),
-          ),
-          Positioned(
-            bottom: 90,
-            left: -50,
-            child: _GlowOrb(color: cs.tertiary.withOpacity(0.12), size: 180),
-          ),
-          Column(
-            children: [
-              if (_enrollmentState == 'retrying' && _enrollmentError.isNotEmpty)
-                Container(
-                  width: double.infinity,
-                  margin: const EdgeInsets.fromLTRB(12, 8, 12, 0),
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                  decoration: BoxDecoration(
-                    color: cs.surfaceContainerHighest.withOpacity(0.7),
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: cs.outlineVariant.withOpacity(0.45)),
-                  ),
-                  child: Text(
-                    _enrollmentError,
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: cs.onSurfaceVariant,
-                        ),
-                  ),
-                ),
-              Expanded(
-                child: history.isEmpty
-                    ? _EmptyChat(cs: cs)
-                    : ListView.builder(
-                        controller: _scrollController,
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 12, vertical: 8),
-                        itemCount: history.length,
-                        itemBuilder: (_, i) =>
-                            _MessageBubble(message: history[i]),
+                child: Text(
+                  _enrollmentError,
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: cs.onSurfaceVariant,
                       ),
-              ),
-              if (_sending)
-                LinearProgressIndicator(
-                  backgroundColor: cs.surfaceContainerHighest,
-                  color: cs.primary,
                 ),
-              _InputRow(
-                controller: _textController,
-                onSend: _send,
-                enabled: !_sending,
+              ),
+            ),
+          const SliverToBoxAdapter(
+            child: Padding(
+              padding: EdgeInsets.fromLTRB(16, 14, 16, 8),
+              child: Text('Choose a feature'),
+            ),
+          ),
+          SliverPadding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 18),
+            sliver: SliverGrid(
+              delegate: SliverChildBuilderDelegate(
+                (context, index) {
+                  final item = features[index];
+                  return _FeaturePill(
+                    feature: item,
+                    onTap: () => _navigateAndTrack(item.screenBuilder()),
+                  );
+                },
+                childCount: features.length,
+              ),
+              gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                crossAxisCount: crossAxisCount,
+                childAspectRatio: 1.45,
+                crossAxisSpacing: 12,
+                mainAxisSpacing: 12,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _DashboardFeature {
+  const _DashboardFeature({
+    required this.title,
+    required this.icon,
+    required this.screenBuilder,
+  });
+
+  final String title;
+  final IconData icon;
+  final Widget Function() screenBuilder;
+}
+
+class _FeaturePill extends StatelessWidget {
+  const _FeaturePill({required this.feature, required this.onTap});
+
+  final _DashboardFeature feature;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+
+    return Material(
+      color: cs.surfaceContainerLow,
+      borderRadius: BorderRadius.circular(28),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(28),
+        onTap: onTap,
+        child: Container(
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(28),
+            border: Border.all(color: cs.outlineVariant.withOpacity(0.45)),
+          ),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Container(
+                width: 44,
+                height: 44,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: cs.primaryContainer,
+                ),
+                child: Icon(feature.icon, color: cs.onPrimaryContainer),
+              ),
+              const SizedBox(height: 10),
+              Text(
+                feature.title,
+                textAlign: TextAlign.center,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                      fontWeight: FontWeight.w600,
+                    ),
               ),
             ],
           ),
-        ],
-      ),
-    );
-  }
-}
-
-
-class _GlowOrb extends StatelessWidget {
-  const _GlowOrb({required this.color, required this.size});
-
-  final Color color;
-  final double size;
-
-  @override
-  Widget build(BuildContext context) {
-    return IgnorePointer(
-      child: Container(
-        width: size,
-        height: size,
-        decoration: BoxDecoration(
-          shape: BoxShape.circle,
-          gradient: RadialGradient(
-            colors: [color, color.withOpacity(0)],
-          ),
         ),
       ),
     );
   }
 }
 
-// ── Chat bubble ───────────────────────────────────────────────────────────────
+class NudeNetBlockerScreen extends StatefulWidget {
+  const NudeNetBlockerScreen({super.key});
 
-class _MessageBubble extends StatelessWidget {
-  const _MessageBubble({required this.message});
-  final ChatMessage message;
+  @override
+  State<NudeNetBlockerScreen> createState() => _NudeNetBlockerScreenState();
+}
+
+class _NudeNetBlockerScreenState extends State<NudeNetBlockerScreen> {
+  static const _kNudeNetEnabled = 'nudenet_enabled';
+  static const _kFilterThreshold = 'filter_confidence_threshold';
+  static const _kFilterStrictMode = 'filter_strict_mode';
+
+  bool _loading = true;
+  bool _nudeNetEnabled = false;
+  bool _strictMode = false;
+  double _threshold = 0.55;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    final prefs = await SharedPreferences.getInstance();
+    if (!mounted) return;
+    setState(() {
+      _nudeNetEnabled = prefs.getBool(_kNudeNetEnabled) ?? false;
+      _strictMode = prefs.getBool(_kFilterStrictMode) ?? false;
+      _threshold = prefs.getDouble(_kFilterThreshold) ?? 0.55;
+      _loading = false;
+    });
+  }
+
+  Future<void> _save() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_kNudeNetEnabled, _nudeNetEnabled);
+    await prefs.setBool(_kFilterStrictMode, _strictMode);
+    await prefs.setDouble(_kFilterThreshold, _threshold);
+    await FilterServiceChannel.setStrictMode(enabled: _strictMode);
+    await FilterServiceChannel.setThreshold(_threshold);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('NudeNet blocker settings saved.')),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
-    final isUser = message.isUser;
-    final cs = Theme.of(context).colorScheme;
+    if (_loading) {
+      return const Scaffold(
+        body: Center(child: CircularProgressIndicator()),
+      );
+    }
 
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 3),
-      child: Row(
-        mainAxisAlignment:
-            isUser ? MainAxisAlignment.end : MainAxisAlignment.start,
-        crossAxisAlignment: CrossAxisAlignment.end,
+    return Scaffold(
+      appBar: AppBar(title: const Text('NudeNet Blocker')),
+      body: ListView(
+        padding: const EdgeInsets.all(16),
         children: [
-          if (!isUser) ...[
-            CircleAvatar(
-              radius: 14,
-              backgroundColor: cs.primaryContainer,
-              child: Icon(Icons.smart_toy_outlined,
-                  size: 14, color: cs.onPrimaryContainer),
-            ),
-            const SizedBox(width: 6),
-          ],
-          Flexible(
-            child: Container(
-              constraints: BoxConstraints(
-                maxWidth: MediaQuery.of(context).size.width * 0.72,
-              ),
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-              decoration: BoxDecoration(
-                color: isUser
-                    ? cs.primary.withOpacity(0.92)
-                    : cs.surfaceContainerHigh,
-                borderRadius: BorderRadius.only(
-                  topLeft: const Radius.circular(18),
-                  topRight: const Radius.circular(18),
-                  bottomLeft: Radius.circular(isUser ? 18 : 4),
-                  bottomRight: Radius.circular(isUser ? 4 : 18),
-                ),
-                border: Border.all(
-                  color: isUser
-                      ? cs.primary.withOpacity(0.55)
-                      : cs.outlineVariant.withOpacity(0.4),
-                ),
-                boxShadow: [
-                  BoxShadow(
-                    blurRadius: 12,
-                    offset: const Offset(0, 4),
-                    color: Colors.black.withOpacity(0.18),
-                  ),
-                ],
-              ),
-              child: Text(
-                message.content,
-                style: TextStyle(
-                  color: isUser ? cs.onPrimary : cs.onSurface,
-                  height: 1.4,
-                ),
-              ),
-            ),
+          SwitchListTile(
+            title: const Text('Enable NudeNet media censoring'),
+            subtitle: const Text('Blocks detected explicit content locally.'),
+            value: _nudeNetEnabled,
+            onChanged: (value) => setState(() => _nudeNetEnabled = value),
           ),
-          if (isUser) const SizedBox(width: 6),
+          SwitchListTile(
+            title: const Text('Strict Mode'),
+            subtitle: const Text('Apply stricter content filtering behavior.'),
+            value: _strictMode,
+            onChanged: (value) => setState(() => _strictMode = value),
+          ),
+          const SizedBox(height: 10),
+          Text(
+            'Detection Threshold (${_threshold.toStringAsFixed(2)})',
+            style: Theme.of(context).textTheme.titleSmall,
+          ),
+          Slider(
+            value: _threshold,
+            min: 0.1,
+            max: 1.0,
+            divisions: 18,
+            onChanged: (value) => setState(() => _threshold = value),
+          ),
+          const SizedBox(height: 16),
+          FilledButton.icon(
+            onPressed: _save,
+            icon: const Icon(Icons.save_outlined),
+            label: const Text('Save'),
+          ),
         ],
-      ),
-    );
-  }
-}
-
-// ── Input row ─────────────────────────────────────────────────────────────────
-
-class _InputRow extends StatelessWidget {
-  const _InputRow({
-    required this.controller,
-    required this.onSend,
-    required this.enabled,
-  });
-  final TextEditingController controller;
-  final VoidCallback onSend;
-  final bool enabled;
-
-  @override
-  Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
-    return SafeArea(
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(12, 6, 12, 10),
-        child: Card(
-          elevation: 4,
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(10, 8, 8, 8),
-            child: Row(
-              children: [
-                Expanded(
-                  child: TextField(
-                    controller: controller,
-                    enabled: enabled,
-                    decoration: const InputDecoration(
-                      hintText: 'Message Handler…',
-                    ),
-                    onSubmitted: (_) => onSend(),
-                    textInputAction: TextInputAction.send,
-                  ),
-                ),
-                const SizedBox(width: 8),
-                IconButton.filled(
-                  onPressed: enabled ? onSend : null,
-                  icon: const Icon(Icons.arrow_upward_rounded),
-                  style: IconButton.styleFrom(
-                    shape: const CircleBorder(),
-                    backgroundColor: cs.primary,
-                    foregroundColor: cs.onPrimary,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
       ),
     );
   }

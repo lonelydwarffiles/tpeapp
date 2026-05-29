@@ -28,7 +28,7 @@ const _kMediaMaxInFlight    = 'media_filter_max_in_flight';
 const _kBlockPasswordChanges = 'vault_block_password_changes';
 const _kRevealTimeoutSeconds = 'vault_reveal_timeout_seconds';
 
-/// Settings / admin screen — partner-facing; PIN-protected in [HomeScreen].
+/// Settings / admin screen.
 ///
 /// Covers the features exposed by [com.tpeapp.ui.MainActivity] in the old
 /// native UI:

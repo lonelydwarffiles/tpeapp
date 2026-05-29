@@ -3,10 +3,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../services/api_service.dart';
 
-/// Dart equivalent of [QuestionsActivity] (partner-facing screen).
-///
 /// Fetches, answers, and deletes "Puppy Pouch" questions via [ApiService].
-/// PIN-protected in [HomeScreen] before navigation.
 class QuestionsScreen extends StatefulWidget {
   const QuestionsScreen({super.key});
 

@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:developer' as developer;
 import 'dart:io';
 
 import 'package:record/record.dart';
@@ -77,26 +78,87 @@ class WebSocketService {
   // ── Incoming message handling ────────────────────────────────────────
 
   void _onMessage(dynamic data) {
+    developer.log(
+      'Raw incoming WS payload (${data.runtimeType}): $data',
+      name: 'WebSocketService',
+    );
     if (data is! String) return;
     final Map<String, dynamic> payload;
     try {
       payload = jsonDecode(data) as Map<String, dynamic>;
-    } catch (_) {
+    } catch (err) {
+      developer.log(
+        'Failed to parse incoming WS payload: $err',
+        name: 'WebSocketService',
+      );
       return;
     }
-    final command = payload['command'] as String?;
+    final command = _commandFromPayload(payload);
     switch (command) {
       case 'START_HOT_MIC':
         _startHotMic();
       case 'STOP_HOT_MIC':
         _stopHotMic();
       case 'TTS_COMMAND':
-        final text = payload['text'] as String?;
+        final text = _stringValue(payload, const ['text', 'message', 'content']);
         if (text != null && text.isNotEmpty) {
-          final forceSpeaker = (payload['force_speaker'] as bool?) ?? false;
+          final forceSpeaker = _boolValue(
+            payload,
+            const ['force_speaker', 'forceSpeaker'],
+            defaultValue: false,
+          );
           _tts.handleCommand(text: text, forceSpeaker: forceSpeaker);
         }
+      default:
+        developer.log(
+          'Ignoring unsupported WS command: $command',
+          name: 'WebSocketService',
+        );
     }
+  }
+
+  String _commandFromPayload(Map<String, dynamic> payload) {
+    final raw = _stringValue(payload, const ['command', 'action', 'event', 'type']) ?? '';
+    final normalized = raw.trim().toUpperCase().replaceAll(RegExp(r'[\s\-.]+'), '_');
+    switch (normalized) {
+      case 'HOT_MIC_START':
+        return 'START_HOT_MIC';
+      case 'HOT_MIC_STOP':
+        return 'STOP_HOT_MIC';
+      case 'SPEAK_TEXT':
+      case 'TTS':
+        return 'TTS_COMMAND';
+      default:
+        return normalized;
+    }
+  }
+
+  String? _stringValue(Map<String, dynamic> payload, List<String> keys) {
+    for (final key in keys) {
+      final value = payload[key];
+      if (value is String && value.trim().isNotEmpty) {
+        return value.trim();
+      }
+    }
+    return null;
+  }
+
+  bool _boolValue(
+    Map<String, dynamic> payload,
+    List<String> keys, {
+    required bool defaultValue,
+  }) {
+    for (final key in keys) {
+      final value = payload[key];
+      if (value is bool) return value;
+      if (value is String) {
+        final normalized = value.trim().toLowerCase();
+        if (normalized == 'true' || normalized == '1') return true;
+        if (normalized == 'false' || normalized == '0') return false;
+      }
+      if (value is num) return value != 0;
+    }
+    return defaultValue;
   }
 
   void _onError(Object error) {

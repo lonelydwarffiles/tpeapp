@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:developer' as developer;
 
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter/services.dart';
@@ -45,6 +46,7 @@ class RemoteCommandService {
   int _toyPatternTick = 0;
 
   Future<void> handleEvent(Map<String, String> event) async {
+    developer.log('MQTT raw payload: $event', name: 'RemoteCommandService');
     final command = RemoteCommand.fromEvent(event);
     if (command == null) return;
     _lastTelemetry = null;
@@ -63,6 +65,12 @@ class RemoteCommandService {
     try {
       await _ack(command, status: 'RUNNING');
       switch (command.action) {
+        case 'native.handled':
+          // Command was fully executed by the native Android layer
+          // (PartnerMqttService). Flutter acknowledges it here so that any
+          // command_id present in the payload receives a SUCCEEDED status
+          // rather than a spurious REJECTED.
+          break;
         case 'puppy.checkin.request':
           await _onCheckInRequested();
           break;
