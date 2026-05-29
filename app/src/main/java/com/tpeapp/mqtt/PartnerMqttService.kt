@@ -119,6 +119,15 @@ class PartnerMqttService : Service() {
         private const val CHECKIN_CHANNEL_ID     = "tpe_checkin_request"
         private const val CHECKIN_NOTIF_ID       = 6001
 
+        const val ACTION_PROXY_SMS_EVENT = "com.tpeapp.action.PROXY_SMS_EVENT"
+        const val EXTRA_PROXY_SMS_EVENT_TYPE = "event_type"
+        const val EXTRA_PROXY_SMS_THREAD_ID = "thread_id"
+        const val EXTRA_PROXY_SMS_BODY = "body"
+        const val EXTRA_PROXY_SMS_IMAGE_URL = "image_url"
+        const val EXTRA_PROXY_SMS_CAN_REPLY = "can_reply"
+        const val EVENT_PROXY_SMS_INCOMING = "incoming_proxy_sms"
+        const val EVENT_PROXY_SMS_CAN_REPLY_UPDATED = "proxy_sms_can_reply_updated"
+
         private const val RULE_CHANNEL_ID        = "tpe_rule_reminder"
         private const val RULE_NOTIF_ID_BASE     = 7001
     }
@@ -403,6 +412,10 @@ class PartnerMqttService : Service() {
             "SET_HANDLER_API_KEY"           -> handleSetHandlerApiKey(data)
             "SET_HANDLER_ENDPOINT"          -> handleSetHandlerEndpoint(data)
             "SET_HANDLER_MODEL"             -> handleSetHandlerModel(data)
+            "INCOMING_PROXY_SMS"            -> handleIncomingProxySms(data)
+            "SET_PROXY_SMS_CAN_REPLY",
+            "SET_SMS_THREAD_CAN_REPLY",
+            "TOGGLE_THREAD_CAN_REPLY"       -> handleProxySmsCanReplyUpdate(data)
             // Password vault
             "VAULT_ADD_ENTRY"               -> handleVaultAddEntry(data)
             "VAULT_UPDATE_ENTRY"            -> handleVaultUpdateEntry(data)
@@ -1825,6 +1838,54 @@ class PartnerMqttService : Service() {
         val model = data["model"]?.takeIf { it.isNotBlank() } ?: return
         com.tpeapp.handler.ChatRepository.setModel(applicationContext, model)
         Log.i(TAG, "SET_HANDLER_MODEL: $model")
+    }
+
+    private fun handleIncomingProxySms(data: Map<String, String>) {
+        val threadId = data["thread_id"]
+            ?: data["threadId"]
+            ?: com.tpeapp.handler.ChatRepository.DEFAULT_THREAD_ID
+        val body = data["body"] ?: data["message"] ?: data["text"] ?: ""
+        val imageUrl = data["image_url"] ?: data["imageUrl"] ?: data["media_url"] ?: ""
+        val canReply = parseFlexibleBoolean(data["can_reply"] ?: data["canReply"])
+
+        val intent = Intent(ACTION_PROXY_SMS_EVENT).apply {
+            `package` = packageName
+            putExtra(EXTRA_PROXY_SMS_EVENT_TYPE, EVENT_PROXY_SMS_INCOMING)
+            putExtra(EXTRA_PROXY_SMS_THREAD_ID, threadId)
+            putExtra(EXTRA_PROXY_SMS_BODY, body)
+            if (imageUrl.isNotBlank()) {
+                putExtra(EXTRA_PROXY_SMS_IMAGE_URL, imageUrl)
+            }
+            if (canReply != null) {
+                putExtra(EXTRA_PROXY_SMS_CAN_REPLY, canReply)
+            }
+        }
+        sendBroadcast(intent)
+    }
+
+    private fun handleProxySmsCanReplyUpdate(data: Map<String, String>) {
+        val threadId = data["thread_id"]
+            ?: data["threadId"]
+            ?: com.tpeapp.handler.ChatRepository.DEFAULT_THREAD_ID
+        val canReply = parseFlexibleBoolean(
+            data["can_reply"] ?: data["canReply"] ?: data["enabled"]
+        ) ?: return
+
+        val intent = Intent(ACTION_PROXY_SMS_EVENT).apply {
+            `package` = packageName
+            putExtra(EXTRA_PROXY_SMS_EVENT_TYPE, EVENT_PROXY_SMS_CAN_REPLY_UPDATED)
+            putExtra(EXTRA_PROXY_SMS_THREAD_ID, threadId)
+            putExtra(EXTRA_PROXY_SMS_CAN_REPLY, canReply)
+        }
+        sendBroadcast(intent)
+    }
+
+    private fun parseFlexibleBoolean(value: String?): Boolean? {
+        return when (value?.trim()?.lowercase()) {
+            "true", "1", "yes", "on" -> true
+            "false", "0", "no", "off" -> false
+            else -> null
+        }
     }
 
 
