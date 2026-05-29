@@ -11,7 +11,9 @@ data class ChatMessage(
     val id: String,
     val role: String,
     val content: String,
-    val timestamp: Long
+    val timestamp: Long,
+    val threadId: String = ChatRepository.DEFAULT_THREAD_ID,
+    val imageUrl: String? = null,
 ) {
     val isUser: Boolean get() = role == "user"
 }

@@ -41,6 +41,7 @@ object ChatRepository {
     const val PREF_HANDLER_SYSTEM_PROMPT = "handler_system_prompt"
     const val PREF_HANDLER_MODEL         = "handler_model"
     private const val PREF_CHAT_HISTORY  = "handler_chat_history_json"
+    const val DEFAULT_THREAD_ID = "default_thread"
 
     // ------------------------------------------------------------------
     //  Defaults
@@ -75,10 +76,12 @@ object ChatRepository {
             List(arr.length()) { i ->
                 val o = arr.getJSONObject(i)
                 ChatMessage(
-                    id        = o.getString("id"),
-                    role      = o.getString("role"),
-                    content   = o.getString("content"),
-                    timestamp = o.getLong("timestamp")
+                    id        = o.optString("id"),
+                    role      = o.optString("role"),
+                    content   = o.optString("content"),
+                    timestamp = o.optLong("timestamp"),
+                    threadId  = o.optString("thread_id", DEFAULT_THREAD_ID),
+                    imageUrl  = o.optString("image_url").takeIf { it.isNotBlank() },
                 )
             }
         } catch (e: Exception) {
@@ -90,6 +93,7 @@ object ChatRepository {
     fun addMessage(ctx: Context, message: ChatMessage): List<ChatMessage> {
         val list = getHistory(ctx).toMutableList()
         list.add(message)
+        list.sortBy { it.timestamp }
         if (list.size > MAX_HISTORY) {
             list.subList(0, list.size - MAX_HISTORY).clear()
         }
@@ -192,6 +196,8 @@ object ChatRepository {
             arr.put(JSONObject().apply {
                 put("id", m.id); put("role", m.role)
                 put("content", m.content); put("timestamp", m.timestamp)
+                put("thread_id", m.threadId)
+                m.imageUrl?.takeIf { it.isNotBlank() }?.let { put("image_url", it) }
             })
         }
         PreferenceManager.getDefaultSharedPreferences(ctx).edit()
@@ -199,18 +205,41 @@ object ChatRepository {
     }
 
     /** Convenience factory for a new user message. */
-    fun newUserMessage(text: String) = ChatMessage(
+    fun newUserMessage(
+        text: String,
+        threadId: String = DEFAULT_THREAD_ID,
+    ) = ChatMessage(
         id        = UUID.randomUUID().toString(),
         role      = "user",
         content   = text,
-        timestamp = System.currentTimeMillis()
+        timestamp = System.currentTimeMillis(),
+        threadId  = threadId,
     )
 
     /** Convenience factory for a new assistant message. */
-    fun newAssistantMessage(text: String) = ChatMessage(
+    fun newAssistantMessage(
+        text: String,
+        threadId: String = DEFAULT_THREAD_ID,
+        imageUrl: String? = null,
+        timestamp: Long = System.currentTimeMillis(),
+    ) = ChatMessage(
         id        = UUID.randomUUID().toString(),
         role      = "assistant",
         content   = text,
-        timestamp = System.currentTimeMillis()
+        timestamp = timestamp,
+        threadId  = threadId,
+        imageUrl  = imageUrl?.takeIf { it.isNotBlank() },
+    )
+
+    fun newIncomingProxySmsMessage(
+        threadId: String,
+        text: String,
+        imageUrl: String?,
+        timestamp: Long = System.currentTimeMillis(),
+    ) = newAssistantMessage(
+        text = text,
+        threadId = threadId.ifBlank { DEFAULT_THREAD_ID },
+        imageUrl = imageUrl,
+        timestamp = timestamp,
     )
 }
