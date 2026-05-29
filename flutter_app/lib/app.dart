@@ -1,18 +1,22 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:provider/provider.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:uuid/uuid.dart';
 
+import 'channels/filter_service_channel.dart';
 import 'channels/remote_control_channel.dart';
-import 'screens/pairing_screen.dart';
+import 'services/api_service.dart';
 import 'screens/home_screen.dart';
 
 const _permissionsBootstrapCompleteKey = 'permissions_bootstrap_complete';
+const _autoEnrollmentStateKey = 'auto_enrollment_state';
 
-/// Root widget.  Decides whether to show [PairingScreen] or [HomeScreen]
-/// based on the `is_paired` flag stored in SharedPreferences.
+/// Root widget for the Flutter app shell.
 class TpeApp extends StatelessWidget {
   const TpeApp({super.key});
 
@@ -184,10 +188,15 @@ class _StartupGate extends StatefulWidget {
 }
 
 class _StartupGateState extends State<_StartupGate> {
+  static const String _defaultEndpoint =
+      String.fromEnvironment('TPE_DEFAULT_ENDPOINT');
+
   bool _bootstrapping = true;
   bool _acknowledged = false;
   bool _rootAvailable = false;
   bool _rootCheckFailed = false;
+  bool _autoEnrollInFlight = false;
+  Timer? _autoEnrollTimer;
   final Map<Permission, PermissionStatus> _statuses = {};
 
   static const _requiredPermissions = [
@@ -234,6 +243,95 @@ class _StartupGateState extends State<_StartupGate> {
       _bootstrapping = false;
       _acknowledged = seen && !missingPermissions;
     });
+
+    _ensureAutoEnrollmentLoop(prefs);
+  }
+
+  void _ensureAutoEnrollmentLoop(SharedPreferences prefs) {
+    _autoEnrollTimer?.cancel();
+    _attemptAutoEnrollment(prefs);
+    _autoEnrollTimer = Timer.periodic(const Duration(seconds: 12), (_) {
+      _attemptAutoEnrollment(prefs);
+    });
+  }
+
+  Future<void> _attemptAutoEnrollment(SharedPreferences prefs) async {
+    if (_autoEnrollInFlight) return;
+    if (prefs.getBool('is_paired') ?? false) {
+      await prefs.setString(_autoEnrollmentStateKey, 'connected');
+      _autoEnrollTimer?.cancel();
+      _autoEnrollTimer = null;
+      return;
+    }
+
+    var endpoint = (prefs.getString('partner_endpoint_url') ?? '')
+        .trim()
+        .replaceAll(RegExp(r'/$'), '');
+    if (endpoint.isEmpty) {
+      endpoint = _defaultEndpoint.trim().replaceAll(RegExp(r'/$'), '');
+      if (endpoint.isNotEmpty) {
+        await prefs.setString('partner_endpoint_url', endpoint);
+      }
+    }
+    if (!endpoint.startsWith('https://')) {
+      await prefs.setString(_autoEnrollmentStateKey, 'retrying');
+      return;
+    }
+
+    await prefs.setString(_autoEnrollmentStateKey, 'enrolling');
+    _autoEnrollInFlight = true;
+    try {
+      final deviceId = prefs.getString('device_id')?.trim().isNotEmpty == true
+          ? prefs.getString('device_id')!
+          : const Uuid().v4();
+      await prefs.setString('device_id', deviceId);
+      await prefs.setString('mqtt_client_id', deviceId);
+
+      final autoPairKey = (prefs.getString('auto_pair_key') ?? '').trim();
+      final api = ApiService(prefs);
+      final result = await api.pairAuto(
+        endpoint: endpoint,
+        mqttClientId: deviceId,
+        autoPairKey: autoPairKey.isEmpty ? null : autoPairKey,
+      );
+
+      final webhookSecret = (result['webhook_secret'] as String?)?.trim() ?? '';
+      final mqttBrokerUri =
+          (result['mqtt_broker_uri'] as String?)?.trim() ?? '';
+      final mqttUsername = (result['mqtt_username'] as String?)?.trim() ?? '';
+      final mqttPassword = (result['mqtt_password'] as String?) ?? '';
+      final mqttTopicPrefix =
+          (result['mqtt_topic_prefix'] as String?)?.trim() ?? '';
+
+      await prefs.setBool('is_paired', true);
+      await prefs.setString('partner_endpoint_url', endpoint);
+      await prefs.setString('webhook_url', '$endpoint/api/tpe/webhook');
+      if (mqttBrokerUri.isNotEmpty) {
+        await prefs.setString('mqtt_broker_uri', mqttBrokerUri);
+      }
+      if (mqttUsername.isNotEmpty) {
+        await prefs.setString('mqtt_username', mqttUsername);
+      }
+      if (mqttPassword.isNotEmpty) {
+        await prefs.setString('mqtt_password', mqttPassword);
+      }
+      if (mqttTopicPrefix.isNotEmpty) {
+        await prefs.setString('mqtt_topic_prefix', mqttTopicPrefix);
+      }
+      if (webhookSecret.isNotEmpty) {
+        await prefs.setString('webhook_bearer_token', webhookSecret);
+      }
+
+      await FilterServiceChannel.start();
+      await prefs.setString(_autoEnrollmentStateKey, 'connected');
+      _autoEnrollTimer?.cancel();
+      _autoEnrollTimer = null;
+    } catch (_) {
+      await prefs.setString(_autoEnrollmentStateKey, 'retrying');
+      // Keep retry loop running until backend/endpoint becomes available.
+    } finally {
+      _autoEnrollInFlight = false;
+    }
   }
 
   Future<Map<Permission, PermissionStatus>>
@@ -255,6 +353,12 @@ class _StartupGateState extends State<_StartupGate> {
         .setBool(_permissionsBootstrapCompleteKey, true);
     if (!mounted) return;
     setState(() => _acknowledged = true);
+  }
+
+  @override
+  void dispose() {
+    _autoEnrollTimer?.cancel();
+    super.dispose();
   }
 
   Future<void> _openSystemSettings() async {
@@ -384,8 +488,6 @@ class _RootRouter extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final prefs = context.read<SharedPreferences>();
-    final isPaired = prefs.getBool('is_paired') ?? false;
-    return isPaired ? const HomeScreen() : const PairingScreen();
+    return const HomeScreen();
   }
 }

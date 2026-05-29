@@ -251,7 +251,9 @@ class _HomeScreenState extends State<HomeScreen> {
   final _textController = TextEditingController();
   final _scrollController = ScrollController();
   bool _sending = false;
+  String _enrollmentState = 'enrolling';
   StreamSubscription<Map<String, String>>? _mqttSub;
+  Timer? _enrollmentStatusTimer;
   RemoteCommandService? _remoteCommands;
 
   @override
@@ -268,14 +270,51 @@ class _HomeScreenState extends State<HomeScreen> {
   void initState() {
     super.initState();
     _mqttSub = MqttChannel.events.listen(_onMqttEvent);
+    _refreshEnrollmentState();
+    _enrollmentStatusTimer = Timer.periodic(const Duration(seconds: 5), (_) {
+      _refreshEnrollmentState();
+    });
   }
 
   @override
   void dispose() {
     _mqttSub?.cancel();
+    _enrollmentStatusTimer?.cancel();
     _textController.dispose();
     _scrollController.dispose();
     super.dispose();
+  }
+
+  Future<void> _refreshEnrollmentState() async {
+    final prefs = context.read<SharedPreferences>();
+    final paired = prefs.getBool('is_paired') ?? false;
+    final state = (prefs.getString('auto_enrollment_state') ?? '').trim();
+    final normalized =
+        paired ? 'connected' : (state.isEmpty ? 'enrolling' : state);
+    if (!mounted || normalized == _enrollmentState) return;
+    setState(() => _enrollmentState = normalized);
+  }
+
+  String _enrollmentLabel() {
+    switch (_enrollmentState) {
+      case 'connected':
+        return 'Enrollment: Connected';
+      case 'retrying':
+        return 'Enrollment: Retrying';
+      default:
+        return 'Enrollment: Connecting';
+    }
+  }
+
+  Color _enrollmentColor(ColorScheme cs) {
+    switch (_enrollmentState) {
+      case 'connected':
+        return Colors.greenAccent.shade400;
+      case 'retrying':
+        return Colors.orangeAccent.shade200;
+      default:
+        return cs.primary;
+    }
   }
 
   void _onMqttEvent(Map<String, String> data) {
@@ -406,6 +445,17 @@ class _HomeScreenState extends State<HomeScreen> {
       appBar: AppBar(
         title: const Text('Handler'),
         actions: [
+          Container(
+            margin: const EdgeInsets.only(right: 6),
+            child: Chip(
+              avatar: Icon(
+                Icons.circle,
+                size: 10,
+                color: _enrollmentColor(cs),
+              ),
+              label: Text(_enrollmentLabel()),
+            ),
+          ),
           PopupMenuButton<String>(
             onSelected: (item) {
               switch (item) {

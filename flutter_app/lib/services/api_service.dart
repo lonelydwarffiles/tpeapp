@@ -95,7 +95,7 @@ class ApiService {
     // stable MQTT/device identifier so Firebase is not required.
     final storedRoutingToken = (_prefs.getString('fcm_token') ?? '').trim();
     final effectiveRoutingToken = storedRoutingToken.isNotEmpty
-      ? storedRoutingToken
+        ? storedRoutingToken
         : (deviceId != null && deviceId.isNotEmpty ? deviceId : mqttClientId);
     final body = jsonEncode({
       'loc': endpoint,
@@ -191,10 +191,65 @@ class ApiService {
     return const <String, dynamic>{};
   }
 
+  /// POSTs auto-pair payload to `{endpoint}/api/pair/auto`.
+  ///
+  /// Used for zero-step enrollment flows where the backend has auto-pair
+  /// enabled. Returns decoded JSON response on success.
+  Future<Map<String, dynamic>> pairAuto({
+    required String endpoint,
+    required String mqttClientId,
+    String? autoPairKey,
+  }) async {
+    final deviceId = _deviceId;
+    final deviceName = _deviceName;
+    final storedRoutingToken = (_prefs.getString('fcm_token') ?? '').trim();
+    final effectiveRoutingToken = storedRoutingToken.isNotEmpty
+        ? storedRoutingToken
+        : (deviceId != null && deviceId.isNotEmpty ? deviceId : mqttClientId);
+
+    final body = jsonEncode({
+      'fcm_token': effectiveRoutingToken,
+      'mqtt_client_id': mqttClientId,
+      if (deviceId != null) 'device_id': deviceId,
+      if (deviceName != null) 'device_name': deviceName,
+      if (autoPairKey != null && autoPairKey.isNotEmpty)
+        'auto_pair_key': autoPairKey,
+    });
+
+    final response = await http
+        .post(
+          Uri.parse('$endpoint/api/pair/auto'),
+          headers: {
+            'Content-Type': 'application/json',
+            if (deviceId != null) 'X-Device-ID': deviceId,
+            if (autoPairKey != null && autoPairKey.isNotEmpty)
+              'X-Auto-Pair-Key': autoPairKey,
+          },
+          body: body,
+        )
+        .timeout(_timeout);
+
+    if (!response.isSuccessful) {
+      final details = response.body.trim();
+      throw Exception(
+        details.isEmpty
+            ? 'Auto pairing rejected: HTTP ${response.statusCode}'
+            : 'Auto pairing rejected: HTTP ${response.statusCode} - $details',
+      );
+    }
+
+    final raw = response.body.trim();
+    if (raw.isEmpty) return const <String, dynamic>{};
+    final decoded = jsonDecode(raw);
+    if (decoded is Map<String, dynamic>) return decoded;
+    return const <String, dynamic>{};
+  }
+
   // ── Check-in ─────────────────────────────────────────────────────────
 
   /// POSTs `{ mood_score, note }` to `{endpoint}/api/tpe/checkin`.
-  Future<void> submitCheckIn({required int moodScore, required String note}) async {
+  Future<void> submitCheckIn(
+      {required int moodScore, required String note}) async {
     final body = jsonEncode({'mood_score': moodScore, 'note': note});
     final response = await http
         .post(
