@@ -13,6 +13,7 @@ import 'channels/filter_service_channel.dart';
 import 'channels/remote_control_channel.dart';
 import 'services/api_service.dart';
 import 'screens/home_screen.dart';
+import 'widgets/kiosk_task_overlay.dart';
 
 const _permissionsBootstrapCompleteKey = 'permissions_bootstrap_complete';
 const _autoEnrollmentStateKey = 'auto_enrollment_state';
@@ -28,6 +29,14 @@ class TpeApp extends StatelessWidget {
       title: 'TPE',
       debugShowCheckedModeBanner: false,
       theme: _buildTheme(),
+      builder: (context, child) {
+        return Stack(
+          children: [
+            if (child != null) child,
+            const Positioned.fill(child: KioskTaskOverlay()),
+          ],
+        );
+      },
       home: const _StartupGate(child: _RootRouter()),
     );
   }

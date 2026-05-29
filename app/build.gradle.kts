@@ -91,6 +91,7 @@ dependencies {
     implementation(libs.paho.android.service)
     implementation(libs.paho.client)
     implementation(libs.webrtc)
+    implementation(libs.play.services.location)
 
     // Blur utility
     implementation(libs.renderscript.toolkit)

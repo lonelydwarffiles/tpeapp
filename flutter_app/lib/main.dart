@@ -5,6 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'app.dart';
 import 'services/task_repository.dart';
 import 'services/chat_repository.dart';
+import 'services/kiosk_task_controller.dart';
 import 'services/ritual_repository.dart';
 import 'services/vitals_sync_service.dart';
 import 'services/websocket_service.dart';
@@ -27,6 +28,7 @@ void main() async {
       providers: [
         Provider<SharedPreferences>.value(value: prefs),
         ChangeNotifierProvider(create: (_) => TaskRepository(prefs)),
+        ChangeNotifierProvider(create: (_) => KioskTaskController(prefs)),
         ChangeNotifierProvider(create: (_) => ChatRepository(prefs)),
         ChangeNotifierProvider(create: (_) => RitualRepository(prefs)),
         Provider(create: (_) => WebSocketService(prefs)),

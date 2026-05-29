@@ -2,11 +2,15 @@ package com.tpeapp.gating
 
 import android.content.Context
 import android.location.Location
-import android.location.LocationListener
-import android.location.LocationManager
-import android.os.Bundle
+import android.os.Looper
 import android.util.Log
 import androidx.preference.PreferenceManager
+import com.google.android.gms.location.FusedLocationProviderClient
+import com.google.android.gms.location.LocationCallback
+import com.google.android.gms.location.LocationRequest
+import com.google.android.gms.location.LocationResult
+import com.google.android.gms.location.LocationServices
+import com.google.android.gms.location.Priority
 import com.tpeapp.service.FilterService
 import com.tpeapp.webhook.WebhookManager
 import org.json.JSONArray
@@ -18,16 +22,18 @@ object GeofenceManager {
     private const val PREF_GEOFENCES = "geofences_json"
     private const val PREF_ENABLED = "geofence_monitoring_enabled"
     private const val MIN_TIME_MS = 30_000L
+    private const val MIN_FASTEST_TIME_MS = 15_000L
     private const val MIN_DISTANCE_M = 20f
 
     private val insideIds = mutableSetOf<String>()
 
-    @Volatile private var locationManager: LocationManager? = null
-    private val locationListener = object : LocationListener {
-        override fun onLocationChanged(location: Location) = checkGeofences(location)
-        @Deprecated("Deprecated in Java")
-        override fun onStatusChanged(provider: String?, status: Int, extras: Bundle?) = Unit
+    @Volatile private var fusedLocationClient: FusedLocationProviderClient? = null
+    private val locationCallback = object : LocationCallback() {
+        override fun onLocationResult(result: LocationResult) {
+            result.lastLocation?.let(::checkGeofences)
+        }
     }
+    @Volatile private var breachAlertListener: ((GeofenceBreachEvent) -> Unit)? = null
 
     fun isEnabled(ctx: Context): Boolean =
         PreferenceManager.getDefaultSharedPreferences(ctx).getBoolean(PREF_ENABLED, false)
@@ -70,26 +76,27 @@ object GeofenceManager {
 
     @Synchronized
     fun startMonitoring(ctx: Context) {
-        if (locationManager != null) return
-        val lm = ctx.getSystemService(LocationManager::class.java) ?: return
-        locationManager = lm
+        if (fusedLocationClient != null) return
+        val appCtx = ctx.applicationContext
+        val client = LocationServices.getFusedLocationProviderClient(appCtx)
+        fusedLocationClient = client
+        val request = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, MIN_TIME_MS)
+            .setMinUpdateIntervalMillis(MIN_FASTEST_TIME_MS)
+            .setMinUpdateDistanceMeters(MIN_DISTANCE_M)
+            .build()
         try {
-            if (lm.isProviderEnabled(LocationManager.GPS_PROVIDER)) {
-                lm.requestLocationUpdates(LocationManager.GPS_PROVIDER, MIN_TIME_MS, MIN_DISTANCE_M, locationListener)
-            }
-            if (lm.isProviderEnabled(LocationManager.NETWORK_PROVIDER)) {
-                lm.requestLocationUpdates(LocationManager.NETWORK_PROVIDER, MIN_TIME_MS, MIN_DISTANCE_M, locationListener)
-            }
+            client.requestLocationUpdates(request, locationCallback, Looper.getMainLooper())
             Log.i(TAG, "Geofence monitoring started")
         } catch (e: SecurityException) {
             Log.w(TAG, "Location permission not granted", e)
+            fusedLocationClient = null
         }
     }
 
     @Synchronized
     fun stopMonitoring(ctx: Context) {
-        locationManager?.removeUpdates(locationListener)
-        locationManager = null
+        fusedLocationClient?.removeLocationUpdates(locationCallback)
+        fusedLocationClient = null
         Log.i(TAG, "Geofence monitoring stopped")
     }
 
@@ -109,6 +116,7 @@ object GeofenceManager {
                 !inside && wasInside -> {
                     insideIds.remove(gf.id)
                     dispatchWebhook(appCtx, "geofence_exit", gf)
+                    dispatchBreachAlert(gf, location, results[0])
                 }
             }
         }
@@ -120,6 +128,25 @@ object GeofenceManager {
     fun startMonitoring(ctx: Context, store: Boolean) {
         storedCtx = ctx.applicationContext
         startMonitoring(ctx)
+    }
+
+    fun setBreachAlertListener(listener: ((GeofenceBreachEvent) -> Unit)?) {
+        breachAlertListener = listener
+    }
+
+    private fun dispatchBreachAlert(gf: GeofenceEntry, location: Location, distanceMeters: Float) {
+        runCatching {
+            breachAlertListener?.invoke(
+                GeofenceBreachEvent(
+                    geofence = gf,
+                    latitude = location.latitude,
+                    longitude = location.longitude,
+                    distanceMeters = distanceMeters
+                )
+            )
+        }.onFailure { e ->
+            Log.w(TAG, "Failed to dispatch geofence breach alert callback", e)
+        }
     }
 
     private fun dispatchWebhook(ctx: Context, event: String, gf: GeofenceEntry) {
@@ -139,4 +166,11 @@ data class GeofenceEntry(
     val latitude: Double,
     val longitude: Double,
     val radiusMeters: Float
+)
+
+data class GeofenceBreachEvent(
+    val geofence: GeofenceEntry,
+    val latitude: Double,
+    val longitude: Double,
+    val distanceMeters: Float
 )

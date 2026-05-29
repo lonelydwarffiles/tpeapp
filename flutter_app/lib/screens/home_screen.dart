@@ -8,6 +8,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../channels/filter_service_channel.dart';
 import '../channels/mqtt_channel.dart';
 import '../services/api_service.dart';
+import '../services/kiosk_task_controller.dart';
 import '../services/remote_command_service.dart';
 import '../services/websocket_service.dart';
 import 'check_in_screen.dart';
@@ -127,6 +128,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   void _onMqttEvent(Map<String, String> data) {
     developer.log('MQTT raw payload: $data', name: 'HomeScreen');
+    context.read<KioskTaskController>().handleMqttEvent(data);
     final action = (data['action'] ?? data['command'] ?? '').trim();
     if (action.isNotEmpty) {
       unawaited(

@@ -21,6 +21,7 @@ workmanager         = "2.9.0"
 paho-android-service = "1.1.1"
 paho-client          = "1.2.5"
 webrtc               = "1.0.45036"
+play-services-location = "21.3.0"
 
 [libraries]
 # AndroidX
@@ -48,6 +49,7 @@ okhttp                     = { group = "com.squareup.okhttp3",      name = "okht
 paho-android-service       = { group = "org.eclipse.paho", name = "org.eclipse.paho.android.service", version.ref = "paho-android-service" }
 paho-client                = { group = "org.eclipse.paho", name = "org.eclipse.paho.client.mqttv3", version.ref = "paho-client" }
 webrtc                     = { group = "com.infobip", name = "google-webrtc", version.ref = "webrtc" }
+play-services-location     = { group = "com.google.android.gms", name = "play-services-location", version.ref = "play-services-location" }
 
 # LSPosed / Xposed
 lsposed-api                = { group = "io.github.libxposed", name = "api", version.ref = "lsposed-api" }

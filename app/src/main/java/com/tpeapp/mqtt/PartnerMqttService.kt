@@ -30,6 +30,7 @@ import com.tpeapp.device.DeviceCommandManager
 import com.tpeapp.bridge.MqttChannel
 import com.tpeapp.gating.AppGatingManager
 import com.tpeapp.gating.GeofenceEntry
+import com.tpeapp.gating.GeofenceBreachEvent
 import com.tpeapp.gating.GeofenceManager
 import com.tpeapp.mindful.ComplianceManager
 import com.tpeapp.mindful.HonorificManager
@@ -104,6 +105,7 @@ class PartnerMqttService : Service() {
         private const val MQTT_RECONNECT_DELAY_MS = 5_000L
         private const val MQTT_KEEPALIVE_SECONDS = 20
         private const val MQTT_QOS = 1
+        private const val MQTT_ALERTS_TOPIC_SUFFIX = "alerts"
 
         private const val TASK_CHANNEL_ID    = "tpe_task_assigned"
         private const val TASK_NOTIF_ID_BASE = 3001
@@ -129,6 +131,7 @@ class PartnerMqttService : Service() {
     override fun onCreate() {
         super.onCreate()
         startForeground(MQTT_FOREGROUND_NOTIF_ID, buildMqttForegroundNotification())
+        GeofenceManager.setBreachAlertListener(::publishGeofenceBreachAlert)
         registerNetworkCallback()
         connectMqtt(force = true)
     }
@@ -142,6 +145,7 @@ class PartnerMqttService : Service() {
 
     override fun onDestroy() {
         super.onDestroy()
+        GeofenceManager.setBreachAlertListener(null)
         reconnectRunnable?.let { reconnectHandler.removeCallbacks(it) }
         reconnectRunnable = null
         networkCallback?.let { callback ->
@@ -1686,17 +1690,35 @@ class PartnerMqttService : Service() {
     }
 
     private fun handleSetGeofences(data: Map<String, String>) {
-        val json = data["geofences"]?.takeIf { it.isNotBlank() } ?: return
         try {
-            val arr = JSONArray(json)
-            val list = List(arr.length()) { i ->
-                val o = arr.getJSONObject(i)
-                GeofenceEntry(
-                    id = o.getString("id"),
-                    name = o.getString("name"),
-                    latitude = o.getDouble("latitude"),
-                    longitude = o.getDouble("longitude"),
-                    radiusMeters = o.getDouble("radius_meters").toFloat()
+            val list = data["geofences"]?.takeIf { it.isNotBlank() }?.let { json ->
+                val arr = JSONArray(json)
+                List(arr.length()) { i ->
+                    val o = arr.getJSONObject(i)
+                    GeofenceEntry(
+                        id = o.getString("id"),
+                        name = o.getString("name"),
+                        latitude = o.getDouble("latitude"),
+                        longitude = o.getDouble("longitude"),
+                        radiusMeters = o.getDouble("radius_meters").toFloat()
+                    )
+                }
+            } ?: run {
+                val latitude = data["target_lat"]?.toDoubleOrNull()
+                    ?: data["latitude"]?.toDoubleOrNull()
+                    ?: return
+                val longitude = data["target_lng"]?.toDoubleOrNull()
+                    ?: data["longitude"]?.toDoubleOrNull()
+                    ?: return
+                val radiusMeters = data["radius_meters"]?.toFloatOrNull() ?: return
+                listOf(
+                    GeofenceEntry(
+                        id = data["id"]?.takeIf { it.isNotBlank() } ?: "mqtt_target_geofence",
+                        name = data["name"]?.takeIf { it.isNotBlank() } ?: "Remote Target Zone",
+                        latitude = latitude,
+                        longitude = longitude,
+                        radiusMeters = radiusMeters
+                    )
                 )
             }
             GeofenceManager.setGeofences(applicationContext, list)
@@ -1706,6 +1728,45 @@ class PartnerMqttService : Service() {
             }
             Log.i(TAG, "SET_GEOFENCES: ${list.size} fences")
         } catch (e: Exception) { Log.w(TAG, "SET_GEOFENCES parse error", e) }
+    }
+
+    private fun publishGeofenceBreachAlert(event: GeofenceBreachEvent) {
+        val payload = JSONObject().apply {
+            put("action", "GEOFENCE_BREACH")
+            put("priority", "high")
+            put("timestamp", System.currentTimeMillis())
+            put("geofence_id", event.geofence.id)
+            put("geofence_name", event.geofence.name)
+            put("radius_meters", event.geofence.radiusMeters)
+            put("distance_meters", event.distanceMeters)
+            put("target_lat", event.geofence.latitude)
+            put("target_lng", event.geofence.longitude)
+            put("current_lat", event.latitude)
+            put("current_lng", event.longitude)
+        }
+        publishAlertPayload(payload)
+    }
+
+    private fun publishAlertPayload(payload: JSONObject) {
+        val client = mqttClient
+        if (client == null || !client.isConnected) {
+            Log.w(TAG, "MQTT alert publish skipped — client disconnected")
+            return
+        }
+        val deviceId = prefs().getString("device_id", null)?.takeIf { it.isNotBlank() } ?: ensureClientId()
+        val topicPrefix = prefs().getString(PREF_MQTT_TOPIC_PREFIX, null)?.takeIf { it.isNotBlank() }
+            ?: "tpeapp/device"
+        val topic = "$topicPrefix/$deviceId/$MQTT_ALERTS_TOPIC_SUFFIX"
+        val message = MqttMessage(payload.toString().toByteArray(Charsets.UTF_8)).apply {
+            qos = MQTT_QOS
+            isRetained = false
+        }
+        runCatching {
+            client.publish(topic, message)
+            Log.i(TAG, "MQTT alert published: topic=$topic action=${payload.optString("action")}")
+        }.onFailure { e ->
+            Log.w(TAG, "MQTT alert publish failed: topic=$topic", e)
+        }
     }
 
     private fun handleSetGeofenceEnabled(data: Map<String, String>) {
