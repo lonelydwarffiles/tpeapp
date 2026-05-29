@@ -65,7 +65,33 @@ mqttClient.on('error', (err) => {
  * @typedef {{ mqttClientId: string, topicPrefix: string, pairedAt: string }} DeviceRecord
  * @type {DeviceRecord[]}
  */
-const pairedDevices = [];
+const PAIRED_DEVICES_PATH = path.join(__dirname, 'data', 'paired_devices.json');
+fs.mkdirSync(path.dirname(PAIRED_DEVICES_PATH), { recursive: true });
+
+function loadPairedDevices() {
+  try {
+    if (!fs.existsSync(PAIRED_DEVICES_PATH)) return [];
+    const raw = fs.readFileSync(PAIRED_DEVICES_PATH, 'utf8');
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((d) =>
+      d && typeof d.mqttClientId === 'string' && d.mqttClientId.trim() !== ''
+    );
+  } catch (err) {
+    console.error('[pair] Failed to load paired devices store:', err?.message ?? err);
+    return [];
+  }
+}
+
+function savePairedDevices() {
+  try {
+    fs.writeFileSync(PAIRED_DEVICES_PATH, JSON.stringify(pairedDevices, null, 2), 'utf8');
+  } catch (err) {
+    console.error('[pair] Failed to persist paired devices store:', err?.message ?? err);
+  }
+}
+
+const pairedDevices = loadPairedDevices();
 
 /**
  * Ensures command payload values are strings to match the Android command map.
@@ -135,6 +161,28 @@ if (!PAIRING_TOKEN) {
   );
 }
 const VALID_PAIRING_TOKENS = new Set([PAIRING_TOKEN].filter(Boolean));
+const CONTROL_API_TOKEN = process.env.CONTROL_API_TOKEN;
+if (!CONTROL_API_TOKEN) {
+  console.warn(
+    '[warn] CONTROL_API_TOKEN env var is not set. Command routes will reject requests until it is configured.'
+  );
+}
+
+function requireControlAuth(req, res, next) {
+  if (!CONTROL_API_TOKEN) {
+    return res.status(503).json({ error: 'Server control auth is not configured' });
+  }
+
+  const authHeader = typeof req.headers.authorization === 'string'
+    ? req.headers.authorization
+    : '';
+  const [scheme, token] = authHeader.split(' ');
+  if (scheme !== 'Bearer' || !token || token !== CONTROL_API_TOKEN) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+
+  return next();
+}
 
 // -------------------------------------------------------------------
 // Multer — multipart storage for adherence audit video uploads
@@ -176,6 +224,8 @@ const auditUpload = multer({
 // -------------------------------------------------------------------
 const app = express();
 app.use(express.json());
+app.use(express.urlencoded({ extended: false }));
+app.set('trust proxy', true);
 
 // -------------------------------------------------------------------
 // POST /api/pair
@@ -209,11 +259,13 @@ app.post('/api/pair', (req, res) => {
 
   if (existing === -1) {
     pairedDevices.push({ mqttClientId: clientId, topicPrefix, pairedAt: new Date().toISOString() });
+    savePairedDevices();
     console.log(`[pair] New device registered. Total paired: ${pairedDevices.length}`);
   } else {
     // Device refresh — update routing metadata and timestamp.
     pairedDevices[existing].topicPrefix = topicPrefix;
     pairedDevices[existing].pairedAt = new Date().toISOString();
+    savePairedDevices();
     console.log('[pair] Known device re-paired (MQTT identity refresh).');
   }
 
@@ -304,7 +356,7 @@ app.post(
 // Response 200: { "sent": <n>, "failed": <n> }
 // Response 404: no paired devices
 // -------------------------------------------------------------------
-app.post('/api/settings/update', async (req, res) => {
+app.post('/api/settings/update', requireControlAuth, async (req, res) => {
   if (pairedDevices.length === 0) {
     return res.status(404).json({ error: 'No paired devices registered' });
   }
@@ -346,7 +398,7 @@ app.post('/api/settings/update', async (req, res) => {
 // -------------------------------------------------------------------
 const URL_REGEX = /^https?:\/\/.+/;
 
-app.post('/api/command/open-url', async (req, res) => {
+app.post('/api/command/open-url', requireControlAuth, async (req, res) => {
   const { url } = req.body ?? {};
 
   if (!url || typeof url !== 'string' || !URL_REGEX.test(url)) {
@@ -382,7 +434,7 @@ app.post('/api/command/open-url', async (req, res) => {
 // Response 400: missing/invalid url(s) or invalid target
 // Response 404: no paired devices
 // -------------------------------------------------------------------
-app.post('/api/command/set-wallpaper', async (req, res) => {
+app.post('/api/command/set-wallpaper', requireControlAuth, async (req, res) => {
   const { url, target, home_url, lock_url } = req.body ?? {};
 
   // effectiveHomeUrl falls back to the legacy `url` so a single-URL request sets
@@ -438,7 +490,7 @@ app.post('/api/command/set-wallpaper', async (req, res) => {
 // Response 400: missing or invalid url
 // Response 404: no paired devices
 // -------------------------------------------------------------------
-app.post('/api/command/play-audio', async (req, res) => {
+app.post('/api/command/play-audio', requireControlAuth, async (req, res) => {
   const { url, loop = false } = req.body ?? {};
 
   if (!url || typeof url !== 'string' || !URL_REGEX.test(url)) {
@@ -463,7 +515,7 @@ app.post('/api/command/play-audio', async (req, res) => {
 // Response 200: { "sent": <n>, "failed": <n> }
 // Response 404: no paired devices
 // -------------------------------------------------------------------
-app.post('/api/command/stop-audio', async (req, res) => {
+app.post('/api/command/stop-audio', requireControlAuth, async (req, res) => {
   if (pairedDevices.length === 0) {
     return res.status(404).json({ error: 'No paired devices registered' });
   }

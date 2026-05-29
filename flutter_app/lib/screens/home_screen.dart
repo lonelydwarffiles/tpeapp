@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../channels/mqtt_channel.dart';
+import '../channels/partner_pin_channel.dart';
 import '../services/chat_repository.dart';
 import '../services/remote_command_service.dart';
 import '../models/chat_message.dart';
@@ -338,9 +339,61 @@ class _HomeScreenState extends State<HomeScreen> {
 
   void _navigateWithPin(Widget screen) => _requirePin(() => _navigate(screen));
 
-  void _requirePin(VoidCallback onAuthorized) {
-    // TODO: Implement actual PIN check. For now, just execute the callback.
+  Future<void> _requirePin(VoidCallback onAuthorized) async {
+    final pinSet = await PartnerPinChannel.isPinSet();
+    if (!mounted) return;
+
+    if (!pinSet) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Set a partner PIN first in Settings.')),
+      );
+      return;
+    }
+
+    final pin = await _showPinDialog('Partner PIN required');
+    if (!mounted || pin == null) return;
+
+    final ok = await PartnerPinChannel.verifyPin(pin);
+    if (!mounted) return;
+    if (!ok) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Incorrect PIN.')),
+      );
+      return;
+    }
+
     onAuthorized();
+  }
+
+  Future<String?> _showPinDialog(String title) async {
+    final pinCtrl = TextEditingController();
+    try {
+      return await showDialog<String>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: Text(title),
+          content: TextField(
+            controller: pinCtrl,
+            autofocus: true,
+            obscureText: true,
+            keyboardType: TextInputType.number,
+            decoration: const InputDecoration(hintText: 'Enter partner PIN'),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(ctx, pinCtrl.text.trim()),
+              child: const Text('Verify'),
+            ),
+          ],
+        ),
+      );
+    } finally {
+      pinCtrl.dispose();
+    }
   }
 
   @override
