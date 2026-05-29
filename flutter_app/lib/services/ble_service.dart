@@ -83,7 +83,7 @@ class BleService {
   Future<void> lovenseBattery() => _lovenseSend('Battery;');
 
   Future<void> _connectLovense(BluetoothDevice device) async {
-    await device.connect(autoConnect: false);
+    await device.connect(license: License.nonprofit, autoConnect: false);
     _lovenseDevice = device;
     final services = await device.discoverServices();
     for (final svc in services) {
@@ -138,7 +138,7 @@ class BleService {
   Future<void> pavlokStopAll() => _pavlokSend(_cmdZap, 0, 0);
 
   Future<void> _connectPavlok(BluetoothDevice device) async {
-    await device.connect(autoConnect: false);
+    await device.connect(license: License.nonprofit, autoConnect: false);
     _pavlokDevice = device;
     final services = await device.discoverServices();
     for (final svc in services) {

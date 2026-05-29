@@ -143,7 +143,8 @@ class _PasswordVaultScreenState extends State<PasswordVaultScreen> {
       rethrow;
     }
 
-    if (password == null) {
+    final revealedPassword = password;
+    if (revealedPassword == null) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Password is locked or unavailable.')),
@@ -158,7 +159,7 @@ class _PasswordVaultScreenState extends State<PasswordVaultScreen> {
 
     final timeout = widget.revealTimeoutSeconds;
     setState(() {
-      _revealed[entry.id]   = password;
+      _revealed[entry.id]   = revealedPassword;
       _countdowns[entry.id] = timeout;
     });
 

@@ -29,7 +29,7 @@ class TextReplacementChannel {
   /// when the stored dictionary is currently empty.
   static const Map<String, String> defaultDict = {
     r'(?i)\bI am\b': 'this mutt is',
-    r'(?i)\bI\'m\b': 'this mutt is',
+    r"(?i)\bI'm\b": 'this mutt is',
     r'(?i)\bI\b': 'this mutt',
     r'(?i)\bme\b': 'it',
     r'(?i)\bmyself\b': 'itself',
@@ -52,7 +52,7 @@ class TextReplacementChannel {
 
   static const Map<String, String> _preferredSelfReferenceRules = {
     r'(?i)\bI am\b': 'this mutt is',
-    r'(?i)\bI\'m\b': 'this mutt is',
+    r"(?i)\bI'm\b": 'this mutt is',
     r'(?i)\bI\b': 'this mutt',
     r'(?i)\bme\b': 'it',
     r'(?i)\bmyself\b': 'itself',

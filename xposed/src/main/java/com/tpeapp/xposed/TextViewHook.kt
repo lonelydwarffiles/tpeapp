@@ -1,6 +1,5 @@
 package com.tpeapp.xposed
 
-import android.text.Spannable
 import android.text.SpannableStringBuilder
 import android.text.Spanned
 import android.util.Log
@@ -38,7 +37,7 @@ object TextViewHook {
         pattern = """(?s)```.+?```|`[^`\n]+`"""
     )
     private val MARKDOWN_LINK_REGEX = Regex(
-        pattern = """\[[^\]]+\]\([^)]+\)"""
+        pattern = """\[[^]]+\]\([^)]+\)"""
     )
     private val FILE_PATH_REGEX = Regex(
         pattern = """(?i)\b(?:[a-z]:\\|/)?(?:[\w.-]+[\\/])+[\w.-]+\b"""
@@ -118,7 +117,7 @@ object TextViewHook {
 
         val service = MainHook.filterService ?: return null
 
-        val json = runCatching { service.getTextReplacementDict() }.getOrNull() ?: return null
+        val json = runCatching<String> { service.getTextReplacementDict() }.getOrNull() ?: return null
         lastFetchMs = now
 
         if (json == cachedDictJson) return cachedDict
@@ -130,7 +129,7 @@ object TextViewHook {
 
     private fun parseDict(json: String): Map<Regex, String> {
         if (json.isBlank()) return emptyMap()
-        return runCatching {
+        return runCatching<Map<Regex, String>> {
             val obj = JSONObject(json)
             val map = LinkedHashMap<Regex, String>(obj.length())
             val keys = obj.keys()
@@ -155,7 +154,7 @@ object TextViewHook {
         if (now - lastPolicyFetchMs < DICT_TTL_MS) return cachedPolicy
 
         val service = MainHook.filterService ?: return cachedPolicy
-        val json = runCatching { service.getTextReplacementPolicy() }.getOrNull() ?: return cachedPolicy
+        val json = runCatching<String> { service.getTextReplacementPolicy() }.getOrNull() ?: return cachedPolicy
         lastPolicyFetchMs = now
 
         if (json == cachedPolicyJson) return cachedPolicy
@@ -166,7 +165,7 @@ object TextViewHook {
 
     private fun parsePolicy(json: String): ReplacementPolicy {
         if (json.isBlank()) return ReplacementPolicy()
-        return runCatching {
+        return runCatching<ReplacementPolicy> {
             val obj = JSONObject(json)
             val defaultMode = parsePolicyMode(obj.optString("default_mode", "auto"))
 
@@ -341,7 +340,7 @@ object TextViewHook {
         if (now - lastModeFetchMs < DICT_TTL_MS) return cachedToneMode
 
         val service = MainHook.filterService ?: return cachedToneMode
-        val raw = runCatching { service.getToneMode() }.getOrNull() ?: return cachedToneMode
+        val raw = runCatching<String> { service.getToneMode() }.getOrNull() ?: return cachedToneMode
         lastModeFetchMs = now
         cachedToneMode = when (raw.trim().lowercase()) {
             "strict" -> MODE_STRICT

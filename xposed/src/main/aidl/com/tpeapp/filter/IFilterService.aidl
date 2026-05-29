@@ -49,6 +49,26 @@ interface IFilterService {
     String getTextReplacementDict();
 
     /**
+     * Returns text-replacement policy overrides as a JSON object.
+     *
+     * Example:
+     * {
+     *   "default_mode": "auto",
+     *   "packages": {
+     *     "com.example.chat": "full",
+     *     "com.example.bank": "identity_only"
+     *   },
+     *   "package_prefixes": {
+     *     "com.example.finance.": "off"
+     *   }
+     * }
+     *
+     * Supported modes: "auto", "full", "identity_only", "off".
+     * Returns an empty string when no policy has been configured.
+     */
+    String getTextReplacementPolicy();
+
+    /**
      * Returns the restricted vocabulary as a JSON array of lower-case strings.
      *
      * These are the words managed by the Accountability Partner via FCM that
@@ -68,6 +88,14 @@ interface IFilterService {
 
     /**
      * Returns media-filter runtime config as JSON.
+     *
+     * Example:
+     * {
+     *   "mode": "speed",
+     *   "censor_style": "pixelate",
+     *   "strict_packages": ["com.example.app"],
+     *   "max_in_flight": 4
+     * }
      */
     String getMediaFilterConfig();
 }

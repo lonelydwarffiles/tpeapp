@@ -482,7 +482,7 @@ class RemoteCommandService {
       'allowRemoteInput',
     ], defaultValue: false);
 
-    if (allowRemoteInput && !_prefs.getBool(_kRemoteControlConsentGranted, false)) {
+    if (allowRemoteInput && !(_prefs.getBool(_kRemoteControlConsentGranted) ?? false)) {
       throw StateError(
         'Remote-control consent has not been granted yet. Open Screen Share and approve once locally.',
       );
