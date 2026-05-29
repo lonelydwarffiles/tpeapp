@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -24,6 +25,10 @@ class ApiService {
   final SharedPreferences _prefs;
 
   static const _timeout = Duration(seconds: 15);
+  static const _offlineQueueKey = 'offline_http_queue_v1';
+  static const _offlineQueueMax = 200;
+
+  bool _isFlushingQueue = false;
 
   // ── Preferences keys (must match native constants) ────────────────────
 
@@ -250,15 +255,22 @@ class ApiService {
   /// POSTs `{ mood_score, note }` to `{endpoint}/api/tpe/checkin`.
   Future<void> submitCheckIn(
       {required int moodScore, required String note}) async {
-    final body = jsonEncode({'mood_score': moodScore, 'note': note});
-    final response = await http
-        .post(
-          Uri.parse('$_endpoint/api/tpe/checkin'),
-          headers: _bearerHeaders,
-          body: body,
-        )
-        .timeout(_timeout);
-    _assertSuccess(response, 'Check-in');
+    final payload = {'mood_score': moodScore, 'note': note};
+    await _flushOfflineQueue();
+    try {
+      final response = await http
+          .post(
+            Uri.parse('$_endpoint/api/tpe/checkin'),
+            headers: _bearerHeaders,
+            body: jsonEncode(payload),
+          )
+          .timeout(_timeout);
+      _assertSuccess(response, 'Check-in');
+    } on SocketException catch (_) {
+      await _enqueueOfflinePost(path: '/api/tpe/checkin', payload: payload);
+    } on TimeoutException catch (_) {
+      await _enqueueOfflinePost(path: '/api/tpe/checkin', payload: payload);
+    }
   }
 
   // ── Task status upload ────────────────────────────────────────────────
@@ -367,23 +379,29 @@ class ApiService {
     String? errorMessage,
     Map<String, dynamic>? telemetry,
   }) async {
-    final body = jsonEncode({
+    final payload = {
       'status': status,
       if (errorCode != null && errorCode.isNotEmpty) 'error_code': errorCode,
       if (errorMessage != null && errorMessage.isNotEmpty)
         'error_message': errorMessage,
       if (telemetry != null && telemetry.isNotEmpty) 'telemetry': telemetry,
-    });
-
-    final response = await http
-        .post(
-          Uri.parse('$_endpoint/api/tpe/commands/$commandId/ack'),
-          headers: _bearerHeaders,
-          body: body,
-        )
-        .timeout(_timeout);
-
-    _assertSuccess(response, 'Command ack');
+    };
+    final path = '/api/tpe/commands/$commandId/ack';
+    await _flushOfflineQueue();
+    try {
+      final response = await http
+          .post(
+            Uri.parse('$_endpoint$path'),
+            headers: _bearerHeaders,
+            body: jsonEncode(payload),
+          )
+          .timeout(_timeout);
+      _assertSuccess(response, 'Command ack');
+    } on SocketException catch (_) {
+      await _enqueueOfflinePost(path: path, payload: payload);
+    } on TimeoutException catch (_) {
+      await _enqueueOfflinePost(path: path, payload: payload);
+    }
   }
 
   // ── Behavioral telemetry ───────────────────────────────────────────────
@@ -394,24 +412,29 @@ class ApiService {
     String? reason,
     Map<String, dynamic>? payload,
   }) async {
-    final body = jsonEncode({
+    final payloadBody = {
       'event': event,
       if (reason != null && reason.trim().isNotEmpty) 'reason': reason.trim(),
       'timestamp': DateTime.now().millisecondsSinceEpoch,
       if (_deviceId != null) 'device_id': _deviceId,
       'source': 'flutter_app',
       if (payload != null && payload.isNotEmpty) ...payload,
-    });
-
-    final response = await http
-        .post(
-          Uri.parse('$_endpoint/api/tpe/webhook'),
-          headers: _bearerHeaders,
-          body: body,
-        )
-        .timeout(_timeout);
-
-    _assertSuccess(response, 'Behavior event');
+    };
+    await _flushOfflineQueue();
+    try {
+      final response = await http
+          .post(
+            Uri.parse('$_endpoint/api/tpe/webhook'),
+            headers: _bearerHeaders,
+            body: jsonEncode(payloadBody),
+          )
+          .timeout(_timeout);
+      _assertSuccess(response, 'Behavior event');
+    } on SocketException catch (_) {
+      await _enqueueOfflinePost(path: '/api/tpe/webhook', payload: payloadBody);
+    } on TimeoutException catch (_) {
+      await _enqueueOfflinePost(path: '/api/tpe/webhook', payload: payloadBody);
+    }
   }
 
   /// Convenience helper for social actions like likes/saves/comments.
@@ -439,6 +462,96 @@ class ApiService {
   }
 
   // ── Helpers ───────────────────────────────────────────────────────────
+
+  Future<List<Map<String, dynamic>>> _readOfflineQueue() async {
+    final raw = _prefs.getString(_offlineQueueKey);
+    if (raw == null || raw.trim().isEmpty) return const [];
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is! List) return const [];
+      return decoded
+          .whereType<Map>()
+          .map((e) => Map<String, dynamic>.from(e))
+          .toList();
+    } catch (_) {
+      return const [];
+    }
+  }
+
+  Future<void> _writeOfflineQueue(List<Map<String, dynamic>> queue) async {
+    await _prefs.setString(_offlineQueueKey, jsonEncode(queue));
+  }
+
+  Future<void> _enqueueOfflinePost({
+    required String path,
+    required Map<String, dynamic> payload,
+  }) async {
+    final queue = await _readOfflineQueue();
+    queue.add({
+      'path': path,
+      'payload': payload,
+      'queued_at': DateTime.now().toUtc().toIso8601String(),
+    });
+    if (queue.length > _offlineQueueMax) {
+      queue.removeRange(0, queue.length - _offlineQueueMax);
+    }
+    await _writeOfflineQueue(queue);
+  }
+
+  Future<void> _flushOfflineQueue() async {
+    if (_isFlushingQueue) return;
+    if (_endpoint.isEmpty) return;
+    _isFlushingQueue = true;
+    try {
+      var queue = await _readOfflineQueue();
+      if (queue.isEmpty) return;
+
+      final remaining = <Map<String, dynamic>>[];
+      var stop = false;
+      for (final item in queue) {
+        if (stop) {
+          remaining.add(item);
+          continue;
+        }
+        final path = (item['path'] ?? '').toString();
+        final payload = item['payload'];
+        if (path.isEmpty || payload is! Map) continue;
+        try {
+          final response = await http
+              .post(
+                Uri.parse('$_endpoint$path'),
+                headers: _bearerHeaders,
+                body: jsonEncode(payload),
+              )
+              .timeout(_timeout);
+          if (response.statusCode >= 200 && response.statusCode < 300) {
+            continue;
+          }
+          // Retry later for transient backend/network edge statuses.
+          if (response.statusCode == 408 ||
+              response.statusCode == 429 ||
+              response.statusCode >= 500) {
+            remaining.add(item);
+            stop = true;
+            continue;
+          }
+          // Non-retryable errors (4xx except 408/429) are dropped.
+        } on SocketException catch (_) {
+          remaining.add(item);
+          stop = true;
+        } on TimeoutException catch (_) {
+          remaining.add(item);
+          stop = true;
+        } catch (_) {
+          remaining.add(item);
+          stop = true;
+        }
+      }
+      await _writeOfflineQueue(remaining);
+    } finally {
+      _isFlushingQueue = false;
+    }
+  }
 
   void _assertSuccess(http.Response response, String label) {
     if (!response.isSuccessful) {

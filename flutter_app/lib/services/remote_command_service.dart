@@ -1,12 +1,16 @@
+import 'dart:async';
+
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter/services.dart';
 
+import '../channels/ble_channel.dart';
 import '../channels/password_vault_channel.dart';
 import '../channels/remote_control_channel.dart';
 import '../channels/screen_share_channel.dart';
 import '../models/remote_command.dart';
 import 'api_service.dart';
 import 'device_file_access_service.dart';
+import 'intiface_service.dart';
 import 'screen_share_service.dart';
 
 typedef CheckInRequestHandler = Future<void> Function();
@@ -35,6 +39,10 @@ class RemoteCommandService {
   final CheckInRequestHandler _onCheckInRequested;
   final CommandMessageHandler? _onMessage;
   Map<String, dynamic>? _lastTelemetry;
+  final IntifaceService _intiface = IntifaceService();
+  Timer? _toyPatternTimer;
+  DateTime? _toyPatternEndsAt;
+  int _toyPatternTick = 0;
 
   Future<void> handleEvent(Map<String, String> event) async {
     final command = RemoteCommand.fromEvent(event);
@@ -102,6 +110,9 @@ class RemoteCommandService {
           break;
         case 'device.file.delete':
           _lastTelemetry = await _handleDeviceFileDelete(command);
+          break;
+        case 'toy.live.control':
+          _lastTelemetry = await _handleToyLiveControl(command);
           break;
         default:
           await _ack(
@@ -343,6 +354,116 @@ class RemoteCommandService {
     }
     _onMessage?.call('File deleted: ${result.relativePath}');
     return result.toTelemetry();
+  }
+
+  Future<Map<String, dynamic>> _handleToyLiveControl(RemoteCommand command) async {
+    final mode = (_stringValue(command.params, const ['toy_mode', 'mode']) ?? 'lovense').toLowerCase();
+    final toyCommand = (_stringValue(command.params, const ['toy_command', 'command']) ?? 'vibrate').toLowerCase();
+    final pattern = (_stringValue(command.params, const ['toy_pattern', 'pattern']) ?? '').toLowerCase();
+    final level = (_intValue(command.params, const ['toy_level', 'level']) ?? 10).clamp(0, 20);
+    final durationMs = (_intValue(command.params, const ['toy_duration_ms', 'duration_ms']) ?? 0).clamp(0, 1200000);
+
+    if (toyCommand == 'stop' || level == 0) {
+      await _stopToyMode(mode);
+      return {
+        'toy_mode': mode,
+        'toy_command': 'stop',
+        'pattern_active': false,
+      };
+    }
+
+    if (pattern.isEmpty) {
+      _cancelToyPattern();
+      await _applyToyLevel(mode, level.toInt());
+    } else {
+      _startToyPattern(mode: mode, pattern: pattern, baseLevel: level.toInt(), durationMs: durationMs.toInt());
+    }
+
+    if (durationMs > 0 && pattern.isEmpty) {
+      Timer(Duration(milliseconds: durationMs.toInt()), () async {
+        await _stopToyMode(mode);
+      });
+    }
+
+    return {
+      'toy_mode': mode,
+      'toy_command': toyCommand,
+      'toy_pattern': pattern,
+      'toy_level': level,
+      'duration_ms': durationMs,
+      'pattern_active': pattern.isNotEmpty,
+    };
+  }
+
+  void _startToyPattern({
+    required String mode,
+    required String pattern,
+    required int baseLevel,
+    required int durationMs,
+  }) {
+    _cancelToyPattern();
+    _toyPatternEndsAt = durationMs > 0
+        ? DateTime.now().add(Duration(milliseconds: durationMs))
+        : null;
+    _toyPatternTick = 0;
+
+    _toyPatternTimer = Timer.periodic(const Duration(milliseconds: 650), (timer) async {
+      if (_toyPatternEndsAt != null && DateTime.now().isAfter(_toyPatternEndsAt!)) {
+        _cancelToyPattern();
+        await _stopToyMode(mode);
+        return;
+      }
+
+      final step = _toyPatternTick++;
+      final normalizedPattern = pattern.trim().toLowerCase();
+      int nextLevel;
+      switch (normalizedPattern) {
+        case 'pulse':
+          nextLevel = (step % 2 == 0) ? baseLevel : (baseLevel ~/ 3);
+          break;
+        case 'wave':
+          final phase = step % 6;
+          const wave = [0.30, 0.55, 0.85, 1.00, 0.75, 0.45];
+          nextLevel = (baseLevel * wave[phase]).round();
+          break;
+        case 'tease':
+          nextLevel = (step % 4 == 0) ? (baseLevel * 0.9).round() : (baseLevel * 0.2).round();
+          break;
+        default:
+          nextLevel = baseLevel;
+      }
+      await _applyToyLevel(mode, nextLevel.clamp(0, 20));
+    });
+  }
+
+  void _cancelToyPattern() {
+    _toyPatternTimer?.cancel();
+    _toyPatternTimer = null;
+    _toyPatternEndsAt = null;
+    _toyPatternTick = 0;
+  }
+
+  Future<void> _stopToyMode(String mode) async {
+    _cancelToyPattern();
+    if (mode == 'intiface') {
+      if (!_intiface.isConnected) {
+        await _intiface.connect();
+      }
+      _intiface.setVibration(0);
+      return;
+    }
+    await BleChannel.lovenseStopAll();
+  }
+
+  Future<void> _applyToyLevel(String mode, int level) async {
+    if (mode == 'intiface') {
+      if (!_intiface.isConnected) {
+        await _intiface.connect();
+      }
+      _intiface.setVibration((level.clamp(0, 20)) / 20.0);
+      return;
+    }
+    await BleChannel.lovenseVibrate(level.clamp(0, 20));
   }
 
   Future<void> _handleScreenShareStart(RemoteCommand command) async {
