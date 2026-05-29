@@ -1,153 +1,343 @@
+import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_onnxruntime/flutter_onnxruntime.dart';
 import 'package:image/image.dart' as img;
-import 'package:tflite_flutter/tflite_flutter.dart';
 
-/// Lightweight on-device content-safety classifier backed by [nudenet.tflite].
-///
-/// The interpreter is loaded from `assets/nudenet.tflite` once during [warmUp]
-/// and kept alive in memory so subsequent scans do not pay a cold-start cost.
-///
-/// Image preprocessing (decode + resize to [_inputSize]×[_inputSize] + normalise)
-/// runs in a separate Dart [Isolate] via [compute] so the UI thread is never
-/// blocked.  Inference itself runs on the interpreter's own background threads
-/// (configured to 2 threads via [InterpreterOptions]).
-///
-/// Usage:
-/// ```dart
-/// // Warm up early in the app lifecycle (e.g. in main or HomeScreen.initState).
-/// await NudeNetService.instance.warmUp();
-///
-/// // Classify a JPEG / PNG byte array.
-/// final score = await NudeNetService.instance.classifyBytes(imageBytes);
-/// if (score >= 0.55) { /* content blocked */ }
-/// ```
+enum CensorStyle { blackout, blur }
+
+class DetectionBox {
+  const DetectionBox({
+    required this.x1,
+    required this.y1,
+    required this.x2,
+    required this.y2,
+    required this.score,
+  });
+
+  final double x1;
+  final double y1;
+  final double x2;
+  final double y2;
+  final double score;
+
+  List<double> toList() => [x1, y1, x2, y2, score];
+}
+
 class NudeNetService {
   NudeNetService._();
 
-  /// Singleton instance — the interpreter is kept alive for the process lifetime.
   static final NudeNetService instance = NudeNetService._();
 
-  // -------------------------------------------------------------------------
-  //  Constants
-  // -------------------------------------------------------------------------
+  static const String _modelAsset = 'assets/320n.onnx';
+  static const int _modelSize = 320;
 
-  static const String _modelAsset = 'assets/nudenet.tflite';
-
-  /// Side length (pixels) the input image is resized to before inference.
-  /// Must match the first/second spatial dimension of the model's input tensor
-  /// (expected shape: [1, _inputSize, _inputSize, 3]).
-  static const int _inputSize = 320;
-
-  /// Number of output classes ([safe_score, unsafe_score]).
-  static const int _outputClasses = 2;
-
-  /// Index within the output vector that holds the "unsafe" probability.
-  static const int _unsafeIdx = 1;
-
-  // -------------------------------------------------------------------------
-  //  State
-  // -------------------------------------------------------------------------
-
-  Interpreter? _interpreter;
+  OrtSession? _session;
   bool _initialized = false;
 
-  // -------------------------------------------------------------------------
-  //  Public API
-  // -------------------------------------------------------------------------
-
-  /// Loads the TFLite model from assets and allocates the interpreter tensors.
-  ///
-  /// Calling [warmUp] explicitly at startup avoids the first-scan latency
-  /// spike.  Subsequent calls are no-ops if the interpreter is already ready.
   Future<void> warmUp() async {
     if (_initialized) return;
-    final options = InterpreterOptions()..threads = 2;
-    _interpreter = await Interpreter.fromAsset(_modelAsset, options: options);
-    _interpreter!.allocateTensors();
+    final modelData = await rootBundle.load(_modelAsset);
+    final modelBytes = modelData.buffer.asUint8List();
+    _session = await OrtSession.fromBuffer(modelBytes);
     _initialized = true;
   }
 
-  /// Runs content-safety inference on raw [imageBytes] (JPEG or PNG).
-  ///
-  /// Returns a score in `[0.0, 1.0]` representing the probability that the
-  /// image contains adult / sensitive content.  A score ≥ 0.55 is typically
-  /// treated as a violation.
-  ///
-  /// Image decoding and resizing execute in a background [Isolate] via
-  /// [compute]; UI responsiveness is preserved even for large images.
-  Future<double> classifyBytes(Uint8List imageBytes) async {
+  Future<Uint8List> censorImageBytes(
+    Uint8List originalBytes, {
+    double scoreThreshold = 0.35,
+    CensorStyle style = CensorStyle.blackout,
+  }) async {
     await warmUp();
 
-    // Preprocessing runs in a background isolate — never blocks the UI thread.
-    final input = await compute(_preprocessImage, _PreprocessArgs(imageBytes, _inputSize));
+    final preprocess = await compute(_prepareInputForOnnx, <String, dynamic>{
+      'imageBytes': originalBytes,
+      'modelSize': _modelSize,
+    });
 
-    // Inference runs on the interpreter's worker threads.
-    final output = [List<double>.filled(_outputClasses, 0.0)];
-    _interpreter!.run(input, output);
+    if (preprocess['valid'] != true) return originalBytes;
 
-    return output[0][_unsafeIdx].clamp(0.0, 1.0);
+    final input = preprocess['input'] as Float32List;
+    final originalWidth = preprocess['width'] as int;
+    final originalHeight = preprocess['height'] as int;
+
+    final modelDetections = await _runDetection(input, scoreThreshold: scoreThreshold);
+    if (modelDetections.isEmpty) return originalBytes;
+
+    final scaledBoxes = modelDetections.map((box) {
+      final sx = originalWidth / _modelSize;
+      final sy = originalHeight / _modelSize;
+      return [
+        (box.x1 * sx).clamp(0, originalWidth - 1).toDouble(),
+        (box.y1 * sy).clamp(0, originalHeight - 1).toDouble(),
+        (box.x2 * sx).clamp(0, originalWidth - 1).toDouble(),
+        (box.y2 * sy).clamp(0, originalHeight - 1).toDouble(),
+        box.score,
+      ];
+    }).toList();
+
+    return compute(_applyLocalizedCensor, <String, dynamic>{
+      'imageBytes': originalBytes,
+      'boxes': scaledBoxes,
+      'style': style.name,
+    });
   }
 
-  /// Releases interpreter resources.  Call when the service is no longer needed
-  /// (e.g. `dispose` of a widget that owns this service).
+  Future<List<DetectionBox>> _runDetection(
+    Float32List input, {
+    required double scoreThreshold,
+  }) async {
+    final session = _session;
+    if (session == null) return const [];
+
+    final inputName = session.inputNames.isNotEmpty ? session.inputNames.first : 'images';
+    final inputTensor = OrtTensor.fromFloat32List(input, [1, 3, _modelSize, _modelSize]);
+    final outputs = await session.run({inputName: inputTensor});
+
+    final List<DetectionBox> detections = [];
+    for (final tensor in outputs.values) {
+      detections.addAll(_parseDetectionTensor(tensor, scoreThreshold));
+    }
+
+    return _nms(detections, iouThreshold: 0.45);
+  }
+
+  List<DetectionBox> _parseDetectionTensor(dynamic tensor, double scoreThreshold) {
+    final rawData = _tensorDataToList(tensor.data);
+    if (rawData.isEmpty) return const [];
+
+    final shape = List<int>.from((tensor.shape as List).map((e) => (e as num).toInt()));
+
+    if (shape.length == 3) {
+      final a = shape[1];
+      final b = shape[2];
+
+      if (b >= 6) {
+        return _parseRowMajor(rawData, rows: a, cols: b, threshold: scoreThreshold);
+      }
+
+      if (a >= 6) {
+        return _parseAttrMajor(rawData, attrs: a, count: b, threshold: scoreThreshold);
+      }
+    }
+
+    if (shape.length == 2 && shape[1] >= 6) {
+      return _parseRowMajor(rawData, rows: shape[0], cols: shape[1], threshold: scoreThreshold);
+    }
+
+    return const [];
+  }
+
+  List<DetectionBox> _parseRowMajor(
+    List<double> values, {
+    required int rows,
+    required int cols,
+    required double threshold,
+  }) {
+    final out = <DetectionBox>[];
+    for (var r = 0; r < rows; r++) {
+      final base = r * cols;
+      final x1 = values[base + 0];
+      final y1 = values[base + 1];
+      final x2 = values[base + 2];
+      final y2 = values[base + 3];
+      final score = values[base + 4];
+
+      if (score < threshold) continue;
+      if (x2 <= x1 || y2 <= y1) continue;
+      out.add(DetectionBox(x1: x1, y1: y1, x2: x2, y2: y2, score: score));
+    }
+    return out;
+  }
+
+  List<DetectionBox> _parseAttrMajor(
+    List<double> values, {
+    required int attrs,
+    required int count,
+    required double threshold,
+  }) {
+    final out = <DetectionBox>[];
+    for (var i = 0; i < count; i++) {
+      final cx = values[(0 * count) + i];
+      final cy = values[(1 * count) + i];
+      final w = values[(2 * count) + i];
+      final h = values[(3 * count) + i];
+      final obj = values[(4 * count) + i];
+
+      double classProb = 0;
+      for (var a = 5; a < attrs; a++) {
+        classProb = math.max(classProb, values[(a * count) + i]);
+      }
+      final score = obj * (classProb == 0 ? 1 : classProb);
+      if (score < threshold) continue;
+
+      final x1 = cx - (w / 2);
+      final y1 = cy - (h / 2);
+      final x2 = cx + (w / 2);
+      final y2 = cy + (h / 2);
+      if (x2 <= x1 || y2 <= y1) continue;
+
+      out.add(DetectionBox(x1: x1, y1: y1, x2: x2, y2: y2, score: score));
+    }
+    return out;
+  }
+
+  List<double> _tensorDataToList(dynamic data) {
+    if (data is Float32List) return data.toList(growable: false);
+    if (data is Float64List) return data.toList(growable: false);
+    if (data is Int32List) {
+      return data.map((e) => e.toDouble()).toList(growable: false);
+    }
+    if (data is List) {
+      return data.expand<double>((e) {
+        if (e is num) return [e.toDouble()];
+        if (e is List) return _flattenNumList(e);
+        return const [];
+      }).toList(growable: false);
+    }
+    return const [];
+  }
+
+  List<double> _flattenNumList(List<dynamic> list) {
+    final out = <double>[];
+    for (final item in list) {
+      if (item is num) {
+        out.add(item.toDouble());
+      } else if (item is List) {
+        out.addAll(_flattenNumList(item));
+      }
+    }
+    return out;
+  }
+
+  List<DetectionBox> _nms(List<DetectionBox> boxes, {required double iouThreshold}) {
+    if (boxes.isEmpty) return const [];
+
+    final sorted = [...boxes]..sort((a, b) => b.score.compareTo(a.score));
+    final kept = <DetectionBox>[];
+
+    while (sorted.isNotEmpty) {
+      final current = sorted.removeAt(0);
+      kept.add(current);
+      sorted.removeWhere((other) => _iou(current, other) > iouThreshold);
+    }
+
+    return kept;
+  }
+
+  double _iou(DetectionBox a, DetectionBox b) {
+    final x1 = math.max(a.x1, b.x1);
+    final y1 = math.max(a.y1, b.y1);
+    final x2 = math.min(a.x2, b.x2);
+    final y2 = math.min(a.y2, b.y2);
+
+    final interW = math.max(0.0, x2 - x1);
+    final interH = math.max(0.0, y2 - y1);
+    final interArea = interW * interH;
+
+    final areaA = (a.x2 - a.x1) * (a.y2 - a.y1);
+    final areaB = (b.x2 - b.x1) * (b.y2 - b.y1);
+    final union = areaA + areaB - interArea;
+
+    if (union <= 0) return 0;
+    return interArea / union;
+  }
+
   void dispose() {
-    _interpreter?.close();
-    _interpreter = null;
+    _session?.close();
+    _session = null;
     _initialized = false;
   }
 }
 
-// ---------------------------------------------------------------------------
-//  Isolate helpers — must be top-level functions for [compute].
-// ---------------------------------------------------------------------------
+Map<String, dynamic> _prepareInputForOnnx(Map<String, dynamic> args) {
+  final imageBytes = args['imageBytes'] as Uint8List;
+  final modelSize = args['modelSize'] as int;
 
-/// Arguments passed to the preprocessing isolate.
-class _PreprocessArgs {
-  const _PreprocessArgs(this.imageBytes, this.inputSize);
-
-  final Uint8List imageBytes;
-  final int inputSize;
-}
-
-/// Decodes [args.imageBytes], resizes to [args.inputSize]×[args.inputSize],
-/// and returns a normalised NHWC float tensor shaped [1, H, W, 3] with values
-/// in `[0.0, 1.0]`.
-///
-/// This function is executed in a separate [Isolate] by [compute] to avoid
-/// jank on the UI thread.
-List<List<List<List<double>>>> _preprocessImage(_PreprocessArgs args) {
-  final decoded = img.decodeImage(args.imageBytes);
-
-  // Return a zeroed tensor when the image cannot be decoded rather than throw.
-  if (decoded == null) {
-    return [
-      List.generate(
-        args.inputSize,
-        (_) => List.generate(args.inputSize, (_) => [0.0, 0.0, 0.0]),
-      ),
-    ];
+  final source = img.decodeImage(imageBytes);
+  if (source == null) {
+    return {
+      'valid': false,
+      'width': 0,
+      'height': 0,
+      'input': Float32List(0),
+    };
   }
 
   final resized = img.copyResize(
-    decoded,
-    width: args.inputSize,
-    height: args.inputSize,
+    source,
+    width: modelSize,
+    height: modelSize,
     interpolation: img.Interpolation.linear,
   );
 
-  // Build NHWC tensor: [batch=1, height, width, channels=3].
-  return [
-    List.generate(args.inputSize, (y) {
-      return List.generate(args.inputSize, (x) {
-        final pixel = resized.getPixel(x, y);
-        return [
-          pixel.r / 255.0,
-          pixel.g / 255.0,
-          pixel.b / 255.0,
-        ];
-      });
-    }),
-  ];
+  final input = Float32List(1 * 3 * modelSize * modelSize);
+  var rOffset = 0;
+  var gOffset = modelSize * modelSize;
+  var bOffset = 2 * modelSize * modelSize;
+
+  for (var y = 0; y < modelSize; y++) {
+    for (var x = 0; x < modelSize; x++) {
+      final p = resized.getPixel(x, y);
+      input[rOffset++] = p.r / 255.0;
+      input[gOffset++] = p.g / 255.0;
+      input[bOffset++] = p.b / 255.0;
+    }
+  }
+
+  return {
+    'valid': true,
+    'width': source.width,
+    'height': source.height,
+    'input': input,
+  };
+}
+
+Uint8List _applyLocalizedCensor(Map<String, dynamic> args) {
+  final imageBytes = args['imageBytes'] as Uint8List;
+  final boxes = (args['boxes'] as List).cast<List<dynamic>>();
+  final style = (args['style'] as String?) ?? CensorStyle.blackout.name;
+
+  final source = img.decodeImage(imageBytes);
+  if (source == null || boxes.isEmpty) return imageBytes;
+
+  for (final b in boxes) {
+    if (b.length < 4) continue;
+    final x1 = b[0].round().clamp(0, source.width - 1);
+    final y1 = b[1].round().clamp(0, source.height - 1);
+    final x2 = b[2].round().clamp(0, source.width - 1);
+    final y2 = b[3].round().clamp(0, source.height - 1);
+
+    if (x2 <= x1 || y2 <= y1) continue;
+
+    if (style == CensorStyle.blur.name) {
+      _blurRegion(source, x1, y1, x2, y2);
+    } else {
+      img.fillRect(
+        source,
+        x1: x1,
+        y1: y1,
+        x2: x2,
+        y2: y2,
+        color: img.ColorRgba8(0, 0, 0, 255),
+      );
+    }
+  }
+
+  return Uint8List.fromList(img.encodeJpg(source, quality: 92));
+}
+
+void _blurRegion(img.Image source, int x1, int y1, int x2, int y2) {
+  final w = x2 - x1;
+  final h = y2 - y1;
+  if (w < 2 || h < 2) return;
+
+  final region = img.copyCrop(source, x: x1, y: y1, width: w, height: h);
+  final smallW = math.max(1, w ~/ 12);
+  final smallH = math.max(1, h ~/ 12);
+  final shrunk = img.copyResize(region, width: smallW, height: smallH, interpolation: img.Interpolation.average);
+  final blurred = img.copyResize(shrunk, width: w, height: h, interpolation: img.Interpolation.nearest);
+  img.compositeImage(source, blurred, dstX: x1, dstY: y1);
 }
