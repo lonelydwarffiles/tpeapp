@@ -13,12 +13,12 @@ import org.json.JSONArray
  * the Accountability Partner.
  *
  * ### Enforcement
- * [commitText] is intercepted before text reaches the target app.  If the
- * committed text contains any restricted word (whole-word, case-insensitive),
- * the [CharSequence] argument is replaced with [SAFE_PHRASE] ("[Redacted]")
- * so the target app never sees the original word.  Each redaction also fires
- * a [XposedToneReceiver.ACTION_XPOSED_TONE_BLOCK] broadcast so the partner
- * dashboard receives live blocking telemetry.
+ * Both [setComposingText] and [commitText] are intercepted before text reaches
+ * the target app. If text contains any restricted word (whole-word,
+ * case-insensitive), the [CharSequence] argument is replaced with
+ * [SAFE_PHRASE] ("[Redacted]") so the target app never sees the original word.
+ * Each redaction also fires a [XposedToneReceiver.ACTION_XPOSED_TONE_BLOCK]
+ * broadcast so the partner dashboard receives live blocking telemetry.
  *
  * ### Soft-mode bypass
  * When the partner has selected "Soft" tone mode the user may override a single
@@ -129,6 +129,11 @@ object InputConnectionHook {
             )
             XposedHelpers.findAndHookMethod(
                 className, loader,
+                "setComposingText", CharSequence::class.java, Int::class.java,
+                setComposingTextHook
+            )
+            XposedHelpers.findAndHookMethod(
+                className, loader,
                 "deleteSurroundingText", Int::class.java, Int::class.java,
                 deleteSurroundingTextHook
             )
@@ -142,56 +147,127 @@ object InputConnectionHook {
 
     private val commitTextHook = object : XC_MethodHook() {
         override fun beforeHookedMethod(param: MethodHookParam) {
-            val text    = param.args[0] as? CharSequence ?: return
-            val textStr = text.toString()
-            if (textStr.isBlank()) return
+            val text = param.args[0] as? CharSequence ?: return
+            if (text.isBlank()) return
 
             // Ensure the AIDL service binding is established the first time any
             // text field is committed, even in apps with no images.
             MainHook.getContext()?.let { MainHook.ensureServiceBound(it) }
 
-            val vocabRegexes = currentVocabRegexes() ?: return
-            if (vocabRegexes.isEmpty()) return
+            enforceOutgoingText(param)
+        }
+    }
 
-            val toneMode  = currentToneMode()
-            val textLower = textStr.lowercase()
+    /**
+     * Intercepts in-progress composing text (mid-composition, before commit) and
+     * applies the same enforcement pipeline as [commitTextHook].  This catches
+     * apps — and IMEs like Gboard — that call [setComposingText] directly instead
+     * of finalising via [commitText].
+     */
+    private val setComposingTextHook = object : XC_MethodHook() {
+        override fun beforeHookedMethod(param: MethodHookParam) {
+            val text = param.args[0] as? CharSequence ?: return
+            if (text.isBlank()) return
+            MainHook.getContext()?.let { MainHook.ensureServiceBound(it) }
+            enforceOutgoingText(param)
+        }
+    }
 
-            // ── Bypass check (Soft mode only) ─────────────────────────────────
-            if (toneMode == MODE_LOOSE && bypassWindowOpen) {
-                val redacted = lastRedactedWord
-                if (redacted != null &&
-                    System.currentTimeMillis() - lastRedactTimestamp <= BYPASS_WINDOW_MS &&
-                    containsWholeWord(textLower, redacted, vocabRegexes)
-                ) {
-                    // User successfully re-typed the restricted word within the
-                    // grace window — add to session whitelist, allow the commit,
-                    // and fire the infraction event.
-                    sessionWhitelistWords.add(redacted)
-                    clearBypassState()
-                    Log.i(TAG, "Soft-mode override accepted for: $redacted")
-                    dispatchInfractionBroadcast(redacted)
-                    return   // let commitText pass unmodified
-                }
-                // Window expired or wrong word — close the bypass
+    /**
+     * Shared enforcement pipeline applied to both [commitText] and [setComposingText].
+     *
+     * Order of operations:
+     *  1. **Vocabulary blocking** — if the text contains a restricted word it is
+     *     replaced with [SAFE_PHRASE] and no further processing is done.
+     *  2. **Text-replacement rules** — the full UPDATE_TEXT_REPLACEMENT_POLICY
+     *     dictionary (shared with [TextViewHook]) is applied so the partner's
+     *     substitution rules affect outgoing text just as they do incoming text.
+     */
+    private fun enforceOutgoingText(param: XC_MethodHook.MethodHookParam) {
+        val text    = param.args[0] as? CharSequence ?: return
+        val textStr = text.toString()
+
+        val vocabRegexes = currentVocabRegexes() ?: return
+        val toneMode  = currentToneMode()
+        val textLower = textStr.lowercase()
+
+        // ── Bypass check (Soft mode only) ─────────────────────────────────
+        if (toneMode == MODE_LOOSE && bypassWindowOpen) {
+            val redacted = lastRedactedWord
+            if (redacted != null &&
+                System.currentTimeMillis() - lastRedactTimestamp <= BYPASS_WINDOW_MS &&
+                containsWholeWord(textLower, redacted, vocabRegexes)
+            ) {
+                // User successfully re-typed the restricted word within the
+                // grace window — add to session whitelist, allow the commit,
+                // and fire the infraction event.
+                sessionWhitelistWords.add(redacted)
                 clearBypassState()
+                Log.i(TAG, "Soft-mode override accepted for: $redacted")
+                dispatchInfractionBroadcast(redacted)
+                return   // let the call pass unmodified
             }
+            // Window expired or wrong word — close the bypass
+            clearBypassState()
+        }
 
-            // ── Enforcement pass ──────────────────────────────────────────────
+        // ── Vocabulary blocking (highest priority) ────────────────────────
+        if (vocabRegexes.isNotEmpty()) {
             for ((word, regex) in vocabRegexes) {
                 if (word.isBlank()) continue
                 // In Soft mode, skip words the user has already whitelisted.
                 if (toneMode == MODE_LOOSE && sessionWhitelistWords.contains(word)) continue
                 if (!regex.containsMatchIn(textLower)) continue
 
-                param.args[0]        = SAFE_PHRASE
-                lastRedactedWord     = word
-                lastRedactTimestamp  = System.currentTimeMillis()
+                val originalText       = text
+                val sanitizedText      = SAFE_PHRASE
+                param.args[0]          = sanitizedText
+                adjustCursorPosition(param, originalText, sanitizedText)
+                lastRedactedWord       = word
+                lastRedactTimestamp    = System.currentTimeMillis()
                 accumulatedDeleteCount = 0
-                bypassWindowOpen     = false
+                bypassWindowOpen       = false
                 Log.i(TAG, "Restricted word '$word' redacted via InputConnection hook")
                 dispatchToneBlockBroadcast(word)
-                return
+                return   // skip text-replacement when the whole text is redacted
             }
+        }
+
+        // ── Text-replacement rules (same engine as TextViewHook) ──────────
+        val dict = TextViewHook.currentDict() ?: return
+        if (dict.isEmpty()) return
+        val policy      = TextViewHook.currentPolicy()
+        val toneModeTR  = TextViewHook.currentToneMode()
+        val packageName = MainHook.getContext()?.packageName.orEmpty()
+        val modified    = TextViewHook.applyReplacements(text, dict, toneModeTR, packageName, policy)
+        if (modified !== text) {
+            param.args[0] = modified
+            adjustCursorPosition(param, text, modified)
+        }
+    }
+
+    /**
+     * Adjust cursor movement when replacement length changes so IMEs like Gboard
+     * don't jump to extreme positions after sanitization.
+     */
+    private fun adjustCursorPosition(
+        param: XC_MethodHook.MethodHookParam,
+        originalText: CharSequence,
+        sanitizedText: CharSequence
+    ) {
+        val originalLen = originalText.length
+        val sanitizedLen = sanitizedText.length
+        if (originalLen == sanitizedLen) return
+        val currentCursor = param.args.getOrNull(1) as? Int ?: return
+
+        val delta = sanitizedLen - originalLen
+        val adjustedCursor = when {
+            currentCursor > 0 -> (currentCursor + delta).coerceIn(1, sanitizedLen + 1)
+            currentCursor < 0 -> (currentCursor - delta).coerceIn(-sanitizedLen, -1)
+            else -> 0
+        }
+        if (adjustedCursor != currentCursor) {
+            param.args[1] = adjustedCursor
         }
     }
 

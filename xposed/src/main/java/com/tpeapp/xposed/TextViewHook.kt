@@ -63,18 +63,21 @@ object TextViewHook {
 
     fun install(loader: ClassLoader) {
         try {
-            // Hook setText(CharSequence, BufferType).
-            // setText(CharSequence) delegates to this overload internally, so
-            // hooking only here avoids double-processing the same text.
+            // Hook the lowest-level setText(CharSequence, BufferType, boolean, int).
+            // All public setText overloads ultimately delegate here, so a single
+            // hook at this level intercepts every text assignment — including
+            // internal calls that bypass the public API — without double-processing.
             val bufferTypeClass = XposedHelpers.findClass(
                 "android.widget.TextView\$BufferType", loader
             )
             XposedHelpers.findAndHookMethod(
                 "android.widget.TextView", loader,
-                "setText", CharSequence::class.java, bufferTypeClass,
+                "setText",
+                CharSequence::class.java, bufferTypeClass,
+                Boolean::class.javaPrimitiveType, Int::class.javaPrimitiveType,
                 setTextHook
             )
-            Log.i(TAG, "TextView hook installed")
+            Log.i(TAG, "TextView hook installed (4-param setText)")
         } catch (e: Throwable) {
             Log.w(TAG, "Failed to install TextView hook", e)
         }
@@ -110,8 +113,9 @@ object TextViewHook {
     /**
      * Returns the current dictionary, refreshing from the service if the cache
      * has expired.  Returns `null` when the service is unavailable.
+     * Internal so [InputConnectionHook] can share the same cached instance.
      */
-    private fun currentDict(): Map<Regex, String>? {
+    internal fun currentDict(): Map<Regex, String>? {
         val now = System.currentTimeMillis()
         if (now - lastFetchMs < DICT_TTL_MS) return cachedDict
 
@@ -149,7 +153,7 @@ object TextViewHook {
         }
     }
 
-    private fun currentPolicy(): ReplacementPolicy {
+    internal fun currentPolicy(): ReplacementPolicy {
         val now = System.currentTimeMillis()
         if (now - lastPolicyFetchMs < DICT_TTL_MS) return cachedPolicy
 
@@ -203,8 +207,9 @@ object TextViewHook {
      * when [text] is a [Spanned].
      *
      * Returns the original [text] reference unchanged if no pattern matches.
+     * Internal so [InputConnectionHook] can apply the same engine to outgoing text.
      */
-    private fun applyReplacements(
+    internal fun applyReplacements(
         text: CharSequence,
         dict: Map<Regex, String>,
         toneMode: String,
@@ -335,7 +340,7 @@ object TextViewHook {
         }
     }
 
-    private fun currentToneMode(): String {
+    internal fun currentToneMode(): String {
         val now = System.currentTimeMillis()
         if (now - lastModeFetchMs < DICT_TTL_MS) return cachedToneMode
 

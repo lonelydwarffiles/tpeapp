@@ -128,9 +128,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
         _mediaFilterMode = (mediaConfig['mode'] as String?)?.trim().toLowerCase() == 'strict'
           ? 'strict'
           : (_prefs.getString(_kMediaFilterMode) ?? 'speed');
-        _mediaCensorStyle = (mediaConfig['censor_style'] as String?)?.trim().toLowerCase() == 'blur'
-          ? 'blur'
-          : (_prefs.getString(_kMediaCensorStyle) ?? 'pixelate');
+        _mediaCensorStyle = _normalizeCensorStyle(
+          (mediaConfig['censor_style'] as String?) ?? _prefs.getString(_kMediaCensorStyle),
+        );
         _mediaStrictPackagesRaw = strictPackages.join(', ');
         _mediaMaxInFlight = (mediaConfig['max_in_flight'] is int)
           ? (mediaConfig['max_in_flight'] as int).clamp(1, 12)
@@ -431,6 +431,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
+  String _normalizeCensorStyle(String? raw) {
+    switch ((raw ?? '').trim().toLowerCase()) {
+      case 'blackout':
+        return 'blackout';
+      case 'heavy_blur':
+      case 'heavyblur':
+      case 'blur':
+        return 'heavy_blur';
+      default:
+        return 'pixelate';
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -491,8 +504,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
               border: OutlineInputBorder(),
             ),
             items: const [
-              DropdownMenuItem(value: 'pixelate', child: Text('Pixelate (faster)')),
-              DropdownMenuItem(value: 'blur', child: Text('Blur (slower, softer look)')),
+              DropdownMenuItem(value: 'blackout', child: Text('Blackout (maximum concealment)')),
+              DropdownMenuItem(value: 'heavy_blur', child: Text('Heavy Blur (soft look)')),
+              DropdownMenuItem(value: 'pixelate', child: Text('Pixelate (balanced)')),
             ],
             onChanged: (v) => setState(() => _mediaCensorStyle = v ?? 'pixelate'),
           ),

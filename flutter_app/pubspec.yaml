@@ -67,6 +67,12 @@ dependencies:
   permission_handler: ^12.0.1
   google_fonts: ^8.1.0
 
+  # ONNX Runtime — runs 320n.onnx detection model on-device
+  flutter_onnxruntime: ^1.4.1
+
+  # Image decoding and resizing (used by NudeNetService isolate preprocessing)
+  image: ^4.2.0
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
@@ -74,3 +80,6 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+
+  assets:
+    - assets/320n.onnx

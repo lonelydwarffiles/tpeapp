@@ -81,6 +81,9 @@ class RemoteCommand {
       case 'LOVENSE_COMMAND':
       case 'PAVLOK_COMMAND':
       case 'TASK_ASSIGNED':
+      case 'TASK_CLEARED':
+      case 'CLEAR_TASK_ASSIGNED':
+      case 'TASK_CLEAR':
       case 'NEW_QUESTION':
       case 'START_REVIEW':
       case 'RULE_REMINDER':

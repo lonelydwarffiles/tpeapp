@@ -1,5 +1,5 @@
 # Replace this file with the actual NudeNet TFLite model binary.
-# Model input:  [1, 480, 480, 3] FLOAT32
+# Model input:  [1, 320, 320, 3] FLOAT32  (NHWC, pixel values normalised to [0.0, 1.0])
 # Model output: [1, 2] FLOAT32  (index 0 = safe, index 1 = unsafe)
 #
 # Download source: https://github.com/notAI-tech/NudeNet
