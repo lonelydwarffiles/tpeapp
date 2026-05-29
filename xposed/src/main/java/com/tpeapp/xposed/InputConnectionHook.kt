@@ -13,12 +13,12 @@ import org.json.JSONArray
  * the Accountability Partner.
  *
  * ### Enforcement
- * [commitText] is intercepted before text reaches the target app.  If the
- * committed text contains any restricted word (whole-word, case-insensitive),
- * the [CharSequence] argument is replaced with [SAFE_PHRASE] ("[Redacted]")
- * so the target app never sees the original word.  Each redaction also fires
- * a [XposedToneReceiver.ACTION_XPOSED_TONE_BLOCK] broadcast so the partner
- * dashboard receives live blocking telemetry.
+ * Both [setComposingText] and [commitText] are intercepted before text reaches
+ * the target app. If text contains any restricted word (whole-word,
+ * case-insensitive), the [CharSequence] argument is replaced with
+ * [SAFE_PHRASE] ("[Redacted]") so the target app never sees the original word.
+ * Each redaction also fires a [XposedToneReceiver.ACTION_XPOSED_TONE_BLOCK]
+ * broadcast so the partner dashboard receives live blocking telemetry.
  *
  * ### Soft-mode bypass
  * When the partner has selected "Soft" tone mode the user may override a single
@@ -168,6 +168,7 @@ object InputConnectionHook {
         override fun beforeHookedMethod(param: MethodHookParam) {
             val text = param.args[0] as? CharSequence ?: return
             if (text.isBlank()) return
+            MainHook.getContext()?.let { MainHook.ensureServiceBound(it) }
             enforceOutgoingText(param)
         }
     }
@@ -218,7 +219,10 @@ object InputConnectionHook {
                 if (toneMode == MODE_LOOSE && sessionWhitelistWords.contains(word)) continue
                 if (!regex.containsMatchIn(textLower)) continue
 
-                param.args[0]          = SAFE_PHRASE
+                val originalText       = text
+                val sanitizedText      = SAFE_PHRASE
+                param.args[0]          = sanitizedText
+                adjustCursorPosition(param, originalText, sanitizedText)
                 lastRedactedWord       = word
                 lastRedactTimestamp    = System.currentTimeMillis()
                 accumulatedDeleteCount = 0
@@ -238,6 +242,32 @@ object InputConnectionHook {
         val modified    = TextViewHook.applyReplacements(text, dict, toneModeTR, packageName, policy)
         if (modified !== text) {
             param.args[0] = modified
+            adjustCursorPosition(param, text, modified)
+        }
+    }
+
+    /**
+     * Adjust cursor movement when replacement length changes so IMEs like Gboard
+     * don't jump to extreme positions after sanitization.
+     */
+    private fun adjustCursorPosition(
+        param: XC_MethodHook.MethodHookParam,
+        originalText: CharSequence,
+        sanitizedText: CharSequence
+    ) {
+        val originalLen = originalText.length
+        val sanitizedLen = sanitizedText.length
+        if (originalLen == sanitizedLen) return
+        val currentCursor = param.args.getOrNull(1) as? Int ?: return
+
+        val delta = sanitizedLen - originalLen
+        val adjustedCursor = when {
+            currentCursor > 0 -> (currentCursor + delta).coerceIn(1, sanitizedLen + 1)
+            currentCursor < 0 -> (currentCursor - delta).coerceIn(-sanitizedLen, -1)
+            else -> 0
+        }
+        if (adjustedCursor != currentCursor) {
+            param.args[1] = adjustedCursor
         }
     }
 
