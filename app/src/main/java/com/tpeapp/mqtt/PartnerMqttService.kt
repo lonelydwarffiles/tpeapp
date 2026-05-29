@@ -1166,7 +1166,7 @@ class PartnerMqttService : Service() {
             Log.w(TAG, "SEND_NOTIFICATION missing title"); return
         }
         val body = data["body"] ?: ""
-        DeviceCommandManager.sendNotification(applicationContext, title, body, data["channel_id"])
+        DeviceCommandManager.sendNotification(applicationContext, title, body, data["channel_id"], data)
         Log.i(TAG, "SEND_NOTIFICATION: '$title'")
     }
 

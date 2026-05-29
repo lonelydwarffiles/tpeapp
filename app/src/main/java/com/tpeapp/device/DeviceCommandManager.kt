@@ -18,6 +18,7 @@ import android.provider.AlarmClock
 import android.speech.tts.TextToSpeech
 import android.util.Log
 import androidx.preference.PreferenceManager
+import com.tpeapp.bridge.TpeFlutterActivity
 import com.tpeapp.mdm.AppDeviceAdminReceiver
 import com.tpeapp.mindful.MindfulNotificationService
 import com.tpeapp.pairing.PairingActivity
@@ -449,16 +450,49 @@ object DeviceCommandManager {
      * Posts a custom local notification on behalf of the partner.
      * @param channelId Optional override; falls back to [CMD_CHANNEL_ID].
      */
-    fun sendNotification(context: Context, title: String, body: String, channelId: String?) {
+    fun sendNotification(
+        context: Context,
+        title: String,
+        body: String,
+        channelId: String?,
+        payload: Map<String, String>? = null,
+    ) {
         val nm      = context.getSystemService(NotificationManager::class.java)
         val channel = channelId?.takeIf { it.isNotBlank() } ?: CMD_CHANNEL_ID
         ensureCmdChannel(nm)
+        val tapIntent = Intent(context, TpeFlutterActivity::class.java).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+            payload?.forEach { (key, value) ->
+                if (value.isNotBlank() && (
+                        key == "pm_thread_id" ||
+                        key == "pm_event" ||
+                        key == "booking_id" ||
+                        key == "booking_event" ||
+                        key == "tap_target"
+                    )
+                ) {
+                    putExtra(key, value)
+                }
+            }
+        }
+        val tapReqCode = (
+            title.hashCode() * 31 +
+                (payload?.get("pm_thread_id")?.hashCode() ?: 0) * 17 +
+                (payload?.get("booking_id")?.hashCode() ?: 0)
+            ) and 0x7FFFFFFF
+        val tapPending = PendingIntent.getActivity(
+            context,
+            tapReqCode,
+            tapIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
         val notification = androidx.core.app.NotificationCompat.Builder(context, channel)
             .setSmallIcon(com.tpeapp.R.drawable.ic_shield)
             .setContentTitle(title)
             .setContentText(body)
             .setStyle(androidx.core.app.NotificationCompat.BigTextStyle().bigText(body))
             .setPriority(androidx.core.app.NotificationCompat.PRIORITY_HIGH)
+            .setContentIntent(tapPending)
             .setAutoCancel(true)
             .build()
         nm.notify(CMD_NOTIF_ID + title.hashCode() and 0x0FFF, notification)
