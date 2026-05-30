@@ -8,14 +8,18 @@ import 'package:flutter/services.dart';
 /// reads to perform stealth regex substitutions inside every hooked app's
 /// [android.widget.TextView].
 ///
-/// The dictionary is a [Map<String, String>] where each key is a Regex pattern
-/// string and each value is the replacement template (supports `$1`, `$2`, â€¦
-/// capture-group references).
+/// The dictionary is a [Map<String, dynamic>] where each key is a Regex pattern
+/// string and each value is either:
+/// - A single replacement string: `"pattern": "replacement"`
+/// - A list of replacement strings: `"pattern": ["option1", "option2", "option3"]`
+///
+/// When multiple options are provided, one is randomly selected on each match.
 ///
 /// Example:
 /// ```dart
 /// await TextReplacementChannel.setDict({
 ///   r'(?i)\b(good)\s+(boy|girl)\b': r'$1 pup',
+///   r'(?i)\bI\b': ['this mutt', 'puppy', 'it'],  // randomly picks one
 /// });
 /// ```
 class TextReplacementChannel {
@@ -28,12 +32,12 @@ class TextReplacementChannel {
 
   /// Built-in defaults for pronoun shifting and playful puppy diction.
   ///
-  /// Rules are regex pattern -> replacement template and are only auto-seeded
-  /// when the stored dictionary is currently empty.
-  static const Map<String, String> defaultDict = {
+  /// Rules are regex pattern -> replacement (string or list of strings).
+  /// When a list is provided, one option is randomly selected on each match.
+  static const Map<String, dynamic> defaultDict = {
     r'(?i)\bI am\b': 'this mutt is',
     r"(?i)\bI'm\b": 'this mutt is',
-    r'(?i)\bI\b': 'this mutt',
+    r'(?i)\bI\b': ['this mutt', 'puppy', 'it'],  // variable self-reference
     r'(?i)\bme\b': 'it',
     r'(?i)\bmyself\b': 'itself',
     r'(?i)\bmy\b': 'its',
@@ -53,10 +57,10 @@ class TextReplacementChannel {
     r'(?i)\bsorry\b': 'puppy is sorry',
   };
 
-  static const Map<String, String> _preferredSelfReferenceRules = {
+  static const Map<String, dynamic> _preferredSelfReferenceRules = {
     r'(?i)\bI am\b': 'this mutt is',
     r"(?i)\bI'm\b": 'this mutt is',
-    r'(?i)\bI\b': 'this mutt',
+    r'(?i)\bI\b': ['this mutt', 'puppy', 'it'],  // variable self-reference
     r'(?i)\bme\b': 'it',
     r'(?i)\bmyself\b': 'itself',
     r'(?i)\bmy\b': 'its',
@@ -67,12 +71,14 @@ class TextReplacementChannel {
   ///
   /// Returns an empty map when no dictionary has been set or when the stored
   /// value is malformed JSON.
-  static Future<Map<String, String>> getDict() async {
+  ///
+  /// Returned map may contain both string and list values for each pattern.
+  static Future<Map<String, dynamic>> getDict() async {
     final json = await _channel.invokeMethod<String>('getDict') ?? '';
     if (json.isEmpty) return {};
     try {
       final decoded = jsonDecode(json) as Map<String, dynamic>;
-      return decoded.map((k, v) => MapEntry(k, v as String));
+      return decoded;
     } on FormatException catch (_) {
       // Stored value is corrupt; return empty so the UI stays usable.
       return {};
@@ -82,7 +88,9 @@ class TextReplacementChannel {
   /// Persists [dict] to SharedPreferences.
   ///
   /// Passing an empty map clears the dictionary (no replacements will be made).
-  static Future<void> setDict(Map<String, String> dict) =>
+  ///
+  /// Dictionary values can be either strings or lists of strings for random selection.
+  static Future<void> setDict(Map<String, dynamic> dict) =>
       _channel.invokeMethod('setDict', {'json': jsonEncode(dict)});
 
   static Future<Map<String, dynamic>> getPolicy() async {
@@ -109,7 +117,7 @@ class TextReplacementChannel {
     } else {
       // Keep custom rules, backfill missing defaults, and enforce preferred
       // first-person-to-it/mutt self-reference mappings.
-      final merged = <String, String>{...defaultDict, ...current};
+      final merged = <String, dynamic>{...defaultDict, ...current};
       merged.addAll(_preferredSelfReferenceRules);
       await setDict(merged);
     }

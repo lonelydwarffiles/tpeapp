@@ -73,6 +73,29 @@ class ToneEnforcementService : AccessibilityService() {
          */
         private const val CORRECTION_GUARD_MS = 250L
 
+        /** How long (ms) to ignore the first echoed text event for our own rewrite. */
+        private const val REPLACEMENT_ECHO_WINDOW_MS = 1_500L
+
+        /** Minimum ms between accepting dictionary replacements (per keystroke). */
+        private const val MIN_REPLACEMENT_INTERVAL_MS = 500L
+
+        /** Max age (ms) for tracking recent replacements to prevent re-application. */
+        private const val RECENT_REPLACEMENT_WINDOW_MS = 5_000L
+
+        /**
+         * Grammar correction rules as (pattern → replacement) pairs.
+         * Applied AFTER text dictionary replacements to fix agreement errors.
+         */
+        private val GRAMMAR_RULES = listOf(
+            // Subject-verb agreement
+            Regex("""\bthis mutt are\b""", RegexOption.IGNORE_CASE) to "this mutt is",
+            Regex("""\bit are\b""", RegexOption.IGNORE_CASE) to "it is",
+            // Double verbs
+            Regex("""\b(is|are|was|were)\s+\1\b""", RegexOption.IGNORE_CASE) to "$1",
+            // Double common words
+            Regex("""\b(the|a|an|and|or|but)\s+\1\b""", RegexOption.IGNORE_CASE) to "$1"
+        )
+
         /** Package-name substrings that identify messaging/SMS apps for PTS gating. */
         private val MESSAGING_PACKAGE_KEYWORDS = listOf(
             "sms", "message", "whatsapp", "telegram", "signal", "messenger",
@@ -134,11 +157,61 @@ class ToneEnforcementService : AccessibilityService() {
     /** Lower-case restricted word most recently corrected (used for bypass detection). */
     private var lastCorrectedWord: String? = null
 
+    /** Last full replacement text injected by this service (used to stop rewrite loops). */
+    private var lastAppliedReplacementText: String? = null
+
+    /** Timestamp for [lastAppliedReplacementText]. */
+    private var lastAppliedReplacementAt: Long = 0L
+
+    /** Timestamp of the last accepted replacement (for rate-limiting per keystroke). */
+    private var lastReplacementAcceptedAt: Long = 0L
+
+    /** Original text before the last dictionary replacement (for bypass detection). */
+    private var lastDictReplacementOriginal: String? = null
+
+    /** The regex pattern applied in last dictionary replacement (for bypass detection). */
+    private var lastAppliedDictPattern: String? = null
+
+    /** Timestamp of the last dictionary replacement (for bypass detection). */
+    private var lastDictReplacementTimestamp: Long = 0L
+
+    /**
+     * Tracks recently-applied dictionary replacements (original → result pairs).
+     * Used to prevent re-applying the same pattern when the user extends the
+     * already-replaced text (e.g., typing a space after a replacement).
+     */
+    private data class RecentReplacement(
+        val original: String,
+        val result: String,
+        val pattern: String,
+        val appliedAt: Long
+    )
+    private val recentDictReplacements = mutableListOf<RecentReplacement>()
+
+
+    /**
+     * Regex patterns that the user has explicitly bypassed this session
+     * by deleting and retyping the original text.
+     */
+    private val dictionaryBypassPatterns = mutableSetOf<String>()
+    /**
+     * Text corrections that the user has explicitly bypassed this session.
+     * Used to prevent re-applying grammar corrections the user wants to keep wrong.
+     */
+    private val grammarBypassRules = mutableSetOf<String>()
     /**
      * Words that the user has successfully bypassed during this session.
      * Ignored when strict mode is active.
      */
     private val sessionWhitelist = mutableSetOf<String>()
+
+    /**
+     * Tracks the chosen replacement option for each pattern this session.
+     * When a pattern has multiple replacement options, the first randomly-selected
+     * option is reused for all matches within that session, ensuring consistency
+     * (e.g., "I" stays as "puppy" throughout a message, not varying per keystroke).
+     */
+    private val sessionReplacementChoices = mutableMapOf<String, String>()
 
     // ------------------------------------------------------------------
     //  Focus-change tracking (used to reset session state)
@@ -240,11 +313,61 @@ class ToneEnforcementService : AccessibilityService() {
             val currentText = node.text?.toString() ?: return
             if (currentText.isBlank()) return
 
+            val now = System.currentTimeMillis()
+            if (currentText == lastAppliedReplacementText &&
+                (now - lastAppliedReplacementAt) <= REPLACEMENT_ECHO_WINDOW_MS
+            ) {
+                Log.d(TAG, "Ignoring replacement echo event")
+                return
+            }
+
+            // Rate-limit dictionary replacements to avoid firing on every keystroke.
+            val timeSinceLastReplacement = now - lastReplacementAcceptedAt
+            if (timeSinceLastReplacement < MIN_REPLACEMENT_INTERVAL_MS) {
+                Log.d(TAG, "Replacement rate-limited: ${timeSinceLastReplacement}ms since last")
+                return
+            }
+
             // ---- Honorific prepend ------------------------------------------------
             if (HonorificManager.isEnabled(applicationContext)) {
                 val honorific = HonorificManager.getHonorific(applicationContext)
                 if (honorific.isNotBlank() && !currentText.startsWith(honorific)) {
                     scheduleReplacement(honorific + currentText)
+                    return
+                }
+            }
+
+            // ---- Correction pass --------------------------------------------------
+            val rewritten = applyTextReplacementDictionary(currentText)
+            if (rewritten != currentText) {
+                Log.i(TAG, "Text-replacement dictionary matched — applying rewrite")
+                lastReplacementAcceptedAt = System.currentTimeMillis()
+                applyReplacement(node, rewritten)
+                return
+            }
+
+            // ---- Grammar correction pass --------------------------------------------------
+            val grammarCorrected = postProcessGrammar(currentText)
+            if (grammarCorrected != currentText) {
+                Log.i(TAG, "Grammar error detected and corrected")
+                applyReplacement(node, grammarCorrected)
+                return
+            }
+
+            // ---- Dictionary bypass detection (soft mode only) ----
+            if (!strictToneModeEnabled) {
+                val pattern = lastAppliedDictPattern
+                val original = lastDictReplacementOriginal
+                if (pattern != null && original != null &&
+                    currentText == original &&
+                    (System.currentTimeMillis() - lastDictReplacementTimestamp) <= BYPASS_WINDOW_MS
+                ) {
+                    // User deleted the replacement and retyped original within grace window.
+                    dictionaryBypassPatterns.add(pattern)
+                    lastAppliedDictPattern = null
+                    lastDictReplacementOriginal = null
+                    Log.i(TAG, "Dictionary pattern bypass accepted: $pattern")
+                    ConsequenceDispatcher.punish(applicationContext, "dict_bypass=$pattern")
                     return
                 }
             }
@@ -273,7 +396,6 @@ class ToneEnforcementService : AccessibilityService() {
                 }
             }
 
-            // ---- Correction pass --------------------------------------------------
             for (word in restricted) {
                 if (word.isBlank()) continue
                 if (!containsWholeWord(textLower, word)) continue
@@ -284,7 +406,7 @@ class ToneEnforcementService : AccessibilityService() {
                 Log.i(TAG, "Restricted word detected ('$word') — scheduling replacement")
                 lastCorrectedWord        = word
                 lastCorrectionTimestamp  = System.currentTimeMillis()
-                scheduleReplacement(SAFE_PHRASE)
+                applyReplacement(node, SAFE_PHRASE)
                 dispatchToneBlockTelemetry(word)
                 ConsequenceDispatcher.punish(applicationContext, "restricted_word=$word")
                 return
@@ -299,6 +421,35 @@ class ToneEnforcementService : AccessibilityService() {
     // ------------------------------------------------------------------
 
     /**
+     * Attempts to replace text on the same node that emitted the event, then
+     * falls back to debounced focused-node replacement when direct action fails.
+     */
+    private fun applyReplacement(targetNode: AccessibilityNodeInfo, replacement: String) {
+        lastAppliedReplacementText = replacement
+        lastAppliedReplacementAt = System.currentTimeMillis()
+        isApplyingCorrection = true
+        val succeeded = runCatching {
+            val args = Bundle().apply {
+                putCharSequence(
+                    AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE,
+                    replacement
+                )
+            }
+            targetNode.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)
+        }.getOrElse { err ->
+            Log.w(TAG, "Direct node replacement failed; falling back", err)
+            false
+        }
+
+        if (succeeded) {
+            handler.postDelayed({ isApplyingCorrection = false }, CORRECTION_GUARD_MS)
+        } else {
+            isApplyingCorrection = false
+            scheduleReplacement(replacement)
+        }
+    }
+
+    /**
      * Cancels any pending correction and schedules a new one after [DEBOUNCE_MS].
      * Uses [rootInActiveWindow] at execution time so no [AccessibilityNodeInfo]
      * reference is held across the delay.
@@ -308,6 +459,8 @@ class ToneEnforcementService : AccessibilityService() {
 
         val runnable = Runnable {
             pendingCorrectionRunnable = null
+            lastAppliedReplacementText = replacement
+            lastAppliedReplacementAt = System.currentTimeMillis()
             isApplyingCorrection = true
 
             val root = rootInActiveWindow
@@ -335,6 +488,124 @@ class ToneEnforcementService : AccessibilityService() {
     /** Returns `true` if [text] contains [word] as a whole word (regex boundary). */
     private fun containsWholeWord(text: String, word: String): Boolean =
         WORD_BOUNDARY_REGEX.format(Regex.escape(word)).toRegex().containsMatchIn(text)
+
+    /**
+     * Applies partner-configured regex dictionary rules from SharedPreferences.
+     *
+     * This provides a local fallback when LSPosed or external hook layers are
+     * unavailable, ensuring replacements still occur through Accessibility.
+     * 
+     * Skips any patterns that the user has explicitly bypassed during this session,
+     * and also skips patterns whose replacement results are already visible in the
+     * current text (to avoid re-applying them as the user continues typing).
+     */
+    private fun applyTextReplacementDictionary(text: String): String {
+        // Clean up expired recent replacements.
+        val now = System.currentTimeMillis()
+        recentDictReplacements.removeAll { (now - it.appliedAt) > RECENT_REPLACEMENT_WINDOW_MS }
+
+        // If any recent replacement's result is already in the current text,
+        // skip dictionary application entirely to avoid re-triggering.
+        for (recent in recentDictReplacements) {
+            if (text.contains(recent.result)) {
+                Log.d(TAG, "Current text already contains recent replacement result, skipping dict")
+                return text
+            }
+        }
+
+        val prefs = PreferenceManager.getDefaultSharedPreferences(applicationContext)
+        val dictJson = prefs.getString(FilterService.PREF_TEXT_REPLACEMENT_DICT, null)
+            ?.takeIf { it.isNotBlank() }
+            ?: return text
+
+        return try {
+            val obj = JSONObject(dictJson)
+            var rewritten = text
+            var appliedPattern: String? = null
+            var appliedReplacement: String? = null
+            val keys = obj.keys()
+            while (keys.hasNext()) {
+                val pattern = keys.next()
+                if (pattern.isBlank()) continue
+                // Skip patterns the user has already bypassed this session.
+                if (dictionaryBypassPatterns.contains(pattern)) {
+                    Log.d(TAG, "Skipping bypassed dict pattern: $pattern")
+                    continue
+                }
+                // Support both single string and array of strings for multiple options.
+                val replacementValue = obj.opt(pattern)
+                val replacements = when (replacementValue) {
+                    is String -> if (replacementValue.isEmpty()) continue else listOf(replacementValue)
+                    is org.json.JSONArray -> {
+                        val list = mutableListOf<String>()
+                        for (i in 0 until replacementValue.length()) {
+                            val item = replacementValue.optString(i, "").takeIf { it.isNotEmpty() }
+                            if (item != null) list.add(item)
+                        }
+                        if (list.isEmpty()) continue else list
+                    }
+                    else -> continue
+                }
+                // Get or pick a consistent replacement for this session.
+                // If we've already chosen a replacement for this pattern this session,
+                // reuse it. Otherwise, randomly pick one and cache it for consistency.
+                val replacement = sessionReplacementChoices.getOrPut(pattern) {
+                    replacements.random()
+                }
+                runCatching {
+                    val beforeRewrite = rewritten
+                    rewritten = rewritten.replace(pattern.toRegex(), replacement)
+                    // Track the first pattern that actually matched.
+                    if (appliedPattern == null && rewritten != beforeRewrite) {
+                        appliedPattern = pattern
+                        appliedReplacement = replacement
+                        // Store the original text before any replacements for bypass detection.
+                        lastDictReplacementOriginal = text
+                        lastAppliedDictPattern = pattern
+                        lastDictReplacementTimestamp = System.currentTimeMillis()
+                        // Record this replacement to prevent re-application during incremental typing.
+                        recentDictReplacements.add(
+                            RecentReplacement(text, rewritten, pattern, now)
+                        )
+                        Log.i(TAG, "Dictionary pattern applied: $pattern → $replacement")
+                    }
+                }.onFailure { err ->
+                    Log.w(TAG, "Invalid replacement regex skipped: $pattern", err)
+                }
+            }
+            rewritten
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to parse text-replacement dictionary", e)
+            text
+        }
+    }
+
+    /**
+     * Applies grammar correction rules to fix common errors introduced by
+     * text replacements (e.g., subject-verb agreement, double verbs).
+     * 
+     * Skips any rules the user has explicitly bypassed during this session.
+     */
+    private fun postProcessGrammar(text: String): String {
+        var corrected = text
+        for ((pattern, replacement) in GRAMMAR_RULES) {
+            val ruleId = pattern.pattern  // Use the regex pattern string as ID
+            if (grammarBypassRules.contains(ruleId)) {
+                Log.d(TAG, "Skipping bypassed grammar rule: $ruleId")
+                continue
+            }
+            runCatching {
+                val before = corrected
+                corrected = pattern.replace(corrected, replacement)
+                if (corrected != before) {
+                    Log.i(TAG, "Grammar corrected: $ruleId")
+                }
+            }.onFailure { err ->
+                Log.w(TAG, "Grammar rule failed: $ruleId", err)
+            }
+        }
+        return corrected
+    }
 
     /**
      * Replaces the text inside [node] with [replacement] using
@@ -390,8 +661,18 @@ class ToneEnforcementService : AccessibilityService() {
      */
     private fun resetSessionState() {
         sessionWhitelist.clear()
+        dictionaryBypassPatterns.clear()
+        grammarBypassRules.clear()
+        recentDictReplacements.clear()
+        sessionReplacementChoices.clear()
         lastCorrectedWord       = null
         lastCorrectionTimestamp = 0L
+        lastReplacementAcceptedAt = 0L
+        lastDictReplacementOriginal = null
+        lastAppliedDictPattern = null
+        lastDictReplacementTimestamp = 0L
+        lastAppliedReplacementText = null
+        lastAppliedReplacementAt = 0L
         lastPtsRequestedPackage = null
         pendingCorrectionRunnable?.let { handler.removeCallbacks(it) }
         pendingCorrectionRunnable = null

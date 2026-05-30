@@ -50,7 +50,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _loadingRemoteControl = true;
 
   // Text replacement dictionary
-  Map<String, String> _textReplacementDict = {};
+  Map<String, dynamic> _textReplacementDict = {};
   bool _loadingDict = true;
 
   // Password vault
@@ -132,8 +132,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
   }
 
-  Future<Map<String, String>> _safeDict(
-    Future<Map<String, String>> Function() fn,
+  Future<Map<String, dynamic>> _safeDict(
+    Future<Map<String, dynamic>> Function() fn,
   ) async {
     try {
       return await fn().timeout(_channelTimeout);
@@ -420,7 +420,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       }
       return;
     }
-    final updated = Map<String, String>.from(_textReplacementDict)..[pattern] = replacement;
+    final updated = Map<String, dynamic>.from(_textReplacementDict)..[pattern] = replacement;
     await TextReplacementChannel.setDict(updated);
     setState(() => _textReplacementDict = updated);
     await _syncTextReplacementDict(updated);
@@ -436,7 +436,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Future<void> _removeDictEntry(String pattern) async {
-    final updated = Map<String, String>.from(_textReplacementDict)..remove(pattern);
+    final updated = Map<String, dynamic>.from(_textReplacementDict)..remove(pattern);
     await TextReplacementChannel.setDict(updated);
     setState(() => _textReplacementDict = updated);
     await _syncTextReplacementDict(updated);
@@ -503,7 +503,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
   }
 
-  Future<void> _syncTextReplacementDict(Map<String, String> dict) async {
+  Future<void> _syncTextReplacementDict(Map<String, dynamic> dict) async {
     final endpoint = (_prefs.getString('partner_endpoint_url') ?? '').trim();
     if (endpoint.isEmpty) {
       return;

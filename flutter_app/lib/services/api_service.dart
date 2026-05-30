@@ -481,8 +481,10 @@ class ApiService {
 
   /// Pushes a text-replacement dictionary to the device runtime through the
   /// partner backend's admin MQTT bridge.
+  ///
+  /// Dictionary values can be either strings or lists of strings for random selection.
   Future<void> pushTextReplacementDict({
-    required Map<String, String> dict,
+    required Map<String, dynamic> dict,
     String? deviceId,
   }) async {
     final payload = {
