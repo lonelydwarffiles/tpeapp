@@ -34,9 +34,13 @@ enum IntifaceStatus {
 /// exponentially increasing delay (up to [_maxReconnectDelay]) before trying
 /// again, unless [disconnect] was called intentionally.
 class IntifaceService extends ChangeNotifier {
-  static const String _host = '127.0.0.1';
-  static const int _port = 12345;
-  static const String _url = 'ws://$_host:$_port';
+  factory IntifaceService() => _instance;
+
+  IntifaceService._internal();
+
+  static final IntifaceService _instance = IntifaceService._internal();
+
+  static const String _defaultEndpoint = 'ws://127.0.0.1:12345';
 
   static const String _clientName = 'tpeapp';
 
@@ -55,6 +59,8 @@ class IntifaceService extends ChangeNotifier {
   int? _deviceIndex;
   String? _deviceName;
   String? _serverName;
+  String _endpoint = _defaultEndpoint;
+  String? _lastError;
 
   IntifaceStatus _status = IntifaceStatus.disconnected;
   bool _intentionalDisconnect = false;
@@ -76,9 +82,20 @@ class IntifaceService extends ChangeNotifier {
   /// a successful connection.
   String? get serverName => _serverName;
 
+  String get endpoint => _endpoint;
+
+  String? get lastError => _lastError;
+
   /// `true` while a WebSocket connection is active and the handshake has
   /// completed successfully.
   bool get isConnected => _status == IntifaceStatus.connected;
+
+  void setEndpoint(String endpoint) {
+    final value = endpoint.trim();
+    if (value.isEmpty || value == _endpoint) return;
+    _endpoint = value;
+    notifyListeners();
+  }
 
   /// Opens the WebSocket connection, performs the Buttplug handshake, and
   /// starts scanning for devices.
@@ -123,7 +140,8 @@ class IntifaceService extends ChangeNotifier {
 
   Future<void> _openSocket() async {
     try {
-      _socket = await WebSocket.connect(_url);
+      _socket = await WebSocket.connect(_endpoint);
+      _lastError = null;
       _reconnectDelay = _initialReconnectDelay; // reset backoff on success
       _socketSub = _socket!.listen(
         _onMessage,
@@ -133,6 +151,8 @@ class IntifaceService extends ChangeNotifier {
       );
       await _handshake();
     } catch (e) {
+      _lastError = 'Intiface connection failed: $e';
+      notifyListeners();
       _scheduleReconnect();
     }
   }
@@ -144,6 +164,7 @@ class IntifaceService extends ChangeNotifier {
     _socket = null;
     _deviceIndex = null;
     _deviceName = null;
+    _serverName = null;
   }
 
   void _scheduleReconnect() {
@@ -246,6 +267,7 @@ class IntifaceService extends ChangeNotifier {
       case 'ServerInfo':
         // Handshake complete — capture server name and begin scanning.
         _serverName = body['ServerName'] as String?;
+        _lastError = null;
         _setStatus(IntifaceStatus.connected);
         _startScanning();
 
@@ -266,13 +288,17 @@ class IntifaceService extends ChangeNotifier {
         }
 
       case 'Error':
-        // Non-fatal server errors are silently ignored; the connection stays
-        // open.  Fatal transport errors are handled in _onError / _onDone.
+        _lastError =
+            (body['ErrorMessage'] ?? body['Message'] ?? 'Intiface server error')
+                .toString();
+        notifyListeners();
         break;
     }
   }
 
   void _onError(Object error) {
+    _lastError = 'Intiface socket error: $error';
+    notifyListeners();
     _closeSocket().then((_) => _scheduleReconnect());
   }
 
@@ -281,6 +307,10 @@ class IntifaceService extends ChangeNotifier {
     _socketSub = null;
     _deviceIndex = null;
     _deviceName = null;
+    if (!_intentionalDisconnect && _lastError == null) {
+      _lastError = 'Intiface connection closed.';
+    }
+    notifyListeners();
     _scheduleReconnect();
   }
 }

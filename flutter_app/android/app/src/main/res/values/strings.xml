@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="tpe_accessibility_service_label">TPE Accessibility Companion</string>
+    <string name="tpe_accessibility_service_description">Lets TPE observe foreground app changes and support device control features that rely on Accessibility.</string>
+    <string name="tpe_accessibility_service_summary">Enables TPE accessibility-backed control and context awareness.</string>
+</resources>

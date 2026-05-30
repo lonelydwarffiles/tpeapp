@@ -12,6 +12,7 @@ import 'services/kiosk_task_controller.dart';
 import 'services/ritual_repository.dart';
 import 'services/vitals_sync_service.dart';
 import 'services/websocket_service.dart';
+import 'services/ble_service.dart';
 import 'services/intiface_service.dart';
 import 'channels/text_replacement_channel.dart';
 
@@ -23,8 +24,13 @@ void main() async {
   await TextReplacementChannel.ensureDefaults();
   unawaited(() async {
     try {
+      final dict = await TextReplacementChannel.getDict();
+      final policy = await TextReplacementChannel.getPolicy();
       await ApiService(prefs).pushTextReplacementDict(
-        dict: await TextReplacementChannel.getDict(),
+        dict: dict,
+      );
+      await ApiService(prefs).pushTextReplacementPolicy(
+        policy: policy.isEmpty ? TextReplacementChannel.defaultPolicy : policy,
       );
     } catch (_) {
       // Best-effort sync only.
@@ -44,6 +50,7 @@ void main() async {
         ChangeNotifierProvider(create: (_) => ChatRepository(prefs)),
         ChangeNotifierProvider(create: (_) => RitualRepository(prefs)),
         Provider(create: (_) => WebSocketService(prefs)),
+        ChangeNotifierProvider(create: (_) => BleService()),
         ChangeNotifierProvider(create: (_) => IntifaceService()),
       ],
       child: const TpeApp(),

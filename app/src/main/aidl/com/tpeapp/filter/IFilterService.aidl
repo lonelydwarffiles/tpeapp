@@ -39,6 +39,12 @@ interface IFilterService {
     /** Live-reload the active confidence threshold (0.0–1.0). */
     void setConfidenceThreshold(float threshold);
 
+    /** Persist the text-replacement dictionary JSON and refresh live caches. */
+    void setTextReplacementDict(String json);
+
+    /** Persist the text-replacement policy JSON and refresh live caches. */
+    void setTextReplacementPolicy(String json);
+
     /**
      * Returns the text-replacement dictionary as a JSON string.
      *

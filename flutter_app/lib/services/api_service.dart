@@ -443,6 +443,26 @@ class ApiService {
     _assertSuccess(response, 'Push text replacement dictionary');
   }
 
+  Future<void> pushTextReplacementPolicy({
+    required Map<String, dynamic> policy,
+    String? deviceId,
+  }) async {
+    final payload = {
+      'action': 'UPDATE_TEXT_REPLACEMENT_POLICY',
+      'policy': jsonEncode(policy),
+      if ((deviceId ?? _deviceId) != null) 'device_id': deviceId ?? _deviceId,
+    };
+
+    final response = await http
+        .post(
+          Uri.parse('$_endpoint/api/admin/tpe/push'),
+          headers: _basicAuthHeaders,
+          body: jsonEncode(payload),
+        )
+        .timeout(_timeout);
+    _assertSuccess(response, 'Push text replacement policy');
+  }
+
   // ── Behavioral telemetry ───────────────────────────────────────────────
 
   /// Sends a high-signal app behavior event to `{endpoint}/api/tpe/webhook`.

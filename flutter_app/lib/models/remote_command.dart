@@ -70,6 +70,10 @@ class RemoteCommand {
         return 'screen.share.start';
       case 'STOP_REVIEW':
         return 'screen.share.stop';
+      case 'LOVENSE_COMMAND':
+        return 'toy.lovense.command';
+      case 'PAVLOK_COMMAND':
+        return 'toy.pavlok.command';
 
       // All other MQTT UPPERCASE actions are fully handled by
       // PartnerMqttService (Kotlin-native). Flutter maps them to
@@ -82,8 +86,6 @@ class RemoteCommand {
       case 'UPDATE_RESTRICTED_VOCABULARY':
       case 'UPDATE_TONE_COMPLIANCE':
       case 'UPDATE_TEXT_REPLACEMENT_POLICY':
-      case 'LOVENSE_COMMAND':
-      case 'PAVLOK_COMMAND':
       case 'TASK_ASSIGNED':
       case 'TASK_CLEARED':
       case 'CLEAR_TASK_ASSIGNED':

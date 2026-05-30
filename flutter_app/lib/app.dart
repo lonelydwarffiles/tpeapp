@@ -9,6 +9,7 @@ import 'package:provider/provider.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:uuid/uuid.dart';
 
+import 'channels/accessibility_setup_channel.dart';
 import 'channels/filter_service_channel.dart';
 import 'channels/remote_control_channel.dart';
 import 'channels/device_command_channel.dart';
@@ -214,6 +215,8 @@ class _StartupGateState extends State<_StartupGate> {
   bool _acknowledged = false;
   bool _rootAvailable = false;
   bool _rootCheckFailed = false;
+  bool _accessibilityEnabled = false;
+  bool _accessibilityCheckFailed = false;
   bool _autoEnrollInFlight = false;
   bool _deviceStatusInFlight = false;
   Timer? _autoEnrollTimer;
@@ -244,6 +247,8 @@ class _StartupGateState extends State<_StartupGate> {
 
     var rootAvailable = false;
     var rootCheckFailed = false;
+    var accessibilityEnabled = false;
+    var accessibilityCheckFailed = false;
     try {
       rootAvailable = await RemoteControlChannel.isRootAvailable();
     } on PlatformException {
@@ -252,8 +257,17 @@ class _StartupGateState extends State<_StartupGate> {
       rootCheckFailed = true;
     }
 
+    try {
+      accessibilityEnabled = await AccessibilitySetupChannel.isEnabled();
+    } on PlatformException {
+      accessibilityCheckFailed = true;
+    } on MissingPluginException {
+      accessibilityCheckFailed = true;
+    }
+
     final missingPermissions =
         statuses.values.any((status) => !status.isGranted);
+    final missingAccessibility = !accessibilityEnabled;
     if (!mounted) return;
 
     setState(() {
@@ -262,8 +276,10 @@ class _StartupGateState extends State<_StartupGate> {
         ..addAll(statuses);
       _rootAvailable = rootAvailable;
       _rootCheckFailed = rootCheckFailed;
+      _accessibilityEnabled = accessibilityEnabled;
+      _accessibilityCheckFailed = accessibilityCheckFailed;
       _bootstrapping = false;
-      _acknowledged = seen && !missingPermissions;
+      _acknowledged = seen && !missingPermissions && !missingAccessibility;
     });
 
     // Keep command transport alive independent of individual screens.
@@ -506,6 +522,10 @@ class _StartupGateState extends State<_StartupGate> {
     await openAppSettings();
   }
 
+  Future<void> _openAccessibilitySettings() async {
+    await AccessibilitySetupChannel.openSettings();
+  }
+
   String _labelFor(Permission permission) {
     switch (permission) {
       case Permission.camera:
@@ -596,12 +616,33 @@ class _StartupGateState extends State<_StartupGate> {
                         : 'Root access not detected. Full device-control features will be limited.',
               ),
             ),
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: Icon(
+                _accessibilityEnabled ? Icons.check_circle : Icons.error_outline,
+              ),
+              title: const Text('Accessibility Service'),
+              subtitle: Text(
+                _accessibilityCheckFailed
+                    ? 'Accessibility status check failed. Open system accessibility settings and enable the TPE service.'
+                    : _accessibilityEnabled
+                        ? 'Accessibility Service is enabled.'
+                        : 'Enable the TPE Accessibility Service in Android Accessibility settings.',
+              ),
+            ),
             const SizedBox(height: 24),
             if (missingPermissions.isNotEmpty)
               FilledButton(
                 onPressed: _bootstrap,
                 child: const Text('Retry Permission Requests'),
               ),
+            if (!_accessibilityEnabled) ...[
+              if (missingPermissions.isNotEmpty) const SizedBox(height: 12),
+              OutlinedButton(
+                onPressed: _openAccessibilitySettings,
+                child: const Text('Open Accessibility Settings'),
+              ),
+            ],
             if (missingPermissions.any((permission) =>
                 _statuses[permission]?.isPermanentlyDenied == true)) ...[
               const SizedBox(height: 12),

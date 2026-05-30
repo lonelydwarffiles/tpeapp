@@ -405,6 +405,26 @@ class FilterService : Service() {
             Log.i(TAG, "Confidence threshold updated → $threshold")
         }
 
+        override fun setTextReplacementDict(json: String?) {
+            val normalized = json?.takeIf { it.isNotBlank() } ?: ""
+            textReplacementDictJson = normalized
+            PreferenceManager.getDefaultSharedPreferences(applicationContext)
+                .edit()
+                .putString(PREF_TEXT_REPLACEMENT_DICT, normalized)
+                .apply()
+            Log.i(TAG, "Text-replacement dictionary updated via binder (${normalized.length} chars)")
+        }
+
+        override fun setTextReplacementPolicy(json: String?) {
+            val normalized = json?.takeIf { it.isNotBlank() } ?: ""
+            textReplacementPolicyJson = normalized
+            PreferenceManager.getDefaultSharedPreferences(applicationContext)
+                .edit()
+                .putString(PREF_TEXT_REPLACEMENT_POLICY, normalized)
+                .apply()
+            Log.i(TAG, "Text-replacement policy updated via binder (${normalized.length} chars)")
+        }
+
         override fun getTextReplacementDict(): String = textReplacementDictJson
 
         override fun getTextReplacementPolicy(): String = textReplacementPolicyJson

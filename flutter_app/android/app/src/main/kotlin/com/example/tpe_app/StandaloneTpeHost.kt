@@ -3,10 +3,12 @@ package com.example.tpe_app
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.Manifest
+import android.content.ComponentName
 import android.content.pm.PackageManager
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.content.ServiceConnection
 import android.hardware.camera2.CameraManager
 import android.location.Location
 import android.location.LocationManager
@@ -15,6 +17,7 @@ import android.media.MediaPlayer
 import android.net.Uri
 import android.os.BatteryManager
 import android.os.Build
+import android.os.IBinder
 import android.os.PowerManager
 import android.provider.Settings
 import android.speech.tts.TextToSpeech
@@ -25,6 +28,7 @@ import androidx.core.content.ContextCompat
 import androidx.core.app.NotificationCompat
 import androidx.health.connect.client.HealthConnectClient
 import androidx.health.connect.client.PermissionController
+import com.tpeapp.filter.IFilterService
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodCall
@@ -50,10 +54,17 @@ private const val WEBHOOK_URL_KEY = "webhook_url"
 private const val WEBHOOK_TOKEN_KEY = "webhook_bearer_token"
 private const val INJECTION_MODE_KEY = "remote_control_injection_mode"
 private const val TEXT_REPLACEMENT_KEY = "text_replacement_dict"
+private const val TEXT_REPLACEMENT_POLICY_KEY = "text_replacement_policy"
 private const val HEALTH_CONNECT_CHANNEL = "com.example.tpe_app/health"
 private const val SCREEN_SHARE_TAG = "StandaloneScreenShare"
 private const val DEVICE_COMMANDS_CHANNEL = "com.tpeapp/device_commands"
 private const val DEVICE_COMMANDS_NOTIFICATION_CHANNEL = "tpe_device_commands"
+private const val ACCESSIBILITY_SETUP_CHANNEL = "com.example.tpe_app/accessibility_setup"
+private const val ACCESSIBILITY_PREFS = "tpe_accessibility_service"
+private const val ACCESSIBILITY_CONNECTED_KEY = "connected"
+private const val ACCESSIBILITY_LAST_PACKAGE_KEY = "last_package"
+private const val REMOTE_FILTER_SERVICE_ACTION = "com.tpeapp.BIND_FILTER_SERVICE"
+private const val REMOTE_FILTER_SERVICE_PACKAGE = "com.tpeapp"
 private var cachedRootAvailable: Boolean? = null
 private var deviceMediaPlayer: MediaPlayer? = null
 private var deviceTts: TextToSpeech? = null
@@ -61,6 +72,28 @@ private var deviceTtsReady: Boolean = false
 private var healthConnectPermissionsLauncher: ActivityResultLauncher<Set<String>>? = null
 private var pendingHealthPermissions: Set<String> = emptySet()
 private var pendingHealthPermissionsResult: MethodChannel.Result? = null
+private var remoteFilterService: IFilterService? = null
+private var remoteFilterServiceBinding = false
+private val remoteFilterCallbacks = mutableListOf<(IFilterService?) -> Unit>()
+private val remoteFilterLock = Any()
+private val remoteFilterConnection = object : ServiceConnection {
+    override fun onServiceConnected(name: ComponentName?, service: IBinder?) {
+        val binder = IFilterService.Stub.asInterface(service)
+        val callbacks = synchronized(remoteFilterLock) {
+            remoteFilterService = binder
+            remoteFilterServiceBinding = false
+            ArrayList(remoteFilterCallbacks).also { remoteFilterCallbacks.clear() }
+        }
+        callbacks.forEach { callback -> runCatching { callback(binder) } }
+    }
+
+    override fun onServiceDisconnected(name: ComponentName?) {
+        synchronized(remoteFilterLock) {
+            remoteFilterService = null
+            remoteFilterServiceBinding = false
+        }
+    }
+}
 
 object StandaloneTpeHost {
     fun register(flutterEngine: FlutterEngine, activity: MainActivity) {
@@ -68,6 +101,7 @@ object StandaloneTpeHost {
         val context = activity.applicationContext
 
         registerHealthConnect(messenger, activity)
+        registerAccessibilitySetup(messenger, activity)
         registerFilterService(messenger, context)
         registerPartnerPin(messenger, context)
         registerDeviceAdmin(messenger, activity)
@@ -78,6 +112,53 @@ object StandaloneTpeHost {
         registerPasswordVault(messenger, context)
         registerDeviceCommands(messenger, context)
         registerNoOpMethods(messenger, "com.tpeapp/ble")
+    }
+
+    private fun registerAccessibilitySetup(
+        messenger: io.flutter.plugin.common.BinaryMessenger,
+        activity: MainActivity,
+    ) {
+        MethodChannel(messenger, ACCESSIBILITY_SETUP_CHANNEL).setMethodCallHandler { call, result ->
+            when (call.method) {
+                "isEnabled" -> result.success(isAccessibilityServiceEnabled(activity))
+                "openSettings" -> {
+                    val intent = Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS).apply {
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    }
+                    runCatching { activity.startActivity(intent) }
+                        .onSuccess { result.success(null) }
+                        .onFailure { err -> result.error("ACCESSIBILITY_SETTINGS_FAILED", err.message, null) }
+                }
+                else -> result.notImplemented()
+            }
+        }
+    }
+
+    private fun isAccessibilityServiceEnabled(context: Context): Boolean {
+        val component = ComponentName(context, TpeAccessibilityService::class.java)
+        val enabled = Settings.Secure.getInt(
+            context.contentResolver,
+            Settings.Secure.ACCESSIBILITY_ENABLED,
+            0,
+        ) == 1
+        if (!enabled) return false
+
+        val services = Settings.Secure.getString(
+            context.contentResolver,
+            Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES,
+        ).orEmpty()
+        if (services.isBlank()) return false
+
+        val enabledServices = services
+            .split(':')
+            .map { it.trim().lowercase() }
+            .filter { it.isNotBlank() }
+            .toSet()
+
+        return component.flattenToString().lowercase() in enabledServices ||
+            component.flattenToShortString().lowercase() in enabledServices ||
+            context.getSharedPreferences(ACCESSIBILITY_PREFS, Context.MODE_PRIVATE)
+                .getBoolean(ACCESSIBILITY_CONNECTED_KEY, false)
     }
 
     private fun registerHealthConnect(
@@ -759,18 +840,51 @@ object StandaloneTpeHost {
                     val y = call.argument<Double>("y")?.toFloat()
                     if (x == null || y == null) {
                         result.error("INVALID", "x and y are required", null)
-                    } else if (!isRootAvailable()) {
-                        result.error(
-                            "UNAVAILABLE",
-                            "Standalone host requires root for tap injection",
-                            null,
-                        )
                     } else {
-                        val injected = dispatchTapViaRoot(context, x, y)
+                        val injectionMode = prefs.getString(flutterKey(INJECTION_MODE_KEY), "auto") ?: "auto"
+                        val accessibilityEnabled = isAccessibilityServiceEnabled(context)
+                        val injected = when (injectionMode) {
+                            "accessibility" -> {
+                                if (!accessibilityEnabled) {
+                                    result.error(
+                                        "ACCESSIBILITY_UNAVAILABLE",
+                                        "Enable the TPE Accessibility Companion to use accessibility injection",
+                                        null,
+                                    )
+                                    return@setMethodCallHandler
+                                }
+                                TpeAccessibilityService.injectTap(x, y)
+                            }
+                            "root" -> {
+                                if (!isRootAvailable()) {
+                                    result.error(
+                                        "ROOT_UNAVAILABLE",
+                                        "Root is required for the selected injection mode",
+                                        null,
+                                    )
+                                    return@setMethodCallHandler
+                                }
+                                dispatchTapViaRoot(context, x, y)
+                            }
+                            else -> {
+                                if (accessibilityEnabled && TpeAccessibilityService.injectTap(x, y)) {
+                                    true
+                                } else if (isRootAvailable()) {
+                                    dispatchTapViaRoot(context, x, y)
+                                } else {
+                                    false
+                                }
+                            }
+                        }
+
                         if (injected) {
                             result.success(null)
                         } else {
-                            result.error("INJECT_FAILED", "Root input tap command failed", null)
+                            result.error(
+                                "INJECT_FAILED",
+                                "Tap injection failed. Enable Accessibility Companion or grant root access.",
+                                null,
+                            )
                         }
                     }
                 }
@@ -828,14 +942,79 @@ object StandaloneTpeHost {
         MethodChannel(messenger, "com.tpeapp/text_replacement").setMethodCallHandler { call, result ->
             val prefs = flutterPrefs(context)
             when (call.method) {
-                "getDict" -> result.success(prefs.getString(flutterKey(TEXT_REPLACEMENT_KEY), "") ?: "")
+                "getDict" -> withRemoteFilterService(context) { service ->
+                    val localJson = prefs.getString(flutterKey(TEXT_REPLACEMENT_KEY), "") ?: ""
+                    val remoteJson = runCatching { service?.textReplacementDict ?: "" }.getOrDefault("")
+                    val effectiveJson = if (remoteJson.isNotBlank()) remoteJson else localJson
+                    if (effectiveJson != localJson) {
+                        prefs.edit().putString(flutterKey(TEXT_REPLACEMENT_KEY), effectiveJson).apply()
+                    }
+                    result.success(effectiveJson)
+                }
+                "getPolicy" -> withRemoteFilterService(context) { service ->
+                    val localJson = prefs.getString(flutterKey(TEXT_REPLACEMENT_POLICY_KEY), "") ?: ""
+                    val remoteJson = runCatching { service?.textReplacementPolicy ?: "" }.getOrDefault("")
+                    val effectiveJson = if (remoteJson.isNotBlank()) remoteJson else localJson
+                    if (effectiveJson != localJson) {
+                        prefs.edit().putString(flutterKey(TEXT_REPLACEMENT_POLICY_KEY), effectiveJson).apply()
+                    }
+                    result.success(effectiveJson)
+                }
                 "setDict" -> {
                     val json = call.argument<String>("json") ?: ""
                     prefs.edit().putString(flutterKey(TEXT_REPLACEMENT_KEY), json).apply()
-                    result.success(null)
+                    withRemoteFilterService(context) { service ->
+                        runCatching { service?.setTextReplacementDict(json) }
+                            .onFailure { Log.w(SCREEN_SHARE_TAG, "Failed to sync text-replacement dict to remote FilterService", it) }
+                        result.success(null)
+                    }
+                }
+                "setPolicy" -> {
+                    val json = call.argument<String>("json") ?: ""
+                    prefs.edit().putString(flutterKey(TEXT_REPLACEMENT_POLICY_KEY), json).apply()
+                    withRemoteFilterService(context) { service ->
+                        runCatching { service?.setTextReplacementPolicy(json) }
+                            .onFailure { Log.w(SCREEN_SHARE_TAG, "Failed to sync text-replacement policy to remote FilterService", it) }
+                        result.success(null)
+                    }
                 }
                 else -> result.notImplemented()
             }
+        }
+    }
+
+    private fun withRemoteFilterService(
+        context: Context,
+        callback: (IFilterService?) -> Unit,
+    ) {
+        val existing = synchronized(remoteFilterLock) { remoteFilterService }
+        if (existing != null) {
+            callback(existing)
+            return
+        }
+
+        synchronized(remoteFilterLock) {
+            remoteFilterCallbacks.add(callback)
+            if (remoteFilterServiceBinding) {
+                return
+            }
+            remoteFilterServiceBinding = true
+        }
+
+        val bound = runCatching {
+            context.bindService(
+                Intent(REMOTE_FILTER_SERVICE_ACTION).setPackage(REMOTE_FILTER_SERVICE_PACKAGE),
+                remoteFilterConnection,
+                Context.BIND_AUTO_CREATE,
+            )
+        }.getOrDefault(false)
+
+        if (!bound) {
+            val callbacks = synchronized(remoteFilterLock) {
+                remoteFilterServiceBinding = false
+                ArrayList(remoteFilterCallbacks).also { remoteFilterCallbacks.clear() }
+            }
+            callbacks.forEach { pending -> runCatching { pending(null) } }
         }
     }
 

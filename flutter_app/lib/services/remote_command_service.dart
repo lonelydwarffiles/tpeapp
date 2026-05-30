@@ -122,6 +122,12 @@ class RemoteCommandService {
         case 'toy.live.control':
           _lastTelemetry = await _handleToyLiveControl(command);
           break;
+        case 'toy.lovense.command':
+          _lastTelemetry = await _handleLovenseCommand(command);
+          break;
+        case 'toy.pavlok.command':
+          _lastTelemetry = await _handlePavlokCommand(command);
+          break;
         default:
           await _ack(
             command,
@@ -662,6 +668,84 @@ class RemoteCommandService {
     };
   }
 
+  Future<Map<String, dynamic>> _handleLovenseCommand(RemoteCommand command) async {
+    final toyCommand = (_stringValue(command.params, const ['toy_command', 'command']) ?? 'vibrate').toLowerCase();
+    final level = (_intValue(command.params, const ['toy_level', 'level']) ?? 10).clamp(0, 20);
+
+    switch (toyCommand) {
+      case 'scan':
+      case 'pair':
+        await BleChannel.lovenseScan();
+        break;
+      case 'stopscan':
+      case 'stop_scan':
+        await BleChannel.lovenseStopScan();
+        break;
+      case 'disconnect':
+        await BleChannel.lovenseDisconnect();
+        break;
+      case 'rotate':
+        await BleChannel.lovenseRotate(level.toInt());
+        break;
+      case 'pump':
+        await BleChannel.lovensePump(level.clamp(0, 3).toInt());
+        break;
+      case 'battery':
+        await BleChannel.lovenseBattery();
+        break;
+      case 'stop':
+        await BleChannel.lovenseStopAll();
+        break;
+      case 'vibrate':
+      default:
+        await BleChannel.lovenseVibrate(level.toInt());
+        break;
+    }
+
+    return {'toy_mode': 'lovense', 'toy_command': toyCommand, 'toy_level': level};
+  }
+
+  Future<Map<String, dynamic>> _handlePavlokCommand(RemoteCommand command) async {
+    final pavlokCommand = (_stringValue(command.params, const ['pavlok_cmd', 'toy_command', 'command']) ?? 'zap').toLowerCase();
+    final intensity = (_intValue(command.params, const ['pavlok_intensity', 'intensity', 'toy_level', 'level']) ?? 64).clamp(0, 255);
+    final durationMs = (_intValue(command.params, const ['pavlok_duration_ms', 'duration_ms', 'toy_duration_ms']) ?? 500).clamp(0, 25500);
+
+    switch (pavlokCommand) {
+      case 'scan':
+      case 'pair':
+        await BleChannel.pavlokScan();
+        break;
+      case 'stopscan':
+      case 'stop_scan':
+        await BleChannel.pavlokStopScan();
+        break;
+      case 'disconnect':
+        await BleChannel.pavlokDisconnect();
+        break;
+      case 'stop':
+        await BleChannel.pavlokStopAll();
+        break;
+      case 'beep':
+        await BleChannel.pavlokBeep(intensity: intensity.toInt(), durationMs: durationMs.toInt());
+        break;
+      case 'vibrate':
+        await BleChannel.pavlokVibrate(intensity: intensity.toInt(), durationMs: durationMs.toInt());
+        break;
+      case 'shock':
+      case 'zap':
+      default:
+        await BleChannel.pavlokZap(intensity: intensity.toInt(), durationMs: durationMs.toInt());
+        break;
+    }
+
+    return {
+      'toy_mode': 'pavlok',
+      'pavlok_cmd': pavlokCommand,
+      'pavlok_intensity': intensity,
+      'pavlok_duration_ms': durationMs,
+    };
+  }
+
   void _startToyPattern({
     required String mode,
     required String pattern,
@@ -712,7 +796,7 @@ class RemoteCommandService {
 
   Future<void> _stopToyMode(String mode) async {
     _cancelToyPattern();
-    if (mode == 'intiface') {
+    if (mode == 'intiface' || mode == 'wevibe') {
       if (!_intiface.isConnected) {
         await _intiface.connect();
       }
@@ -723,7 +807,7 @@ class RemoteCommandService {
   }
 
   Future<void> _applyToyLevel(String mode, int level) async {
-    if (mode == 'intiface') {
+    if (mode == 'intiface' || mode == 'wevibe') {
       if (!_intiface.isConnected) {
         await _intiface.connect();
       }

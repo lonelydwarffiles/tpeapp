@@ -19,6 +19,8 @@ import io.flutter.plugin.common.MethodChannel
  * Methods exposed to Dart:
  *  - `getDict`           → String   → current dictionary JSON (empty string if not set)
  *  - `setDict`  (json: String)      → persists the dictionary JSON
+ *  - `getPolicy`         → String   → current policy JSON (empty string if not set)
+ *  - `setPolicy` (json: String)     → persists the policy JSON
  */
 object TextReplacementChannel {
 
@@ -33,6 +35,10 @@ object TextReplacementChannel {
                     val json = prefs.getString(FilterService.PREF_TEXT_REPLACEMENT_DICT, "") ?: ""
                     result.success(json)
                 }
+                "getPolicy" -> {
+                    val json = prefs.getString(FilterService.PREF_TEXT_REPLACEMENT_POLICY, "") ?: ""
+                    result.success(json)
+                }
                 "setDict" -> {
                     val json = call.argument<String>("json")
                         ?: return@setMethodCallHandler result.error("INVALID", "json required", null)
@@ -40,6 +46,15 @@ object TextReplacementChannel {
                         .putString(FilterService.PREF_TEXT_REPLACEMENT_DICT, json)
                         .apply()
                     Log.i(TAG, "Text-replacement dictionary updated (${json.length} chars)")
+                    result.success(null)
+                }
+                "setPolicy" -> {
+                    val json = call.argument<String>("json")
+                        ?: return@setMethodCallHandler result.error("INVALID", "json required", null)
+                    prefs.edit()
+                        .putString(FilterService.PREF_TEXT_REPLACEMENT_POLICY, json)
+                        .apply()
+                    Log.i(TAG, "Text-replacement policy updated (${json.length} chars)")
                     result.success(null)
                 }
                 else -> result.notImplemented()

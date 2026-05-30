@@ -11,7 +11,7 @@ import 'package:flutter/services.dart';
 /// |-----------------|-----------------------------------------------------------------|
 /// | `auto`          | Try root first if available; fall back to AccessibilityService  |
 /// | `root`          | Always use `su -c input tap X Y` (rooted devices only)         |
-/// | `accessibility` | Always use the [RemoteControlService] AccessibilityService      |
+/// | `accessibility` | Always use the standalone TPE Accessibility companion service   |
 ///
 /// The selected mode is persisted in SharedPreferences by the native layer
 /// and takes effect immediately on the next `injectTap` call — no app
@@ -30,8 +30,8 @@ class RemoteControlChannel {
   /// Force root: always attempt `su -c input tap X Y`.
   static const modeRoot = 'root';
 
-  /// Force accessibility: always use the RemoteControlService Accessibility
-  /// Service (no root required).
+  /// Force accessibility: always use the standalone TPE Accessibility
+  /// companion service (no root required).
   static const modeAccessibility = 'accessibility';
 
   // ── API ──────────────────────────────────────────────────────────────────

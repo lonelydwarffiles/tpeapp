@@ -1,5 +1,7 @@
 import 'package:flutter/services.dart';
 
+import '../services/ble_service.dart';
+
 /// Dart client for the `com.tpeapp/ble` MethodChannel.
 ///
 /// Sends commands to the native [BleChannel] which delegates to
@@ -11,73 +13,150 @@ import 'package:flutter/services.dart';
 class BleChannel {
   BleChannel._();
 
-  static const _channel = MethodChannel('com.tpeapp/ble');
+  static final BleService _service = BleService();
+  static const MethodChannel _native = MethodChannel('com.tpeapp/ble');
+
+  // A/B switch for Lovense path: native bridge (SDK-ready) vs Dart BLE.
+  static bool _useNativeLovense = false;
+
+  static bool get useNativeLovense => _useNativeLovense;
+
+  static String get lovensePathLabel =>
+      _useNativeLovense ? 'native bridge' : 'direct BLE';
+
+  static void setLovensePath({required bool useNative}) {
+    _useNativeLovense = useNative;
+  }
 
   // ── Lovense ──────────────────────────────────────────────────────────
 
   /// Starts a BLE scan for the first Lovense toy in range.
-  static Future<void> lovenseScan() => _channel.invokeMethod('lovense.scan');
+  static Future<void> lovenseScan() async {
+    if (_useNativeLovense) {
+      await _invokeLovenseNative('lovense.scan', () => _service.lovenseScan());
+      return;
+    }
+    await _service.lovenseScan();
+  }
 
   /// Stops the Lovense BLE scan.
-  static Future<void> lovenseStopScan() =>
-      _channel.invokeMethod('lovense.stopScan');
+  static Future<void> lovenseStopScan() async {
+    if (_useNativeLovense) {
+      await _invokeLovenseNative('lovense.stopScan', () => _service.lovenseStopScan());
+      return;
+    }
+    await _service.lovenseStopScan();
+  }
 
   /// Disconnects from the Lovense toy.
-  static Future<void> lovenseDisconnect() =>
-      _channel.invokeMethod('lovense.disconnect');
+  static Future<void> lovenseDisconnect() async {
+    if (_useNativeLovense) {
+      await _invokeLovenseNative('lovense.disconnect', () => _service.lovenseDisconnect());
+      return;
+    }
+    await _service.lovenseDisconnect();
+  }
 
   /// Sets vibration intensity (0–20).
-  static Future<void> lovenseVibrate(int level) =>
-      _channel.invokeMethod('lovense.vibrate', {'level': level.clamp(0, 20)});
+  static Future<void> lovenseVibrate(int level) async {
+    final safeLevel = level.clamp(0, 20);
+    if (_useNativeLovense) {
+      await _invokeLovenseNative(
+        'lovense.vibrate',
+        () => _service.lovenseVibrate(safeLevel),
+        {'level': safeLevel},
+      );
+      return;
+    }
+    await _service.lovenseVibrate(safeLevel);
+  }
 
   /// Sets rotation intensity (0–20).
-  static Future<void> lovenseRotate(int level) =>
-      _channel.invokeMethod('lovense.rotate', {'level': level.clamp(0, 20)});
+  static Future<void> lovenseRotate(int level) async {
+    final safeLevel = level.clamp(0, 20);
+    if (_useNativeLovense) {
+      await _invokeLovenseNative(
+        'lovense.rotate',
+        () => _service.lovenseRotate(safeLevel),
+        {'level': safeLevel},
+      );
+      return;
+    }
+    await _service.lovenseRotate(safeLevel);
+  }
 
   /// Sets air-pump intensity (0–3).
-  static Future<void> lovensePump(int level) =>
-      _channel.invokeMethod('lovense.pump', {'level': level.clamp(0, 3)});
+  static Future<void> lovensePump(int level) async {
+    final safeLevel = level.clamp(0, 3);
+    if (_useNativeLovense) {
+      await _invokeLovenseNative(
+        'lovense.pump',
+        () => _service.lovensePump(safeLevel),
+        {'level': safeLevel},
+      );
+      return;
+    }
+    await _service.lovensePump(safeLevel);
+  }
 
   /// Stops all active functions on the Lovense toy.
-  static Future<void> lovenseStopAll() =>
-      _channel.invokeMethod('lovense.stopAll');
+  static Future<void> lovenseStopAll() async {
+    if (_useNativeLovense) {
+      await _invokeLovenseNative('lovense.stopAll', () => _service.lovenseStopAll());
+      return;
+    }
+    await _service.lovenseStopAll();
+  }
 
   /// Requests the Lovense toy's battery level.
-  static Future<void> lovenseBattery() =>
-      _channel.invokeMethod('lovense.battery');
+  static Future<void> lovenseBattery() async {
+    if (_useNativeLovense) {
+      await _invokeLovenseNative('lovense.battery', () => _service.lovenseBattery());
+      return;
+    }
+    await _service.lovenseBattery();
+  }
 
   // ── Pavlok ──────────────────────────────────────────────────────────
 
   /// Starts a BLE scan for a Pavlok wristband in range.
-  static Future<void> pavlokScan() => _channel.invokeMethod('pavlok.scan');
+  static Future<void> pavlokScan() => _service.pavlokScan();
 
   /// Stops the Pavlok BLE scan.
-  static Future<void> pavlokStopScan() =>
-      _channel.invokeMethod('pavlok.stopScan');
+  static Future<void> pavlokStopScan() => _service.pavlokStopScan();
 
   /// Disconnects from the Pavlok wristband.
-  static Future<void> pavlokDisconnect() =>
-      _channel.invokeMethod('pavlok.disconnect');
+  static Future<void> pavlokDisconnect() => _service.pavlokDisconnect();
 
   /// Delivers an electric zap.
   /// [intensity] 0–255; [durationMs] in milliseconds.
   static Future<void> pavlokZap({int intensity = 64, int durationMs = 500}) =>
-      _channel.invokeMethod(
-          'pavlok.zap', {'intensity': intensity, 'durationMs': durationMs});
+      _service.pavlokZap(intensity: intensity, durationMs: durationMs);
 
   /// Activates wristband vibration.
   static Future<void> pavlokVibrate(
           {int intensity = 128, int durationMs = 2000}) =>
-      _channel.invokeMethod('pavlok.vibrate',
-          {'intensity': intensity, 'durationMs': durationMs});
+      _service.pavlokVibrate(intensity: intensity, durationMs: durationMs);
 
   /// Triggers an audible beep.
   static Future<void> pavlokBeep(
           {int intensity = 128, int durationMs = 1000}) =>
-      _channel.invokeMethod(
-          'pavlok.beep', {'intensity': intensity, 'durationMs': durationMs});
+      _service.pavlokBeep(intensity: intensity, durationMs: durationMs);
 
   /// Stops all active Pavlok stimulation.
-  static Future<void> pavlokStopAll() =>
-      _channel.invokeMethod('pavlok.stopAll');
+  static Future<void> pavlokStopAll() => _service.pavlokStopAll();
+
+  static Future<void> _invokeLovenseNative(
+    String method,
+    Future<void> Function() fallback, [
+    Map<String, Object?>? arguments,
+  ]) async {
+    try {
+      await _native.invokeMethod<void>(method, arguments);
+    } on MissingPluginException {
+      await fallback();
+    } on PlatformException {
+      await fallback();
+    }
+  }
 }

@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../channels/accessibility_setup_channel.dart';
 import '../channels/device_admin_channel.dart';
 import '../channels/filter_service_channel.dart';
 import '../channels/remote_control_channel.dart';
@@ -50,6 +51,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _loadingAdmin = true;
   bool _batteryOptimizationsIgnored = false;
   bool _loadingBatteryOptimization = true;
+  bool _accessibilityEnabled = false;
+  bool _loadingAccessibility = true;
 
   // Filter
   double _threshold = 0.55;
@@ -108,6 +111,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
     final active = await DeviceAdminChannel.isAdminActive();
     final batteryIgnored = await DeviceAdminChannel.isIgnoringBatteryOptimizations();
+    final accessibilityEnabled = await AccessibilitySetupChannel.isEnabled();
     final webhookUrl = await FilterServiceChannel.getWebhookUrl();
     final webhookToken = await FilterServiceChannel.getWebhookToken();
     final healthEnabled = await VitalsSyncService.instance.isEnabled();
@@ -128,6 +132,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _loadingAdmin = false;
       _batteryOptimizationsIgnored = batteryIgnored;
       _loadingBatteryOptimization = false;
+      _accessibilityEnabled = accessibilityEnabled;
+      _loadingAccessibility = false;
       _threshold = (_prefs.getDouble('filter_confidence_threshold') ?? 0.55);
       _strictMode = _prefs.getBool('filter_strict_mode') ?? false;
         _mediaFilterMode = (mediaConfig['mode'] as String?)?.trim().toLowerCase() == 'strict'
@@ -159,6 +165,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _revealTimeoutSeconds =
           _prefs.getInt(_kRevealTimeoutSeconds) ?? 10;
     });
+  }
+
+  Future<void> _refreshAccessibility() async {
+    final enabled = await AccessibilitySetupChannel.isEnabled();
+    if (!mounted) return;
+    setState(() {
+      _accessibilityEnabled = enabled;
+      _loadingAccessibility = false;
+    });
+  }
+
+  Future<void> _openAccessibilitySettings() async {
+    await AccessibilitySetupChannel.openSettings();
   }
 
   Future<void> _activateAdmin() async {
@@ -611,6 +630,37 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     ),
                 ]),
 
+          const SizedBox(height: 14),
+          Text('Accessibility Service',
+              style: Theme.of(context).textTheme.titleSmall),
+          const SizedBox(height: 8),
+          _loadingAccessibility
+              ? const LinearProgressIndicator()
+              : Row(children: [
+                  Expanded(
+                    child: Text(
+                      _accessibilityEnabled
+                          ? '✅ TPE Accessibility Companion enabled'
+                          : '❌ TPE Accessibility Companion disabled',
+                    ),
+                  ),
+                  OutlinedButton(
+                    onPressed: _refreshAccessibility,
+                    child: const Text('Refresh'),
+                  ),
+                  const SizedBox(width: 8),
+                  if (_accessibilityEnabled)
+                    OutlinedButton(
+                      onPressed: _openAccessibilitySettings,
+                      child: const Text('Open Settings'),
+                    )
+                  else
+                    FilledButton(
+                      onPressed: _openAccessibilitySettings,
+                      child: const Text('Enable'),
+                    ),
+                ]),
+
           const Divider(height: 32),
 
           // ── Filter settings ─────────────────────────────────────────
@@ -822,8 +872,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     RadioListTile<String>(
                       title: const Text('Force Accessibility'),
                       subtitle: const Text(
-                          'Always use the RemoteControlService Accessibility '
-                          'Service (no root required).'),
+                          'Always use the TPE Accessibility Companion '
+                          '(no root required).'),
                       value: RemoteControlChannel.modeAccessibility,
                       groupValue: _injectionMode,
                       onChanged: _setInjectionMode,

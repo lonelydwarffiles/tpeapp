@@ -22,6 +22,9 @@ class TextReplacementChannel {
   TextReplacementChannel._();
 
   static const _channel = MethodChannel('com.tpeapp/text_replacement');
+  static const Map<String, dynamic> defaultPolicy = {
+    'default_mode': 'auto',
+  };
 
   /// Built-in defaults for pronoun shifting and playful puppy diction.
   ///
@@ -82,18 +85,44 @@ class TextReplacementChannel {
   static Future<void> setDict(Map<String, String> dict) =>
       _channel.invokeMethod('setDict', {'json': jsonEncode(dict)});
 
+  static Future<Map<String, dynamic>> getPolicy() async {
+    final json = await _channel.invokeMethod<String>('getPolicy') ?? '';
+    if (json.isEmpty) return {};
+    try {
+      final decoded = jsonDecode(json);
+      if (decoded is Map<String, dynamic>) return decoded;
+      return {};
+    } on FormatException catch (_) {
+      return {};
+    }
+  }
+
+  static Future<void> setPolicy(Map<String, dynamic> policy) =>
+      _channel.invokeMethod('setPolicy', {'json': jsonEncode(policy)});
+
   /// Seeds [defaultDict] only when no dictionary has been configured yet.
   static Future<void> ensureDefaults() async {
     final current = await getDict();
+    final currentPolicy = await getPolicy();
     if (current.isEmpty) {
       await setDict(defaultDict);
+    } else {
+      // Keep custom rules, backfill missing defaults, and enforce preferred
+      // first-person-to-it/mutt self-reference mappings.
+      final merged = <String, String>{...defaultDict, ...current};
+      merged.addAll(_preferredSelfReferenceRules);
+      await setDict(merged);
+    }
+
+    if (currentPolicy.isEmpty) {
+      await setPolicy(defaultPolicy);
       return;
     }
 
-    // Keep custom rules, backfill missing defaults, and enforce preferred
-    // first-person-to-it/mutt self-reference mappings.
-    final merged = <String, String>{...defaultDict, ...current};
-    merged.addAll(_preferredSelfReferenceRules);
-    await setDict(merged);
+    final mergedPolicy = <String, dynamic>{...currentPolicy};
+    mergedPolicy.putIfAbsent('default_mode', () => defaultPolicy['default_mode']);
+    mergedPolicy.putIfAbsent('packages', () => <String, dynamic>{});
+    mergedPolicy.putIfAbsent('package_prefixes', () => <String, dynamic>{});
+    await setPolicy(mergedPolicy);
   }
 }
