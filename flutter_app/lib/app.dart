@@ -14,6 +14,7 @@ import 'channels/filter_service_channel.dart';
 import 'channels/remote_control_channel.dart';
 import 'channels/device_command_channel.dart';
 import 'services/api_service.dart';
+import 'services/ble_service.dart';
 import 'services/websocket_service.dart';
 import 'screens/home_screen.dart';
 import 'widgets/kiosk_task_overlay.dart';
@@ -335,6 +336,7 @@ class _StartupGateState extends State<_StartupGate> {
         batteryPct: batteryPct,
         lat: lat,
         lon: lon,
+        toyInfo: context.read<BleService>().toyInfoForBackend,
       );
     } catch (_) {
       // Best-effort heartbeat; failures are retried by timer.

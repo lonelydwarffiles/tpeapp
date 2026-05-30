@@ -3,6 +3,7 @@ import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 /// Pure-Dart BLE layer for Lovense and Pavlok devices.
 ///
@@ -19,7 +20,9 @@ import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 class BleService extends ChangeNotifier {
   factory BleService() => _instance;
 
-  BleService._internal();
+  BleService._internal() {
+    _startAutoRepairLoop();
+  }
 
   static final BleService _instance = BleService._internal();
 
@@ -79,16 +82,39 @@ class BleService extends ChangeNotifier {
   static const _cmdVibrate = 0x01;
   static const _cmdBeep    = 0x02;
 
+  static const _prefLovenseId = 'ble_saved_lovense_id';
+  static const _prefPavlokId = 'ble_saved_pavlok_id';
+
+  static final _deviceInfoServiceUuid =
+      Guid('0000180a-0000-1000-8000-00805f9b34fb');
+  static final _modelNumberUuid = Guid('00002a24-0000-1000-8000-00805f9b34fb');
+  static final _manufacturerUuid = Guid('00002a29-0000-1000-8000-00805f9b34fb');
+  static final _firmwareUuid = Guid('00002a26-0000-1000-8000-00805f9b34fb');
+  static final _hardwareUuid = Guid('00002a27-0000-1000-8000-00805f9b34fb');
+  static final _softwareUuid = Guid('00002a28-0000-1000-8000-00805f9b34fb');
+
   // ── State ────────────────────────────────────────────────────────────
   BluetoothDevice? _lovenseDevice;
   BluetoothCharacteristic? _lovenseTx;
   List<BluetoothCharacteristic> _lovenseTxCandidates = const [];
   String? _lovenseError;
+  StreamSubscription<BluetoothConnectionState>? _lovenseConnSub;
+  String? _lastLovenseId;
+  Map<String, dynamic> _lovenseInfo = const {};
 
   BluetoothDevice? _pavlokDevice;
   BluetoothCharacteristic? _pavlokTx;
   List<BluetoothCharacteristic> _pavlokTxCandidates = const [];
   String? _pavlokError;
+  StreamSubscription<BluetoothConnectionState>? _pavlokConnSub;
+  String? _lastPavlokId;
+  Map<String, dynamic> _pavlokInfo = const {};
+
+  Timer? _autoRepairTimer;
+  bool _autoRepairBusy = false;
+  bool _autoRepairEnabled = true;
+  bool _blockManualDisconnect = true;
+  SharedPreferences? _prefs;
 
   StreamSubscription<List<ScanResult>>? _scanSub;
 
@@ -96,6 +122,45 @@ class BleService extends ChangeNotifier {
   bool get pavlokConnected => _pavlokDevice != null && _pavlokTx != null;
   String? get lovenseError => _lovenseError;
   String? get pavlokError => _pavlokError;
+  bool get autoRepairEnabled => _autoRepairEnabled;
+  bool get blockManualDisconnect => _blockManualDisconnect;
+
+  Map<String, dynamic> get toyInfoForBackend => {
+        'lovense': {
+          'connected': lovenseConnected,
+          if (_lastLovenseId != null) 'device_id': _lastLovenseId,
+          ..._lovenseInfo,
+        },
+        'pavlok': {
+          'connected': pavlokConnected,
+          if (_lastPavlokId != null) 'device_id': _lastPavlokId,
+          ..._pavlokInfo,
+        },
+      };
+
+  void setAutoRepairEnabled(bool enabled) {
+    _autoRepairEnabled = enabled;
+    notifyListeners();
+  }
+
+  Future<void> configurePersistence(SharedPreferences prefs) async {
+    _prefs = prefs;
+    _lastLovenseId = (prefs.getString(_prefLovenseId) ?? '').trim();
+    if (_lastLovenseId?.isEmpty ?? true) {
+      _lastLovenseId = null;
+    }
+    _lastPavlokId = (prefs.getString(_prefPavlokId) ?? '').trim();
+    if (_lastPavlokId?.isEmpty ?? true) {
+      _lastPavlokId = null;
+    }
+    notifyListeners();
+    await _runAutoRepairTick();
+  }
+
+  void setManualDisconnectBlocked(bool blocked) {
+    _blockManualDisconnect = blocked;
+    notifyListeners();
+  }
 
   // ═══════════════════════════════════════════════════════════════════
   //  Lovense
@@ -126,11 +191,29 @@ class BleService extends ChangeNotifier {
   Future<void> lovenseStopScan() => FlutterBluePlus.stopScan();
 
   Future<void> lovenseDisconnect() async {
+    if (_blockManualDisconnect) {
+      _lovenseError = 'Lovense disconnect is disabled in this build.';
+      notifyListeners();
+      throw StateError(_lovenseError!);
+    }
+    await _disconnectLovense(clearSavedDevice: true);
+  }
+
+  Future<void> _disconnectLovense({required bool clearSavedDevice}) async {
+    _lastLovenseId = null;
+    _lovenseInfo = const {};
+    await _lovenseConnSub?.cancel();
+    _lovenseConnSub = null;
     await _lovenseDevice?.disconnect();
     _lovenseDevice = null;
     _lovenseTx = null;
     _lovenseTxCandidates = const [];
     _lovenseError = null;
+    if (!clearSavedDevice) {
+      _lastLovenseId = _prefs?.getString(_prefLovenseId);
+    } else {
+      await _prefs?.remove(_prefLovenseId);
+    }
     notifyListeners();
   }
 
@@ -155,7 +238,11 @@ class BleService extends ChangeNotifier {
     try {
       await device.connect(license: License.nonprofit, autoConnect: false);
       _lovenseDevice = device;
+      _lastLovenseId = device.remoteId.str;
+      await _persistSavedIds();
+      _attachLovenseConnectionWatcher(device);
       final services = await device.discoverServices();
+      _lovenseInfo = await _collectDeviceInfo(device, services, brand: 'lovense');
       _lovenseTxCandidates = _findLovenseTxCandidates(services);
       _lovenseTx =
           _lovenseTxCandidates.isNotEmpty ? _lovenseTxCandidates.first : null;
@@ -231,11 +318,29 @@ class BleService extends ChangeNotifier {
   Future<void> pavlokStopScan() => FlutterBluePlus.stopScan();
 
   Future<void> pavlokDisconnect() async {
+    if (_blockManualDisconnect) {
+      _pavlokError = 'Pavlok disconnect is disabled in this build.';
+      notifyListeners();
+      throw StateError(_pavlokError!);
+    }
+    await _disconnectPavlok(clearSavedDevice: true);
+  }
+
+  Future<void> _disconnectPavlok({required bool clearSavedDevice}) async {
+    _lastPavlokId = null;
+    _pavlokInfo = const {};
+    await _pavlokConnSub?.cancel();
+    _pavlokConnSub = null;
     await _pavlokDevice?.disconnect();
     _pavlokDevice = null;
     _pavlokTx = null;
     _pavlokTxCandidates = const [];
     _pavlokError = null;
+    if (!clearSavedDevice) {
+      _lastPavlokId = _prefs?.getString(_prefPavlokId);
+    } else {
+      await _prefs?.remove(_prefPavlokId);
+    }
     notifyListeners();
   }
 
@@ -254,7 +359,11 @@ class BleService extends ChangeNotifier {
     try {
       await device.connect(license: License.nonprofit, autoConnect: false);
       _pavlokDevice = device;
+      _lastPavlokId = device.remoteId.str;
+      await _persistSavedIds();
+      _attachPavlokConnectionWatcher(device);
       final services = await device.discoverServices();
+      _pavlokInfo = await _collectDeviceInfo(device, services, brand: 'pavlok');
       _pavlokTxCandidates = _findPavlokTxCandidates(services);
       _pavlokTx = _pavlokTxCandidates.isNotEmpty ? _pavlokTxCandidates.first : null;
       if (_pavlokTx != null) {
@@ -326,9 +435,144 @@ class BleService extends ChangeNotifier {
   // ── Disposal ─────────────────────────────────────────────────────────
 
   Future<void> dispose() async {
+    _autoRepairTimer?.cancel();
+    await _lovenseConnSub?.cancel();
+    await _pavlokConnSub?.cancel();
     _scanSub?.cancel();
-    await lovenseDisconnect();
-    await pavlokDisconnect();
+    await _disconnectLovense(clearSavedDevice: false);
+    await _disconnectPavlok(clearSavedDevice: false);
+  }
+
+  void _startAutoRepairLoop() {
+    _autoRepairTimer?.cancel();
+    _autoRepairTimer = Timer.periodic(
+      const Duration(seconds: 10),
+      (_) => _runAutoRepairTick(),
+    );
+  }
+
+  Future<void> _runAutoRepairTick() async {
+    if (!_autoRepairEnabled || _autoRepairBusy) {
+      return;
+    }
+    _autoRepairBusy = true;
+    try {
+      if (!lovenseConnected && _lastLovenseId != null) {
+        final found = await _scanForDeviceId(_lastLovenseId!);
+        if (found != null) {
+          await _connectLovense(found);
+        }
+      }
+
+      if (!pavlokConnected && _lastPavlokId != null) {
+        final found = await _scanForDeviceId(_lastPavlokId!);
+        if (found != null) {
+          await _connectPavlok(found);
+        }
+      }
+    } catch (_) {
+      // Auto-repair is best-effort and should stay quiet.
+    } finally {
+      _autoRepairBusy = false;
+    }
+  }
+
+  Future<BluetoothDevice?> _scanForDeviceId(String remoteId) async {
+    final normalized = _normalizeId(remoteId);
+    final devices = await _scanCandidates(
+      (d) => _normalizeId(d.remoteId.str) == normalized,
+      timeout: const Duration(seconds: 5),
+    );
+    return devices.isEmpty ? null : devices.first;
+  }
+
+  void _attachLovenseConnectionWatcher(BluetoothDevice device) {
+    _lovenseConnSub?.cancel();
+    _lovenseConnSub = device.connectionState.listen((state) {
+      if (state == BluetoothConnectionState.disconnected) {
+        _lovenseDevice = null;
+        _lovenseTx = null;
+        _lovenseTxCandidates = const [];
+        _lovenseError = 'Lovense disconnected. Auto-repair is retrying.';
+        notifyListeners();
+      }
+    });
+  }
+
+  void _attachPavlokConnectionWatcher(BluetoothDevice device) {
+    _pavlokConnSub?.cancel();
+    _pavlokConnSub = device.connectionState.listen((state) {
+      if (state == BluetoothConnectionState.disconnected) {
+        _pavlokDevice = null;
+        _pavlokTx = null;
+        _pavlokTxCandidates = const [];
+        _pavlokError = 'Pavlok disconnected. Auto-repair is retrying.';
+        notifyListeners();
+      }
+    });
+  }
+
+  Future<Map<String, dynamic>> _collectDeviceInfo(
+    BluetoothDevice device,
+    List<BluetoothService> services, {
+    required String brand,
+  }) async {
+    final info = <String, dynamic>{
+      'brand': brand,
+      'name': _readableDeviceName(device),
+      'remote_id': device.remoteId.str,
+    };
+    final dis = services.where((s) => s.serviceUuid == _deviceInfoServiceUuid);
+    for (final service in dis) {
+      for (final char in service.characteristics) {
+        final value = await _tryReadStringCharacteristic(char);
+        if (value == null || value.isEmpty) {
+          continue;
+        }
+        if (char.characteristicUuid == _modelNumberUuid) {
+          info['model'] = value;
+        } else if (char.characteristicUuid == _manufacturerUuid) {
+          info['manufacturer'] = value;
+        } else if (char.characteristicUuid == _firmwareUuid) {
+          info['firmware'] = value;
+        } else if (char.characteristicUuid == _hardwareUuid) {
+          info['hardware'] = value;
+        } else if (char.characteristicUuid == _softwareUuid) {
+          info['software'] = value;
+        }
+      }
+    }
+    return info;
+  }
+
+  Future<String?> _tryReadStringCharacteristic(
+    BluetoothCharacteristic char,
+  ) async {
+    try {
+      if (!char.properties.read) {
+        return null;
+      }
+      final bytes = await char.read();
+      final text = utf8.decode(bytes, allowMalformed: true).trim();
+      if (text.isEmpty) {
+        return null;
+      }
+      return text;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> _persistSavedIds() async {
+    if (_prefs == null) {
+      return;
+    }
+    if (_lastLovenseId != null && _lastLovenseId!.isNotEmpty) {
+      await _prefs!.setString(_prefLovenseId, _lastLovenseId!);
+    }
+    if (_lastPavlokId != null && _lastPavlokId!.isNotEmpty) {
+      await _prefs!.setString(_prefPavlokId, _lastPavlokId!);
+    }
   }
 
   bool _looksLikeLovense(BluetoothDevice device) {

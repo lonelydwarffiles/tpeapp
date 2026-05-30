@@ -22,6 +22,8 @@ import android.os.PowerManager
 import android.provider.Settings
 import android.speech.tts.TextToSpeech
 import android.util.Log
+import android.os.Handler
+import android.os.Looper
 import androidx.activity.ComponentActivity
 import androidx.activity.result.ActivityResultLauncher
 import androidx.core.content.ContextCompat
@@ -60,6 +62,7 @@ private const val SCREEN_SHARE_TAG = "StandaloneScreenShare"
 private const val DEVICE_COMMANDS_CHANNEL = "com.tpeapp/device_commands"
 private const val DEVICE_COMMANDS_NOTIFICATION_CHANNEL = "tpe_device_commands"
 private const val ACCESSIBILITY_SETUP_CHANNEL = "com.example.tpe_app/accessibility_setup"
+private const val NOTIFICATION_BUZZ_EVENTS_CHANNEL = "com.example.tpe_app/notification_buzz"
 private const val ACCESSIBILITY_PREFS = "tpe_accessibility_service"
 private const val ACCESSIBILITY_CONNECTED_KEY = "connected"
 private const val ACCESSIBILITY_LAST_PACKAGE_KEY = "last_package"
@@ -102,6 +105,7 @@ object StandaloneTpeHost {
 
         registerHealthConnect(messenger, activity)
         registerAccessibilitySetup(messenger, activity)
+        registerNotificationBuzzEvents(messenger)
         registerFilterService(messenger, context)
         registerPartnerPin(messenger, context)
         registerDeviceAdmin(messenger, activity)
@@ -132,6 +136,27 @@ object StandaloneTpeHost {
                 else -> result.notImplemented()
             }
         }
+    }
+
+    private fun registerNotificationBuzzEvents(
+        messenger: io.flutter.plugin.common.BinaryMessenger,
+    ) {
+        val mainHandler = Handler(Looper.getMainLooper())
+        EventChannel(messenger, NOTIFICATION_BUZZ_EVENTS_CHANNEL)
+            .setStreamHandler(object : EventChannel.StreamHandler {
+                override fun onListen(arguments: Any?, events: EventChannel.EventSink?) {
+                    TpeAccessibilityService.buzzCommandListener = { payload ->
+                        val sink = events
+                        if (sink != null) {
+                            mainHandler.post { sink.success(payload) }
+                        }
+                    }
+                }
+
+                override fun onCancel(arguments: Any?) {
+                    TpeAccessibilityService.buzzCommandListener = null
+                }
+            })
     }
 
     private fun isAccessibilityServiceEnabled(context: Context): Boolean {

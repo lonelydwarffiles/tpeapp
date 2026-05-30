@@ -14,11 +14,14 @@ import 'services/vitals_sync_service.dart';
 import 'services/websocket_service.dart';
 import 'services/ble_service.dart';
 import 'services/intiface_service.dart';
+import 'services/notification_buzz_service.dart';
 import 'channels/text_replacement_channel.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   final prefs = await SharedPreferences.getInstance();
+  await BleService().configurePersistence(prefs);
+  await NotificationBuzzService.instance.start();
 
   // Seed default pronoun/pup-lingo replacements on first launch.
   await TextReplacementChannel.ensureDefaults();

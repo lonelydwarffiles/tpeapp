@@ -267,12 +267,10 @@ class _IntifaceScreenState extends State<IntifaceScreen> {
           const SizedBox(height: 28),
           _ToyPairingCard(
             title: 'Lovense',
-            subtitle: 'Pair a Lovense toy directly over Bluetooth.',
+            subtitle: 'Pair a Lovense toy directly over Bluetooth. Device stays persisted and auto-repaired.',
             paired: ble.lovenseConnected,
             error: ble.lovenseError,
             onPair: () => _pairLovenseWithPicker(ble),
-            onDisconnect: () =>
-                _runLovenseAction('disconnect', BleChannel.lovenseDisconnect),
             onTest: () =>
                 _runLovenseAction('test', () => BleChannel.lovenseVibrate(10)),
             onStop: () =>
@@ -281,12 +279,10 @@ class _IntifaceScreenState extends State<IntifaceScreen> {
           const SizedBox(height: 16),
           _ToyPairingCard(
             title: 'Pavlok',
-            subtitle: 'Pair a Pavlok wristband directly over Bluetooth.',
+            subtitle: 'Pair a Pavlok wristband directly over Bluetooth. Device stays persisted and auto-repaired.',
             paired: ble.pavlokConnected,
             error: ble.pavlokError,
             onPair: () => _pairPavlokWithPicker(ble),
-            onDisconnect: () =>
-                _runToyAction('Pavlok disconnect', BleChannel.pavlokDisconnect),
             onTest: () => _runToyAction(
                 'Pavlok test',
                 () => BleChannel.pavlokBeep(intensity: 96, durationMs: 700)),
@@ -522,7 +518,6 @@ class _ToyPairingCard extends StatelessWidget {
     required this.paired,
     required this.error,
     required this.onPair,
-    required this.onDisconnect,
     required this.onTest,
     required this.onStop,
   });
@@ -532,7 +527,6 @@ class _ToyPairingCard extends StatelessWidget {
   final bool paired;
   final String? error;
   final Future<void> Function() onPair;
-  final Future<void> Function() onDisconnect;
   final Future<void> Function() onTest;
   final Future<void> Function() onStop;
 
@@ -559,7 +553,6 @@ class _ToyPairingCard extends StatelessWidget {
               runSpacing: 8,
               children: [
                 FilledButton(onPressed: onPair, child: const Text('Pair')),
-                OutlinedButton(onPressed: onDisconnect, child: const Text('Disconnect')),
                 OutlinedButton(onPressed: onTest, child: const Text('Test')),
                 TextButton(onPressed: onStop, child: const Text('Stop')),
               ],

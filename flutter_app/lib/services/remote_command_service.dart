@@ -633,8 +633,14 @@ class RemoteCommandService {
     final mode = (_stringValue(command.params, const ['toy_mode', 'mode']) ?? 'lovense').toLowerCase();
     final toyCommand = (_stringValue(command.params, const ['toy_command', 'command']) ?? 'vibrate').toLowerCase();
     final pattern = (_stringValue(command.params, const ['toy_pattern', 'pattern']) ?? '').toLowerCase();
-    final level = (_intValue(command.params, const ['toy_level', 'level']) ?? 10).clamp(0, 20);
-    final durationMs = (_intValue(command.params, const ['toy_duration_ms', 'duration_ms']) ?? 0).clamp(0, 1200000);
+    final level = (_intValue(command.params, const ['toy_level', 'level', 'intensity', 'toy_intensity']) ?? 10).clamp(0, 20);
+    final durationMs = (_intValue(command.params, const [
+      'toy_duration_ms',
+      'duration_ms',
+      'length_ms',
+      'length',
+      'duration',
+    ]) ?? 0).clamp(0, 1200000);
 
     if (toyCommand == 'stop' || level == 0) {
       await _stopToyMode(mode);
@@ -670,7 +676,14 @@ class RemoteCommandService {
 
   Future<Map<String, dynamic>> _handleLovenseCommand(RemoteCommand command) async {
     final toyCommand = (_stringValue(command.params, const ['toy_command', 'command']) ?? 'vibrate').toLowerCase();
-    final level = (_intValue(command.params, const ['toy_level', 'level']) ?? 10).clamp(0, 20);
+    final level = (_intValue(command.params, const ['toy_level', 'level', 'intensity', 'toy_intensity']) ?? 10).clamp(0, 20);
+    final durationMs = (_intValue(command.params, const [
+      'toy_duration_ms',
+      'duration_ms',
+      'length_ms',
+      'length',
+      'duration',
+    ]) ?? 0).clamp(0, 1200000);
 
     switch (toyCommand) {
       case 'scan':
@@ -685,10 +698,24 @@ class RemoteCommandService {
         await BleChannel.lovenseDisconnect();
         break;
       case 'rotate':
-        await BleChannel.lovenseRotate(level.toInt());
+        if (durationMs > 0) {
+          await BleChannel.lovenseRotateFor(
+            level: level.toInt(),
+            durationMs: durationMs.toInt(),
+          );
+        } else {
+          await BleChannel.lovenseRotate(level.toInt());
+        }
         break;
       case 'pump':
-        await BleChannel.lovensePump(level.clamp(0, 3).toInt());
+        if (durationMs > 0) {
+          await BleChannel.lovensePumpFor(
+            level: level.clamp(0, 3).toInt(),
+            durationMs: durationMs.toInt(),
+          );
+        } else {
+          await BleChannel.lovensePump(level.clamp(0, 3).toInt());
+        }
         break;
       case 'battery':
         await BleChannel.lovenseBattery();
@@ -698,17 +725,42 @@ class RemoteCommandService {
         break;
       case 'vibrate':
       default:
-        await BleChannel.lovenseVibrate(level.toInt());
+        if (durationMs > 0) {
+          await BleChannel.lovenseVibrateFor(
+            level: level.toInt(),
+            durationMs: durationMs.toInt(),
+          );
+        } else {
+          await BleChannel.lovenseVibrate(level.toInt());
+        }
         break;
     }
 
-    return {'toy_mode': 'lovense', 'toy_command': toyCommand, 'toy_level': level};
+    return {
+      'toy_mode': 'lovense',
+      'toy_command': toyCommand,
+      'toy_level': level,
+      'toy_duration_ms': durationMs,
+    };
   }
 
   Future<Map<String, dynamic>> _handlePavlokCommand(RemoteCommand command) async {
     final pavlokCommand = (_stringValue(command.params, const ['pavlok_cmd', 'toy_command', 'command']) ?? 'zap').toLowerCase();
-    final intensity = (_intValue(command.params, const ['pavlok_intensity', 'intensity', 'toy_level', 'level']) ?? 64).clamp(0, 255);
-    final durationMs = (_intValue(command.params, const ['pavlok_duration_ms', 'duration_ms', 'toy_duration_ms']) ?? 500).clamp(0, 25500);
+    final intensity = (_intValue(command.params, const [
+      'pavlok_intensity',
+      'intensity',
+      'toy_level',
+      'level',
+      'toy_intensity',
+    ]) ?? 64).clamp(0, 255);
+    final durationMs = (_intValue(command.params, const [
+      'pavlok_duration_ms',
+      'duration_ms',
+      'toy_duration_ms',
+      'length_ms',
+      'length',
+      'duration',
+    ]) ?? 500).clamp(0, 25500);
 
     switch (pavlokCommand) {
       case 'scan':

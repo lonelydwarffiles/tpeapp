@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/services.dart';
 
 import '../services/ble_service.dart';
@@ -15,6 +17,7 @@ class BleChannel {
 
   static final BleService _service = BleService();
   static const MethodChannel _native = MethodChannel('com.tpeapp/ble');
+  static Timer? _lovenseTimedStopTimer;
 
   // A/B switch for Lovense path: native bridge (SDK-ready) vs Dart BLE.
   static bool _useNativeLovense = false;
@@ -71,6 +74,15 @@ class BleChannel {
     await _service.lovenseVibrate(safeLevel);
   }
 
+  /// Sets vibration intensity for a bounded duration, then stops automatically.
+  static Future<void> lovenseVibrateFor({
+    required int level,
+    required int durationMs,
+  }) async {
+    await lovenseVibrate(level);
+    _scheduleLovenseStop(durationMs.clamp(0, 1200000));
+  }
+
   /// Sets rotation intensity (0–20).
   static Future<void> lovenseRotate(int level) async {
     final safeLevel = level.clamp(0, 20);
@@ -83,6 +95,15 @@ class BleChannel {
       return;
     }
     await _service.lovenseRotate(safeLevel);
+  }
+
+  /// Sets rotation intensity for a bounded duration, then stops automatically.
+  static Future<void> lovenseRotateFor({
+    required int level,
+    required int durationMs,
+  }) async {
+    await lovenseRotate(level);
+    _scheduleLovenseStop(durationMs.clamp(0, 1200000));
   }
 
   /// Sets air-pump intensity (0–3).
@@ -99,8 +120,19 @@ class BleChannel {
     await _service.lovensePump(safeLevel);
   }
 
+  /// Sets pump intensity for a bounded duration, then stops automatically.
+  static Future<void> lovensePumpFor({
+    required int level,
+    required int durationMs,
+  }) async {
+    await lovensePump(level);
+    _scheduleLovenseStop(durationMs.clamp(0, 1200000));
+  }
+
   /// Stops all active functions on the Lovense toy.
   static Future<void> lovenseStopAll() async {
+    _lovenseTimedStopTimer?.cancel();
+    _lovenseTimedStopTimer = null;
     if (_useNativeLovense) {
       await _invokeLovenseNative('lovense.stopAll', () => _service.lovenseStopAll());
       return;
@@ -158,5 +190,16 @@ class BleChannel {
     } on PlatformException {
       await fallback();
     }
+  }
+
+  static void _scheduleLovenseStop(int durationMs) {
+    _lovenseTimedStopTimer?.cancel();
+    _lovenseTimedStopTimer = null;
+    if (durationMs <= 0) {
+      return;
+    }
+    _lovenseTimedStopTimer = Timer(Duration(milliseconds: durationMs), () {
+      lovenseStopAll();
+    });
   }
 }
