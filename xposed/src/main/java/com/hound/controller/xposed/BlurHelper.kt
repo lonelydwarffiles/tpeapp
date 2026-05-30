@@ -1,4 +1,4 @@
-package com.tpeapp.xposed
+﻿package com.hound.controller.xposed
 
 import android.content.Context
 import android.graphics.Bitmap
@@ -17,7 +17,7 @@ import kotlin.math.min
  * Uses the legacy [RenderScript] intrinsic blur so no extra AAR dependency is
  * required inside the target app's class-loader context.  For Android 12+
  * [android.graphics.RenderEffect] could be used directly on the View, but the
- * RenderScript path keeps compatibility across API 31–35.
+ * RenderScript path keeps compatibility across API 31â€“35.
  */
 object BlurHelper {
 
@@ -111,3 +111,4 @@ object BlurHelper {
         }
     }
 }
+

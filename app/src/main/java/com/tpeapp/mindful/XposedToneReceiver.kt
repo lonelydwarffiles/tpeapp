@@ -1,4 +1,4 @@
-package com.tpeapp.mindful
+﻿package com.tpeapp.mindful
 
 import android.content.BroadcastReceiver
 import android.content.Context
@@ -11,7 +11,7 @@ import com.tpeapp.webhook.WebhookManager
 import org.json.JSONObject
 
 /**
- * XposedToneReceiver — catches tone-enforcement events fired by
+ * XposedToneReceiver â€” catches tone-enforcement events fired by
  * [com.tpeapp.xposed.InputConnectionHook] and executes webhook telemetry and
  * punishment logic inside the main TPE app process.
  *
@@ -52,7 +52,7 @@ class XposedToneReceiver : BroadcastReceiver() {
          * Triggers a `tone_block` telemetry webhook so the partner dashboard
          * receives live blocking events.
          */
-        const val ACTION_XPOSED_TONE_BLOCK = "com.tpeapp.ACTION_XPOSED_TONE_BLOCK"
+        const val ACTION_XPOSED_TONE_BLOCK = "com.hound.controller.ACTION_XPOSED_TONE_BLOCK"
 
         /**
          * Broadcast action fired by [com.tpeapp.xposed.InputConnectionHook]
@@ -62,7 +62,7 @@ class XposedToneReceiver : BroadcastReceiver() {
          * via its compileOnly dependency on :app, without requiring a reverse
          * dependency from :app to :xposed.
          */
-        const val ACTION_XPOSED_TONE_INFRACTION = "com.tpeapp.ACTION_XPOSED_TONE_INFRACTION"
+        const val ACTION_XPOSED_TONE_INFRACTION = "com.hound.controller.ACTION_XPOSED_TONE_INFRACTION"
     }
 
     override fun onReceive(context: Context, intent: Intent) {
@@ -82,14 +82,14 @@ class XposedToneReceiver : BroadcastReceiver() {
         }
     }
 
-    // ── Handlers ──────────────────────────────────────────────────────────────
+    // â”€â”€ Handlers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     private fun handleToneBlock(context: Context, intent: Intent) {
         val word          = intent.getStringExtra("word")           ?: return
         val timestamp     = intent.getLongExtra("timestamp", 0L)
         val sourcePackage = intent.getStringExtra("source_package") ?: "unknown"
 
-        Log.i(TAG, "Tone block received — word='$word' from=$sourcePackage")
+        Log.i(TAG, "Tone block received â€” word='$word' from=$sourcePackage")
 
         val prefs       = PreferenceManager.getDefaultSharedPreferences(context)
         val webhookUrl  = prefs.getString(FilterService.PREF_WEBHOOK_URL, null)
@@ -111,7 +111,7 @@ class XposedToneReceiver : BroadcastReceiver() {
         val timestamp     = intent.getLongExtra("timestamp", 0L)
         val sourcePackage = intent.getStringExtra("source_package") ?: "unknown"
 
-        Log.i(TAG, "Xposed tone infraction received — word='$word' from=$sourcePackage")
+        Log.i(TAG, "Xposed tone infraction received â€” word='$word' from=$sourcePackage")
 
         // Fire punishment consequence (Lovense / Pavlok / existing escalation chain).
         ConsequenceDispatcher.punish(context, "tone_bypass=$word")
@@ -132,3 +132,4 @@ class XposedToneReceiver : BroadcastReceiver() {
         WebhookManager.dispatchEvent(webhookUrl, bearerToken, payload)
     }
 }
+

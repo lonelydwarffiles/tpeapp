@@ -1,4 +1,4 @@
-package com.tpeapp.xposed
+﻿package com.hound.controller.xposed
 
 import android.graphics.Bitmap
 import org.json.JSONArray
@@ -129,3 +129,4 @@ object MediaFilterRuntimeConfig {
         return out
     }
 }
+

@@ -24,7 +24,7 @@ import java.util.concurrent.TimeUnit
  * | [PREF_HANDLER_SYSTEM_PROMPT] | System prompt that defines Handler's personality |
  * | [PREF_HANDLER_MODEL]         | Model name, e.g. `gpt-4o`                      |
  *
- * History is capped at [MAX_HISTORY] messages to avoid unbounded SharedPreferences growth.
+ * History is persisted in full so conversations survive process death and app closure.
  * The system prompt is *not* stored in the history list — it is prepended fresh on every
  * API call.
  */
@@ -54,9 +54,6 @@ object ChatRepository {
         "dynamic. You speak with authority and warmth. You hold the sub accountable to their " +
         "rules, offer guidance, and track their progress. You may use the word 'Handler' to " +
         "refer to yourself. Keep replies concise unless the sub needs detailed guidance."
-
-    /** Maximum number of messages kept in history (oldest are pruned first). */
-    private const val MAX_HISTORY = 100
 
     private val httpClient = OkHttpClient.Builder()
         .connectTimeout(30, TimeUnit.SECONDS)
@@ -94,16 +91,13 @@ object ChatRepository {
         val list = getHistory(ctx).toMutableList()
         list.add(message)
         list.sortBy { it.timestamp }
-        if (list.size > MAX_HISTORY) {
-            list.subList(0, list.size - MAX_HISTORY).clear()
-        }
         saveHistory(ctx, list)
         return list.toList()
     }
 
     fun clearHistory(ctx: Context) {
         PreferenceManager.getDefaultSharedPreferences(ctx).edit()
-            .remove(PREF_CHAT_HISTORY).apply()
+            .remove(PREF_CHAT_HISTORY).commit()
     }
 
     // ------------------------------------------------------------------
@@ -201,7 +195,7 @@ object ChatRepository {
             })
         }
         PreferenceManager.getDefaultSharedPreferences(ctx).edit()
-            .putString(PREF_CHAT_HISTORY, arr.toString()).apply()
+            .putString(PREF_CHAT_HISTORY, arr.toString()).commit()
     }
 
     /** Convenience factory for a new user message. */

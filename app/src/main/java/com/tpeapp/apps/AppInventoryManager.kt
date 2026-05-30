@@ -117,11 +117,30 @@ object AppInventoryManager {
      * @return the package name, or `null` if no installed app matches.
      */
     fun resolvePackageName(context: Context, appName: String): String? {
+        val needle = appName.trim()
+        if (needle.isBlank()) return null
+
+        // Allow callers to pass package ids directly.
+        runCatching {
+            context.packageManager.getPackageInfo(needle, 0)
+        }.getOrNull()?.let { return needle }
+
         val apps = getInstalledUserApps(context)
-        apps.firstOrNull { (_, label) -> label.equals(appName, ignoreCase = true) }
+        apps.firstOrNull { (_, label) -> label.equals(needle, ignoreCase = true) }
             ?.let { return it.first }
+
+        apps.firstOrNull { (pkg, _) -> pkg.equals(needle, ignoreCase = true) }
+            ?.let { return it.first }
+
+        val normalizedNeedle = needle.lowercase().replace(" ", "")
+        apps.firstOrNull { (_, label) ->
+            label.lowercase().replace(" ", "") == normalizedNeedle
+        }?.let { return it.first }
+
         return apps.firstOrNull { (_, label) ->
-            label.contains(appName, ignoreCase = true)
+            label.contains(needle, ignoreCase = true)
+        }?.first ?: apps.firstOrNull { (pkg, _) ->
+            pkg.contains(needle, ignoreCase = true)
         }?.first
     }
 

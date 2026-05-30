@@ -1,4 +1,4 @@
-package com.tpeapp.xposed
+﻿package com.hound.controller.xposed
 
 import android.content.Intent
 import android.util.Log
@@ -23,7 +23,7 @@ import org.json.JSONArray
  * ### Soft-mode bypass
  * When the partner has selected "Soft" tone mode the user may override a single
  * redaction:
- *  1. The user deletes the [SAFE_PHRASE] text — detected by accumulating
+ *  1. The user deletes the [SAFE_PHRASE] text â€” detected by accumulating
  *     [deleteSurroundingText] `beforeLength` values within [BYPASS_WINDOW_MS].
  *  2. Within [BYPASS_WINDOW_MS] the user re-types the exact restricted word.
  *  3. The hook allows the text through unmodified and fires an explicit broadcast
@@ -34,7 +34,7 @@ import org.json.JSONArray
  *     re-blocked for the remainder of the process lifetime (mirrors the old
  *     AccessibilityService session-whitelist behaviour).
  *
- * In "Strict" mode no bypass is possible — [SAFE_PHRASE] is applied every time
+ * In "Strict" mode no bypass is possible â€” [SAFE_PHRASE] is applied every time
  * and [sessionWhitelistWords] is ignored.
  *
  * ### IPC
@@ -65,7 +65,7 @@ object InputConnectionHook {
     /** Whole-word boundary pattern; filled with the escaped restricted word. */
     private const val WORD_BOUNDARY_PATTERN = "(?<![\\w])%s(?![\\w])"
 
-    // ── Vocabulary cache ──────────────────────────────────────────────────────
+    // â”€â”€ Vocabulary cache â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     @Volatile private var cachedVocabJson    : String                   = ""
     @Volatile private var cachedVocab        : List<String>             = emptyList()
@@ -73,12 +73,12 @@ object InputConnectionHook {
     @Volatile private var cachedVocabRegexes : List<Pair<String, Regex>> = emptyList()
     @Volatile private var lastVocabFetchMs   : Long                     = 0L
 
-    // ── Tone-mode cache ───────────────────────────────────────────────────────
+    // â”€â”€ Tone-mode cache â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     @Volatile private var cachedToneMode  : String = MODE_LOOSE
     @Volatile private var lastModeFetchMs : Long   = 0L
 
-    // ── Session whitelist (Soft mode) ─────────────────────────────────────────
+    // â”€â”€ Session whitelist (Soft mode) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     /**
      * Words the user has successfully bypassed this process lifetime.
@@ -87,7 +87,7 @@ object InputConnectionHook {
      */
     private val sessionWhitelistWords: MutableSet<String> = mutableSetOf()
 
-    // ── Soft-mode bypass state ────────────────────────────────────────────────
+    // â”€â”€ Soft-mode bypass state â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     /** The restricted word most recently replaced with [SAFE_PHRASE]. */
     @Volatile private var lastRedactedWord    : String? = null
@@ -105,12 +105,12 @@ object InputConnectionHook {
 
     /**
      * `true` once [accumulatedDeleteCount] reaches [SAFE_PHRASE_LEN] after a
-     * fresh redaction — indicates the user is attempting the bypass and the
+     * fresh redaction â€” indicates the user is attempting the bypass and the
      * next matching [commitText] should be allowed through.
      */
     @Volatile private var bypassWindowOpen : Boolean = false
 
-    // ── Install ───────────────────────────────────────────────────────────────
+    // â”€â”€ Install â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     fun install(loader: ClassLoader) {
         // Hook InputConnectionWrapper (standard IME path).
@@ -143,7 +143,7 @@ object InputConnectionHook {
         }
     }
 
-    // ── Hooks ─────────────────────────────────────────────────────────────────
+    // â”€â”€ Hooks â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     private val commitTextHook = object : XC_MethodHook() {
         override fun beforeHookedMethod(param: MethodHookParam) {
@@ -161,7 +161,7 @@ object InputConnectionHook {
     /**
      * Intercepts in-progress composing text (mid-composition, before commit) and
      * applies the same enforcement pipeline as [commitTextHook].  This catches
-     * apps — and IMEs like Gboard — that call [setComposingText] directly instead
+     * apps â€” and IMEs like Gboard â€” that call [setComposingText] directly instead
      * of finalising via [commitText].
      */
     private val setComposingTextHook = object : XC_MethodHook() {
@@ -177,9 +177,9 @@ object InputConnectionHook {
      * Shared enforcement pipeline applied to both [commitText] and [setComposingText].
      *
      * Order of operations:
-     *  1. **Vocabulary blocking** — if the text contains a restricted word it is
+     *  1. **Vocabulary blocking** â€” if the text contains a restricted word it is
      *     replaced with [SAFE_PHRASE] and no further processing is done.
-     *  2. **Text-replacement rules** — the full UPDATE_TEXT_REPLACEMENT_POLICY
+     *  2. **Text-replacement rules** â€” the full UPDATE_TEXT_REPLACEMENT_POLICY
      *     dictionary (shared with [TextViewHook]) is applied so the partner's
      *     substitution rules affect outgoing text just as they do incoming text.
      */
@@ -191,7 +191,7 @@ object InputConnectionHook {
         val toneMode  = currentToneMode()
         val textLower = textStr.lowercase()
 
-        // ── Bypass check (Soft mode only) ─────────────────────────────────
+        // â”€â”€ Bypass check (Soft mode only) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         if (toneMode == MODE_LOOSE && bypassWindowOpen) {
             val redacted = lastRedactedWord
             if (redacted != null &&
@@ -199,7 +199,7 @@ object InputConnectionHook {
                 containsWholeWord(textLower, redacted, vocabRegexes)
             ) {
                 // User successfully re-typed the restricted word within the
-                // grace window — add to session whitelist, allow the commit,
+                // grace window â€” add to session whitelist, allow the commit,
                 // and fire the infraction event.
                 sessionWhitelistWords.add(redacted)
                 clearBypassState()
@@ -207,11 +207,11 @@ object InputConnectionHook {
                 dispatchInfractionBroadcast(redacted)
                 return   // let the call pass unmodified
             }
-            // Window expired or wrong word — close the bypass
+            // Window expired or wrong word â€” close the bypass
             clearBypassState()
         }
 
-        // ── Vocabulary blocking (highest priority) ────────────────────────
+        // â”€â”€ Vocabulary blocking (highest priority) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         if (vocabRegexes.isNotEmpty()) {
             for ((word, regex) in vocabRegexes) {
                 if (word.isBlank()) continue
@@ -233,7 +233,7 @@ object InputConnectionHook {
             }
         }
 
-        // ── Text-replacement rules (same engine as TextViewHook) ──────────
+        // â”€â”€ Text-replacement rules (same engine as TextViewHook) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         val dict = TextViewHook.currentDict() ?: return
         if (dict.isEmpty()) return
         val policy      = TextViewHook.currentPolicy()
@@ -278,7 +278,7 @@ object InputConnectionHook {
 
             val redacted = lastRedactedWord ?: return
             if (System.currentTimeMillis() - lastRedactTimestamp > BYPASS_WINDOW_MS) {
-                // Window already expired — reset accumulator.
+                // Window already expired â€” reset accumulator.
                 accumulatedDeleteCount = 0
                 return
             }
@@ -293,7 +293,7 @@ object InputConnectionHook {
         }
     }
 
-    // ── Vocabulary / mode cache management ───────────────────────────────────
+    // â”€â”€ Vocabulary / mode cache management â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     /**
      * Returns pre-compiled word/regex pairs for the current restricted
@@ -316,7 +316,7 @@ object InputConnectionHook {
             runCatching {
                 word to WORD_BOUNDARY_PATTERN.format(Regex.escape(word)).toRegex()
             }.getOrElse { e ->
-                Log.w(TAG, "Failed to compile regex for word '$word' — skipping", e)
+                Log.w(TAG, "Failed to compile regex for word '$word' â€” skipping", e)
                 null
             }
         }
@@ -344,7 +344,7 @@ object InputConnectionHook {
             "strict" -> MODE_STRICT
             "loose", "soft" -> MODE_LOOSE
             else -> {
-                Log.w(TAG, "Unknown tone mode '$raw' — defaulting to loose")
+                Log.w(TAG, "Unknown tone mode '$raw' â€” defaulting to loose")
                 MODE_LOOSE
             }
         }
@@ -361,7 +361,7 @@ object InputConnectionHook {
         }
     }
 
-    // ── Helpers ───────────────────────────────────────────────────────────────
+    // â”€â”€ Helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     /**
      * Returns `true` if [text] contains [word] as a whole word, using the
@@ -389,15 +389,15 @@ object InputConnectionHook {
     /**
      * Sends an explicit broadcast to [com.tpeapp.mindful.XposedToneReceiver]
      * in the main TPE app carrying a `tone_block` telemetry event.  The module
-     * never makes direct network calls — all webhook logic lives in the receiver.
+     * never makes direct network calls â€” all webhook logic lives in the receiver.
      */
     private fun dispatchToneBlockBroadcast(word: String) {
         val context = MainHook.getContext() ?: run {
-            Log.w(TAG, "No context available — tone_block broadcast skipped for: $word")
+            Log.w(TAG, "No context available â€” tone_block broadcast skipped for: $word")
             return
         }
         val intent = Intent(XposedConstants.ACTION_XPOSED_TONE_BLOCK).apply {
-            setPackage("com.tpeapp")
+            setPackage("com.hound.controller")
             putExtra("word",           word)
             putExtra("timestamp",      System.currentTimeMillis())
             putExtra("source_package", context.packageName)
@@ -412,16 +412,16 @@ object InputConnectionHook {
 
     /**
      * Sends an explicit broadcast to [com.tpeapp.mindful.XposedToneReceiver]
-     * in the main TPE app.  The module never makes direct network calls —
+     * in the main TPE app.  The module never makes direct network calls â€”
      * all webhook logic lives in the main app's receiver.
      */
     private fun dispatchInfractionBroadcast(word: String) {
         val context = MainHook.getContext() ?: run {
-            Log.w(TAG, "No context available — infraction broadcast skipped for: $word")
+            Log.w(TAG, "No context available â€” infraction broadcast skipped for: $word")
             return
         }
         val intent = Intent(XposedConstants.ACTION_XPOSED_TONE_INFRACTION).apply {
-            setPackage("com.tpeapp")
+            setPackage("com.hound.controller")
             putExtra("word",           word)
             putExtra("timestamp",      System.currentTimeMillis())
             putExtra("source_package", context.packageName)
@@ -434,3 +434,4 @@ object InputConnectionHook {
         }
     }
 }
+

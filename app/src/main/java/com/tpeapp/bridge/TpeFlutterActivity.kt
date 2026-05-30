@@ -5,9 +5,8 @@ import android.net.Uri
 import android.os.Bundle
 import android.os.PowerManager
 import android.provider.Settings
-import com.tpeapp.mqtt.PartnerMqttService
-import com.tpeapp.service.FilterService
-import io.flutter.embedding.android.FlutterActivity
+import com.tpeapp.service.CoreServiceKeeper
+import io.flutter.embedding.android.FlutterFragmentActivity
 import io.flutter.embedding.engine.FlutterEngine
 
 /**
@@ -33,13 +32,13 @@ import io.flutter.embedding.engine.FlutterEngine
  * The Xposed module, FilterService, AppDeviceAdminReceiver, PartnerMqttService,
  * and all background workers remain purely native and are NOT changed.
  */
-class TpeFlutterActivity : FlutterActivity() {
+class TpeFlutterActivity : FlutterFragmentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        // Keep FilterService alive for the lifetime of the host activity.
-        startForegroundService(Intent(this, FilterService::class.java))
-        startForegroundService(Intent(this, PartnerMqttService::class.java))
+        // Re-assert critical services whenever the host UI opens.
+        CoreServiceKeeper.ensureCoreServicesRunning(this, "flutter_activity_on_create")
+        CoreServiceKeeper.scheduleWatchdog(this)
         requestIgnoreBatteryOptimizationsIfNeeded()
     }
 

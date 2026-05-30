@@ -1,4 +1,4 @@
-package com.tpeapp.consequence
+﻿package com.tpeapp.consequence
 
 import android.app.AlarmManager
 import android.app.NotificationChannel
@@ -23,15 +23,15 @@ import kotlinx.coroutines.launch
 import org.json.JSONObject
 
 /**
- * CornerTimeActivity — full-screen countdown with camera preview.
- * Launched via FCM START_CORNER_TIME → full-screen intent notification.
+ * CornerTimeActivity â€” full-screen countdown with camera preview.
+ * Launched via FCM START_CORNER_TIME â†’ full-screen intent notification.
  */
 // (This file extends ConsequenceDispatcher with escalation support.)
 
 object ConsequenceEscalationHelper {
 
     private const val TAG = "ConsequenceEscalation"
-    const val ACTION_ESCALATE = "com.tpeapp.ACTION_CONSEQUENCE_ESCALATE"
+    const val ACTION_ESCALATE = "com.hound.controller.ACTION_CONSEQUENCE_ESCALATE"
     const val EXTRA_REASON = "escalation_reason"
     const val EXTRA_LEVEL = "escalation_level"
     private const val REQUEST_CODE = 0x6601
@@ -91,7 +91,7 @@ object ConsequenceEscalationHelper {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
         am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerMs, pending)
-        Log.i(TAG, "Escalation scheduled in ${timeoutMinutes}m → level $nextLevel")
+        Log.i(TAG, "Escalation scheduled in ${timeoutMinutes}m â†’ level $nextLevel")
     }
 
     /** Cancels a pending escalation alarm (call when consequence is acknowledged). */
@@ -117,3 +117,4 @@ object ConsequenceEscalationHelper {
         })
     }
 }
+

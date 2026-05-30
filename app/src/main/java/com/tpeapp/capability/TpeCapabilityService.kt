@@ -47,7 +47,7 @@ class TpeCapabilityService : AccessibilityService() {
         private const val TAG = "TpeCapabilityService"
 
         /** Our own package — never blocked so the user can always open the TPE app. */
-        private const val OWN_PACKAGE = "com.tpeapp"
+        private const val OWN_PACKAGE = "com.hound.controller"
 
         /**
          * Known package names for the Android package-installer UI across

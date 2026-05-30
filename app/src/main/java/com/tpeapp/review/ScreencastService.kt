@@ -1,4 +1,4 @@
-package com.tpeapp.review
+﻿package com.tpeapp.review
 
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -12,13 +12,13 @@ import com.tpeapp.R
 import com.tpeapp.ui.MainActivity
 
 /**
- * ScreencastService — a foreground service with [foregroundServiceType="mediaProjection"].
+ * ScreencastService â€” a foreground service with [foregroundServiceType="mediaProjection"].
  *
  * Responsibilities:
- *  • Displays a mandatory persistent notification (required by Android 14+ / upcoming Android 16).
- *  • Creates a [android.media.projection.MediaProjection] from the permission grant result that
+ *  â€¢ Displays a mandatory persistent notification (required by Android 14+ / upcoming Android 16).
+ *  â€¢ Creates a [android.media.projection.MediaProjection] from the permission grant result that
  *    [ReviewActivity] passes in via the starting Intent.
- *  • Hands the [android.media.projection.MediaProjection] to [StreamCoordinator] to begin
+ *  â€¢ Hands the [android.media.projection.MediaProjection] to [StreamCoordinator] to begin
  *    capturing and broadcasting via WebRTC.
  *
  * Start this service with:
@@ -47,7 +47,7 @@ class ScreencastService : Service() {
         const val EXTRA_REMOTE_CONTROL = "extra_remote_control"
         const val EXTRA_SIGNALING_URL  = "extra_signaling_url"
 
-        const val ACTION_STOP = "com.tpeapp.ACTION_STOP_SCREENCAST"
+        const val ACTION_STOP = "com.hound.controller.ACTION_STOP_SCREENCAST"
     }
 
     // ------------------------------------------------------------------
@@ -66,7 +66,7 @@ class ScreencastService : Service() {
         }
 
         if (intent == null) {
-            Log.e(TAG, "Null intent received — stopping service")
+            Log.e(TAG, "Null intent received â€” stopping service")
             stopSelf()
             return START_NOT_STICKY
         }
@@ -78,7 +78,7 @@ class ScreencastService : Service() {
         val signalingUrl      = intent.getStringExtra(EXTRA_SIGNALING_URL).orEmpty()
 
         if (resultData == null || resultCode == 0) {
-            Log.e(TAG, "Missing MediaProjection permission result — stopping service")
+            Log.e(TAG, "Missing MediaProjection permission result â€” stopping service")
             stopSelf()
             return START_NOT_STICKY
         }
@@ -151,3 +151,4 @@ class ScreencastService : Service() {
         ).build()
     }
 }
+

@@ -1,4 +1,4 @@
-package com.tpeapp.xposed
+﻿package com.hound.controller.xposed
 
 import android.graphics.Bitmap
 import android.graphics.Canvas
@@ -70,8 +70,8 @@ object ImageViewHook {
      * LSPosed's built-in guard only suppresses re-entry while the hook's
      * [XC_MethodHook.beforeHookedMethod] call-stack is still active.  Once we
      * return from [XC_MethodHook.beforeHookedMethod] and later post a
-     * `view.setImageBitmap(…)` callback onto the main thread, the hook fires
-     * again, creating an infinite scan–blur loop.
+     * `view.setImageBitmap(â€¦)` callback onto the main thread, the hook fires
+     * again, creating an infinite scanâ€“blur loop.
      *
      * Setting this flag to `true` before any internal [ImageView.setImageBitmap]
      * or [ImageView.setImageDrawable] call we initiate prevents the hooks from
@@ -387,3 +387,4 @@ object ImageViewHook {
         override fun getOpacity(): Int = PixelFormat.OPAQUE
     }
 }
+

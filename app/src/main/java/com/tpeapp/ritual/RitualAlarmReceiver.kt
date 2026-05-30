@@ -1,4 +1,4 @@
-package com.tpeapp.ritual
+﻿package com.tpeapp.ritual
 
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -14,8 +14,8 @@ class RitualAlarmReceiver : BroadcastReceiver() {
 
     companion object {
         private const val TAG = "RitualAlarmReceiver"
-        const val ACTION_RITUAL_MORNING = "com.tpeapp.ACTION_RITUAL_MORNING"
-        const val ACTION_RITUAL_EVENING = "com.tpeapp.ACTION_RITUAL_EVENING"
+        const val ACTION_RITUAL_MORNING = "com.hound.controller.ACTION_RITUAL_MORNING"
+        const val ACTION_RITUAL_EVENING = "com.hound.controller.ACTION_RITUAL_EVENING"
         private const val CHANNEL_ID = "ritual_alarm"
         private const val NOTIF_ID_MORNING = 0x7710
         private const val NOTIF_ID_EVENING = 0x7711
@@ -37,7 +37,7 @@ class RitualAlarmReceiver : BroadcastReceiver() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        val title = if (isMorning) "🌅 Morning Ritual Required" else "🌙 Evening Ritual Required"
+        val title = if (isMorning) "ðŸŒ… Morning Ritual Required" else "ðŸŒ™ Evening Ritual Required"
 
         val notification = NotificationCompat.Builder(context, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.ic_media_play)
@@ -53,7 +53,7 @@ class RitualAlarmReceiver : BroadcastReceiver() {
         try {
             NotificationManagerCompat.from(context).notify(notifId, notification)
         } catch (e: SecurityException) {
-            Log.w(TAG, "Cannot post notification — launching directly", e)
+            Log.w(TAG, "Cannot post notification â€” launching directly", e)
             context.startActivity(activityIntent)
         }
 
@@ -74,3 +74,4 @@ class RitualAlarmReceiver : BroadcastReceiver() {
         )
     }
 }
+

@@ -1,4 +1,4 @@
-package com.tpeapp.telemetry
+﻿package com.tpeapp.telemetry
 
 import android.content.BroadcastReceiver
 import android.content.Context
@@ -18,7 +18,7 @@ class XposedCoverageReceiver : BroadcastReceiver() {
     companion object {
         private const val TAG = "XposedCoverageReceiver"
 
-        const val ACTION_XPOSED_COVERAGE_EVENT = "com.tpeapp.ACTION_XPOSED_COVERAGE_EVENT"
+        const val ACTION_XPOSED_COVERAGE_EVENT = "com.hound.controller.ACTION_XPOSED_COVERAGE_EVENT"
 
         const val EXTRA_LANE = "lane"
         const val EXTRA_STAGE = "stage"
@@ -85,3 +85,4 @@ class XposedCoverageReceiver : BroadcastReceiver() {
         }
     }
 }
+

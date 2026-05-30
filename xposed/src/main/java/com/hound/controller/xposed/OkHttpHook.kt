@@ -1,4 +1,4 @@
-package com.tpeapp.xposed
+﻿package com.hound.controller.xposed
 
 import android.util.Log
 import com.tpeapp.filter.IFilterCallback
@@ -16,13 +16,13 @@ import java.util.concurrent.atomic.AtomicLong
 
 /**
  * Hooks [okhttp3.ResponseBody] to intercept image byte streams at the network
- * layer — **after** download, **before** any image-loading library caches them.
+ * layer â€” **after** download, **before** any image-loading library caches them.
  *
  * This is the lowest-level hook: it catches images loaded by Glide, Coil,
  * Picasso, or any other OkHttp consumer in the target app.
  *
  * **Hooked method**:
- *   `okhttp3.ResponseBody.bytes()` — the fully-buffered byte array path.
+ *   `okhttp3.ResponseBody.bytes()` â€” the fully-buffered byte array path.
  *
  * We also hook the streaming path via `okhttp3.internal.cache.CacheInterceptor`
  * to catch chunked responses before they are written to OkHttp's internal
@@ -312,3 +312,4 @@ object OkHttpHook {
         return hash
     }
 }
+

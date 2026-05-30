@@ -33,7 +33,9 @@ class ApiService {
   // ── Preferences keys (must match native constants) ────────────────────
 
   String get _endpoint =>
-      (_prefs.getString('partner_endpoint_url') ?? '').trimRight();
+      (_prefs.getString('partner_endpoint_url') ?? '')
+        .trim()
+        .replaceFirst(RegExp(r'/+$'), '');
 
   String? get _bearerToken {
     final t = _prefs.getString('webhook_bearer_token');
@@ -352,40 +354,92 @@ class ApiService {
 
   // ── Questions (admin) ─────────────────────────────────────────────────
 
-  /// Fetches unanswered questions from `GET {endpoint}/api/admin/questions`.
+  /// Fetches questions using the best available auth/route combination.
+  ///
+  /// Fallback order:
+  /// 1) GET /api/tpe/questions (device bearer)
+  /// 2) GET /api/handler/questions (JWT bearer)
+  /// 3) GET /api/admin/questions (Basic auth)
+  /// 4) GET /api/questions/public (unauthenticated, read-only)
   Future<List<Map<String, dynamic>>> fetchQuestions() async {
-    final response = await http
-        .get(
-          Uri.parse('$_endpoint/api/admin/questions'),
-          headers: _basicAuthHeaders,
-        )
-        .timeout(_timeout);
+    final response = await _requestWithFallback(
+      method: 'GET',
+      paths: const [
+        '/api/tpe/questions',
+        '/api/handler/questions',
+        '/api/admin/questions',
+        '/api/questions/public',
+      ],
+      headersByPath: [
+        _bearerHeaders,
+        _bearerHeaders,
+        _basicAuthHeaders,
+        const {'Content-Type': 'application/json'},
+      ],
+    );
     _assertSuccess(response, 'Fetch questions');
-    final list = jsonDecode(response.body) as List<dynamic>;
-    return list.cast<Map<String, dynamic>>();
+    final list = (jsonDecode(response.body) as List<dynamic>)
+        .whereType<Map>()
+        .map((e) => Map<String, dynamic>.from(e))
+        .toList();
+
+    final isPublicFeed = response.request?.url.path.endsWith('/api/questions/public') ?? false;
+    if (isPublicFeed) {
+      return list
+          .map(
+            (q) => {
+              ...q,
+              'question': (q['question'] ?? q['text'] ?? '').toString(),
+              'can_moderate': false,
+            },
+          )
+          .toList();
+    }
+
+    return list
+        .map(
+          (q) => {
+            ...q,
+            'question': (q['question'] ?? q['text'] ?? '').toString(),
+            'can_moderate': true,
+          },
+        )
+        .toList();
   }
 
-  /// Posts an answer to `POST {endpoint}/api/admin/questions/{id}/answer`.
+  /// Posts an answer via device route first, then handler/admin fallbacks.
   Future<void> answerQuestion(String id, String answer) async {
     final body = jsonEncode({'answer': answer});
-    final response = await http
-        .post(
-          Uri.parse('$_endpoint/api/admin/questions/$id/answer'),
-          headers: _basicAuthHeaders,
-          body: body,
-        )
-        .timeout(_timeout);
+    final response = await _requestWithFallback(
+      method: 'POST',
+      paths: [
+        '/api/tpe/questions/$id/answer',
+        '/api/handler/questions/$id/answer',
+        '/api/admin/questions/$id/answer',
+      ],
+      headersByPath: [
+        _bearerHeaders,
+        _bearerHeaders,
+        _basicAuthHeaders,
+      ],
+      body: body,
+    );
     _assertSuccess(response, 'Answer question');
   }
 
-  /// Deletes a question via `DELETE {endpoint}/api/admin/questions/{id}`.
+  /// Deletes a question via handler JWT route first, then admin Basic route.
   Future<void> deleteQuestion(String id) async {
-    final response = await http
-        .delete(
-          Uri.parse('$_endpoint/api/admin/questions/$id'),
-          headers: _basicAuthHeaders,
-        )
-        .timeout(_timeout);
+    final response = await _requestWithFallback(
+      method: 'DELETE',
+      paths: [
+        '/api/handler/questions/$id',
+        '/api/admin/questions/$id',
+      ],
+      headersByPath: [
+        _bearerHeaders,
+        _basicAuthHeaders,
+      ],
+    );
     _assertSuccess(response, 'Delete question');
   }
 
@@ -619,6 +673,60 @@ class ApiService {
   void _assertSuccess(http.Response response, String label) {
     if (!response.isSuccessful) {
       throw Exception('$label failed: HTTP ${response.statusCode}');
+    }
+  }
+
+  Future<http.Response> _requestWithFallback({
+    required String method,
+    required List<String> paths,
+    required List<Map<String, String>> headersByPath,
+    String? body,
+  }) async {
+    if (_endpoint.isEmpty) {
+      throw Exception('Endpoint is not configured.');
+    }
+    if (paths.isEmpty || paths.length != headersByPath.length) {
+      throw Exception('Invalid request fallback configuration.');
+    }
+
+    http.Response? lastResponse;
+    for (var i = 0; i < paths.length; i++) {
+      final path = paths[i];
+      final headers = headersByPath[i];
+      final uri = Uri.parse('$_endpoint$path');
+      final response = await _send(method, uri, headers: headers, body: body)
+          .timeout(_timeout);
+      lastResponse = response;
+      if (response.isSuccessful) return response;
+
+      // Try the next route/auth combo for common auth/route misses.
+      if (response.statusCode == 401 ||
+          response.statusCode == 403 ||
+          response.statusCode == 404) {
+        continue;
+      }
+      return response;
+    }
+
+    return lastResponse ??
+        http.Response('No fallback attempt executed', 500);
+  }
+
+  Future<http.Response> _send(
+    String method,
+    Uri uri, {
+    required Map<String, String> headers,
+    String? body,
+  }) {
+    switch (method.toUpperCase()) {
+      case 'GET':
+        return http.get(uri, headers: headers);
+      case 'POST':
+        return http.post(uri, headers: headers, body: body);
+      case 'DELETE':
+        return http.delete(uri, headers: headers);
+      default:
+        throw Exception('Unsupported HTTP method: $method');
     }
   }
 }

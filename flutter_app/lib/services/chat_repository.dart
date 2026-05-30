@@ -35,8 +35,6 @@ class ChatRepository extends ChangeNotifier {
       'dynamic. You speak with authority and warmth. You hold the sub accountable to their '
       'rules, offer guidance, and track their progress. You may use the word \'Handler\' to '
       'refer to yourself. Keep replies concise unless the sub needs detailed guidance.';
-  static const _maxHistory = 100;
-
   final SharedPreferences _prefs;
   List<ChatMessage> _history = [];
 
@@ -81,9 +79,6 @@ class ChatRepository extends ChangeNotifier {
       timestamp: DateTime.now().millisecondsSinceEpoch,
     );
     _history.add(msg);
-    if (_history.length > _maxHistory) {
-      _history.removeRange(0, _history.length - _maxHistory);
-    }
     await _save();
     notifyListeners();
     return msg;
@@ -98,9 +93,6 @@ class ChatRepository extends ChangeNotifier {
       timestamp: DateTime.now().millisecondsSinceEpoch,
     );
     _history.add(msg);
-    if (_history.length > _maxHistory) {
-      _history.removeRange(0, _history.length - _maxHistory);
-    }
     await _save();
     notifyListeners();
     return msg;

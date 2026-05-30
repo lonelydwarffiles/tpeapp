@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:developer' as developer;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -13,6 +14,7 @@ import '../services/kiosk_task_controller.dart';
 import '../services/remote_command_service.dart';
 import '../services/websocket_service.dart';
 import 'check_in_screen.dart';
+import 'chat_screen.dart';
 import 'intiface_screen.dart';
 import 'questions_screen.dart';
 import 'settings_screen.dart';
@@ -288,10 +290,33 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     await _trackBehavior('screen_opened', reason: 'HandlerChatActivity');
     try {
       await DeviceCommandChannel.openHandlerChat();
-    } catch (_) {
+    } on MissingPluginException {
+      if (!mounted) return;
+      await Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => const ChatScreen()),
+      );
+    } on PlatformException catch (err) {
+      final message = (err.message ?? err.code).toLowerCase();
+      final noMethod = message.contains('not implemented') ||
+          message.contains('no implementation') ||
+          message.contains('no method');
+      if (noMethod) {
+        if (!mounted) return;
+        await Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => const ChatScreen()),
+        );
+        return;
+      }
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Unable to open chat right now.')),
+        SnackBar(content: Text('Unable to open chat: ${err.message ?? err.code}')),
+      );
+    } catch (err) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Unable to open chat: $err')),
       );
     }
   }

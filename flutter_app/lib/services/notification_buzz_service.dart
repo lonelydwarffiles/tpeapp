@@ -12,7 +12,7 @@ class NotificationBuzzService {
   static final NotificationBuzzService instance = NotificationBuzzService._();
 
   static const EventChannel _events =
-      EventChannel('com.example.tpe_app/notification_buzz');
+      EventChannel('com.hound.controller/notification_buzz');
 
   StreamSubscription<dynamic>? _sub;
   var _running = false;

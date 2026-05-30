@@ -15,7 +15,8 @@ class HealthService {
   HealthService._();
 
   static final HealthService instance = HealthService._();
-  static const MethodChannel _channel = MethodChannel('com.example.tpe_app/health');
+  static const MethodChannel _nativeChannel =
+      MethodChannel('com.hound.controller/health');
 
   static const _types = [
     HealthDataType.HEART_RATE,
@@ -34,17 +35,18 @@ class HealthService {
   /// Returns true if all requested permissions were granted.
   Future<bool> requestPermissions() async {
     await _health.configure();
-    if (!Platform.isAndroid) {
-      return _health.requestAuthorization(_types, permissions: _permissions);
-    }
 
-    try {
-      final nativeGranted = await _channel.invokeMethod<bool>('requestPermissions');
-      if (nativeGranted != null) {
-        return nativeGranted;
+    if (Platform.isAndroid) {
+      // Prefer native launcher path first for standalone Android host builds.
+      try {
+        final nativeGranted =
+            await _nativeChannel.invokeMethod<bool>('requestPermissions');
+        if (nativeGranted != null) {
+          return nativeGranted;
+        }
+      } catch (e) {
+        debugPrint('$runtimeType - Native requestPermissions unavailable: $e');
       }
-    } catch (e) {
-      debugPrint('$runtimeType - Exception in native requestPermissions(): $e');
     }
 
     try {

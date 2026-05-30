@@ -1,4 +1,4 @@
-package com.tpeapp.service
+﻿package com.tpeapp.service
 
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -30,16 +30,16 @@ import org.json.JSONObject
 import java.io.FileInputStream
 
 /**
- * FilterService — a long-lived, headless bound service that:
+ * FilterService â€” a long-lived, headless bound service that:
  *
- *  • Shows a **persistent foreground notification** (transparency/consent requirement).
- *  • Initialises [NudeNetClassifier] once on a background thread.
- *  • Exposes an [IFilterService] AIDL interface so any bound client (including
+ *  â€¢ Shows a **persistent foreground notification** (transparency/consent requirement).
+ *  â€¢ Initialises [NudeNetClassifier] once on a background thread.
+ *  â€¢ Exposes an [IFilterService] AIDL interface so any bound client (including
  *    the LSPosed module running inside target apps) can submit images for
  *    asynchronous scanning.
  *
  * Clients bind to this service via:
- *   `Intent("com.tpeapp.BIND_FILTER_SERVICE").setPackage("com.tpeapp")`
+ *   `Intent("com.hound.controller.BIND_FILTER_SERVICE").setPackage("com.hound.controller")`
  */
 class FilterService : Service() {
 
@@ -59,7 +59,7 @@ class FilterService : Service() {
         const val PREF_WEBHOOK_BEARER_TOKEN    = "webhook_bearer_token"
 
         // ------------------------------------------------------------------
-        //  Filter configuration keys — written by PartnerMqttService via MQTT
+        //  Filter configuration keys â€” written by PartnerMqttService via MQTT
         // ------------------------------------------------------------------
 
         /** SharedPreferences key for the partner-configured confidence threshold (Float). */
@@ -70,7 +70,7 @@ class FilterService : Service() {
         const val PREF_BLOCKED_CLASSES         = "filter_blocked_classes"
         /**
          * SharedPreferences key (String) for the text-replacement dictionary JSON.
-         * Maps Regex pattern strings → replacement templates (e.g. {"(?i)\\bfoo\\b": "bar"}).
+         * Maps Regex pattern strings â†’ replacement templates (e.g. {"(?i)\\bfoo\\b": "bar"}).
          */
         const val PREF_TEXT_REPLACEMENT_DICT   = "text_replacement_dict"
         /**
@@ -85,9 +85,9 @@ class FilterService : Service() {
          * or non-rooted devices.  Defaults to `false` (disabled).
          */
         const val PREF_NUDENET_ENABLED         = "nudenet_enabled"
-        /** speed|strict — speed is non-blocking fail-open, strict is fail-closed in selected lanes. */
+        /** speed|strict â€” speed is non-blocking fail-open, strict is fail-closed in selected lanes. */
         const val PREF_MEDIA_FILTER_MODE        = "media_filter_mode"
-        /** pixelate|heavy_blur|blackout — style consumed by Xposed media hooks. */
+        /** pixelate|heavy_blur|blackout â€” style consumed by Xposed media hooks. */
         const val PREF_MEDIA_CENSOR_STYLE       = "media_censor_style"
         /** JSON array of package names that should run strict even when global mode is speed. */
         const val PREF_MEDIA_STRICT_PACKAGES    = "media_filter_strict_packages"
@@ -140,7 +140,7 @@ class FilterService : Service() {
     * Feature flag for the NudeNet TFLite classifier.  When `false` the
      * classifier is not initialised and all scan requests immediately return
      * a safe (not-blocked) result, saving performance on low-end devices.
-    * Updated live via MQTT command payloads → SharedPreferences listener.
+    * Updated live via MQTT command payloads â†’ SharedPreferences listener.
      */
     @Volatile private var nudeNetEnabled: Boolean = false
     @Volatile private var mediaFilterMode: String = "speed"
@@ -163,12 +163,12 @@ class FilterService : Service() {
             when (key) {
                 PREF_THRESHOLD -> {
                     threshold = effectiveThreshold(prefs.getFloat(key, DEFAULT_THRESHOLD))
-                    Log.i(TAG, "Threshold updated via MQTT → $threshold")
+                    Log.i(TAG, "Threshold updated via MQTT â†’ $threshold")
                 }
                 PREF_STRICT_MODE -> {
                     strictModeEnabled = prefs.getBoolean(key, false)
                     threshold = effectiveThreshold(prefs.getFloat(PREF_THRESHOLD, DEFAULT_THRESHOLD))
-                    Log.i(TAG, "Strict mode updated via MQTT → $strictModeEnabled (threshold=$threshold)")
+                    Log.i(TAG, "Strict mode updated via MQTT â†’ $strictModeEnabled (threshold=$threshold)")
                 }
                 PREF_BLOCKED_CLASSES ->
                     Log.i(TAG, "Blocked classes updated via MQTT (requires multi-class model to take effect)")
@@ -227,7 +227,7 @@ class FilterService : Service() {
                 }
                 com.tpeapp.mindful.ComplianceManager.PREF_STRICT_TONE_MODE -> {
                     strictToneModeEnabled = prefs.getBoolean(key, false)
-                    Log.i(TAG, "Tone strict mode updated via MQTT → $strictToneModeEnabled")
+                    Log.i(TAG, "Tone strict mode updated via MQTT â†’ $strictToneModeEnabled")
                 }
             }
         }
@@ -275,7 +275,7 @@ class FilterService : Service() {
     }
 
     // ------------------------------------------------------------------
-    //  Settings — load persisted values and register live listener
+    //  Settings â€” load persisted values and register live listener
     // ------------------------------------------------------------------
 
     /**
@@ -314,7 +314,7 @@ class FilterService : Service() {
         strictToneModeEnabled = prefs.getBoolean(
             com.tpeapp.mindful.ComplianceManager.PREF_STRICT_TONE_MODE, false)
         prefs.registerOnSharedPreferenceChangeListener(prefsListener)
-        Log.i(TAG, "Filter settings loaded — threshold=$threshold strictMode=$strictModeEnabled nudeNetEnabled=$nudeNetEnabled strictToneMode=$strictToneModeEnabled")
+        Log.i(TAG, "Filter settings loaded â€” threshold=$threshold strictMode=$strictModeEnabled nudeNetEnabled=$nudeNetEnabled strictToneMode=$strictToneModeEnabled")
     }
 
     // ------------------------------------------------------------------
@@ -323,7 +323,7 @@ class FilterService : Service() {
 
     private fun initClassifierAsync() {
         if (!nudeNetEnabled) {
-            Log.i(TAG, "NudeNet feature flag is disabled — skipping classifier init")
+            Log.i(TAG, "NudeNet feature flag is disabled â€” skipping classifier init")
             return
         }
         ioScope.launch {
@@ -415,7 +415,7 @@ class FilterService : Service() {
 
         override fun setConfidenceThreshold(newThreshold: Float) {
             threshold = newThreshold.coerceIn(0f, 1f)
-            Log.i(TAG, "Confidence threshold updated → $threshold")
+            Log.i(TAG, "Confidence threshold updated â†’ $threshold")
         }
 
         override fun setTextReplacementDict(json: String?) {
@@ -551,7 +551,7 @@ class FilterService : Service() {
 
     /**
      * Waits (with yields) for the classifier to be initialised and returns a
-     * stable local reference.  Also monitors [nudeNetEnabled] — if the flag is
+     * stable local reference.  Also monitors [nudeNetEnabled] â€” if the flag is
      * cleared while waiting, an [IllegalStateException] is thrown so that the
      * caller's `runCatching` block handles it cleanly and reports a safe result
      * rather than looping forever.
@@ -604,3 +604,4 @@ class FilterService : Service() {
             )
             .build()
 }
+

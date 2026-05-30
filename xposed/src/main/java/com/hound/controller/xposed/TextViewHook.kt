@@ -1,4 +1,4 @@
-package com.tpeapp.xposed
+﻿package com.hound.controller.xposed
 
 import android.text.SpannableStringBuilder
 import android.text.Spanned
@@ -12,7 +12,7 @@ import org.json.JSONObject
  * text replacement driven by a Regex dictionary stored in the TPE app.
  *
  * **Design goals**
- *  - All original [android.text.Span] objects (colors, styles, click listeners, …)
+ *  - All original [android.text.Span] objects (colors, styles, click listeners, â€¦)
  *    are preserved and remapped to the new string indices so the replacement is
  *    visually indistinguishable from native UI.
  *  - The dictionary is fetched from [com.tpeapp.service.FilterService] via AIDL
@@ -43,7 +43,7 @@ object TextViewHook {
         pattern = """(?i)\b(?:[a-z]:\\|/)?(?:[\w.-]+[\\/])+[\w.-]+\b"""
     )
 
-    // ── Dict cache ────────────────────────────────────────────────────────────
+    // â”€â”€ Dict cache â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     @Volatile private var cachedDictJson : String              = ""
     @Volatile private var cachedDict     : Map<Regex, String>  = emptyMap()
@@ -59,14 +59,14 @@ object TextViewHook {
         "bank", "wallet", "payment", "pay", "finance", "auth", "password", "security"
     )
 
-    // ── Install ───────────────────────────────────────────────────────────────
+    // â”€â”€ Install â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     fun install(loader: ClassLoader) {
         try {
             // Hook the lowest-level setText(CharSequence, BufferType, boolean, int).
             // All public setText overloads ultimately delegate here, so a single
-            // hook at this level intercepts every text assignment — including
-            // internal calls that bypass the public API — without double-processing.
+            // hook at this level intercepts every text assignment â€” including
+            // internal calls that bypass the public API â€” without double-processing.
             val bufferTypeClass = XposedHelpers.findClass(
                 "android.widget.TextView\$BufferType", loader
             )
@@ -83,7 +83,7 @@ object TextViewHook {
         }
     }
 
-    // ── Hook ──────────────────────────────────────────────────────────────────
+    // â”€â”€ Hook â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     private val setTextHook = object : XC_MethodHook() {
         override fun beforeHookedMethod(param: MethodHookParam) {
@@ -108,7 +108,7 @@ object TextViewHook {
         }
     }
 
-    // ── Dictionary management ─────────────────────────────────────────────────
+    // â”€â”€ Dictionary management â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     /**
      * Returns the current dictionary, refreshing from the service if the cache
@@ -171,7 +171,7 @@ object TextViewHook {
         if (json.isBlank()) return ReplacementPolicy()
         return runCatching<ReplacementPolicy> {
             val obj = JSONObject(json)
-            val defaultMode = parsePolicyMode(obj.optString("default_mode", "auto"))
+            val defaultMode = parsePolicyMode(obj.optString("default_mode", "loose"))
 
             val packageModes = HashMap<String, PolicyMode>()
             obj.optJSONObject("packages")?.let { packages ->
@@ -179,7 +179,7 @@ object TextViewHook {
                 while (keys.hasNext()) {
                     val pkg = keys.next().trim().lowercase()
                     if (pkg.isEmpty()) continue
-                    packageModes[pkg] = parsePolicyMode(packages.optString(pkg, "auto"))
+                    packageModes[pkg] = parsePolicyMode(packages.optString(pkg, "loose"))
                 }
             }
 
@@ -189,7 +189,7 @@ object TextViewHook {
                 while (keys.hasNext()) {
                     val prefix = keys.next().trim().lowercase()
                     if (prefix.isEmpty()) continue
-                    prefixModes[prefix] = parsePolicyMode(prefixes.optString(prefix, "auto"))
+                    prefixModes[prefix] = parsePolicyMode(prefixes.optString(prefix, "loose"))
                 }
             }
 
@@ -200,7 +200,7 @@ object TextViewHook {
         }
     }
 
-    // ── Replacement with span preservation ───────────────────────────────────
+    // â”€â”€ Replacement with span preservation â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     /**
      * Applies all [dict] replacements to [text], preserving all [Span] objects
@@ -424,6 +424,7 @@ object TextViewHook {
             "off", "none", "disabled" -> PolicyMode.OFF
             "identity", "identity_only", "identity-only" -> PolicyMode.IDENTITY_ONLY
             "full", "all" -> PolicyMode.FULL
+            "loose", "soft", "auto" -> PolicyMode.AUTO
             else -> PolicyMode.AUTO
         }
     }
@@ -436,10 +437,10 @@ object TextViewHook {
         return out
     }
 
-    // ── Helpers ───────────────────────────────────────────────────────────────
+    // â”€â”€ Helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     /**
-     * Expands `$1`, `$2`, … references in [template] using the capture groups
+     * Expands `$1`, `$2`, â€¦ references in [template] using the capture groups
      * of [match].  Multi-digit group indices (e.g. `$10`) are handled correctly
      * by consuming all consecutive digit characters after the `$`.
      */
@@ -466,7 +467,7 @@ object TextViewHook {
         return sb.toString()
     }
 
-    // ── Data ──────────────────────────────────────────────────────────────────
+    // â”€â”€ Data â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     private data class SpanRecord(
         val span  : Any,
@@ -511,3 +512,4 @@ object TextViewHook {
         GENERAL,
     }
 }
+

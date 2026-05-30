@@ -1,4 +1,4 @@
-package com.tpeapp.xposed
+﻿package com.hound.controller.xposed
 
 import android.content.ComponentName
 import android.content.Context
@@ -27,7 +27,7 @@ class MainHook : IXposedHookLoadPackage {
 
         // Package names to exclude (the filter app itself + system UI)
         private val EXCLUDED_PACKAGES = setOf(
-            "com.tpeapp",
+            "com.hound.controller",
             "android",
             "com.android.systemui"
         )
@@ -64,8 +64,8 @@ class MainHook : IXposedHookLoadPackage {
             synchronized(this) {
                 if (filterService != null) return
                 serviceContext = context.applicationContext
-                val intent = Intent("com.tpeapp.BIND_FILTER_SERVICE")
-                    .setPackage("com.tpeapp")
+                val intent = Intent("com.hound.controller.BIND_FILTER_SERVICE")
+                    .setPackage("com.hound.controller")
                 try {
                     val bound = context.applicationContext.bindService(
                         intent,
@@ -89,7 +89,7 @@ class MainHook : IXposedHookLoadPackage {
 
             override fun onServiceDisconnected(name: ComponentName) {
                 filterService = null
-                Log.w(TAG, "FilterService disconnected — will rebind on next hook call")
+                Log.w(TAG, "FilterService disconnected â€” will rebind on next hook call")
                 // Re-bind so transient disconnects heal automatically.
                 serviceContext?.let { ctx ->
                     ensureServiceBound(ctx)
@@ -118,3 +118,4 @@ class MainHook : IXposedHookLoadPackage {
         InputConnectionHook.install(loader)
     }
 }
+

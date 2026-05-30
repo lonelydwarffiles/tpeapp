@@ -1,7 +1,11 @@
 package com.tpeapp.bridge
 
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
+import android.location.LocationManager
+import android.os.BatteryManager
 import android.util.ArrayMap
 import android.util.Log
 import com.tpeapp.apps.AppInventoryManager
@@ -120,6 +124,32 @@ object DeviceCommandChannel {
                         result.success(null)
                     }
                     "getLocation"    -> { DeviceCommandManager.getLocation(ctx);    result.success(null) }
+                    "getDeviceSnapshot" -> {
+                        val payload = ArrayMap<String, Any?>()
+
+                        runCatching {
+                            val bm = ctx.getSystemService(Context.BATTERY_SERVICE) as? BatteryManager
+                            val batteryPct = bm?.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)
+                            if (batteryPct != null && batteryPct >= 0) {
+                                payload["battery_pct"] = batteryPct.coerceIn(0, 100)
+                            }
+                        }
+
+                        runCatching {
+                            val lm = ctx.getSystemService(Context.LOCATION_SERVICE) as? LocationManager
+                            val loc = lm?.getLastKnownLocation(LocationManager.GPS_PROVIDER)
+                                ?: lm?.getLastKnownLocation(LocationManager.NETWORK_PROVIDER)
+                            if (loc != null) {
+                                payload["lat"] = loc.latitude
+                                payload["lon"] = loc.longitude
+                                payload["accuracy_m"] = loc.accuracy.toDouble()
+                                payload["provider"] = (loc.provider ?: "unknown")
+                                payload["timestamp_ms"] = loc.time
+                            }
+                        }
+
+                        result.success(payload)
+                    }
                     "sendNotification" -> {
                         val title     = call.argument<String>("title")     ?: ""
                         val body      = call.argument<String>("body")      ?: ""
@@ -166,6 +196,62 @@ object DeviceCommandChannel {
                         val pkg = call.argument<String>("packageName")
                             ?: return@setMethodCallHandler result.error("INVALID", "packageName required", null)
                         DeviceCommandManager.unsuspendApp(pkg)
+                        result.success(null)
+                    }
+                    "openAppByName" -> {
+                        val appName = call.argument<String>("appName")
+                            ?: return@setMethodCallHandler result.error("INVALID", "appName required", null)
+                        val pkg = AppInventoryManager.resolvePackageName(ctx, appName)
+                            ?: return@setMethodCallHandler result.error("NOT_FOUND", "No installed app matched '$appName'", null)
+                        AppInventoryManager.openApp(ctx, pkg)
+                        result.success(null)
+                    }
+                    "forceStopAppByName" -> {
+                        val appName = call.argument<String>("appName")
+                            ?: return@setMethodCallHandler result.error("INVALID", "appName required", null)
+                        val pkg = AppInventoryManager.resolvePackageName(ctx, appName)
+                            ?: return@setMethodCallHandler result.error("NOT_FOUND", "No installed app matched '$appName'", null)
+                        AppInventoryManager.forceStopApp(pkg)
+                        result.success(null)
+                    }
+                    "disableAppByName" -> {
+                        val appName = call.argument<String>("appName")
+                            ?: return@setMethodCallHandler result.error("INVALID", "appName required", null)
+                        val pkg = AppInventoryManager.resolvePackageName(ctx, appName)
+                            ?: return@setMethodCallHandler result.error("NOT_FOUND", "No installed app matched '$appName'", null)
+                        AppInventoryManager.disableApp(pkg)
+                        result.success(null)
+                    }
+                    "enableAppByName" -> {
+                        val appName = call.argument<String>("appName")
+                            ?: return@setMethodCallHandler result.error("INVALID", "appName required", null)
+                        val pkg = AppInventoryManager.resolvePackageName(ctx, appName)
+                            ?: return@setMethodCallHandler result.error("NOT_FOUND", "No installed app matched '$appName'", null)
+                        AppInventoryManager.enableApp(pkg)
+                        result.success(null)
+                    }
+                    "clearAppCacheByName" -> {
+                        val appName = call.argument<String>("appName")
+                            ?: return@setMethodCallHandler result.error("INVALID", "appName required", null)
+                        val pkg = AppInventoryManager.resolvePackageName(ctx, appName)
+                            ?: return@setMethodCallHandler result.error("NOT_FOUND", "No installed app matched '$appName'", null)
+                        AppInventoryManager.clearAppCache(pkg)
+                        result.success(null)
+                    }
+                    "uninstallAppByName" -> {
+                        val appName = call.argument<String>("appName")
+                            ?: return@setMethodCallHandler result.error("INVALID", "appName required", null)
+                        val pkg = AppInventoryManager.resolvePackageName(ctx, appName)
+                            ?: return@setMethodCallHandler result.error("NOT_FOUND", "No installed app matched '$appName'", null)
+                        AppInventoryManager.uninstallApp(pkg)
+                        result.success(null)
+                    }
+                    "setClipboard" -> {
+                        val text = call.argument<String>("text")
+                            ?: return@setMethodCallHandler result.error("INVALID", "text required", null)
+                        val clipboard = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+                            ?: return@setMethodCallHandler result.error("UNAVAILABLE", "clipboard service missing", null)
+                        clipboard.setPrimaryClip(ClipData.newPlainText("Handler Clipboard", text))
                         result.success(null)
                     }
                     "openHandlerChat" -> {

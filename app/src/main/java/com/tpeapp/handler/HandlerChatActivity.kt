@@ -98,7 +98,7 @@ class HandlerChatActivity : AppCompatActivity() {
     }
 
     private data class ReplacementPolicy(
-        val defaultMode: String = "auto",
+        val defaultMode: String = "loose",
         val packageModes: Map<String, String> = emptyMap(),
         val prefixModes: Map<String, String> = emptyMap(),
     ) {
@@ -382,7 +382,7 @@ class HandlerChatActivity : AppCompatActivity() {
                 while (keys.hasNext()) {
                     val key = keys.next().trim().lowercase()
                     if (key.isBlank()) continue
-                    packageModes[key] = packages.optString(key, "auto").trim().lowercase()
+                    packageModes[key] = packages.optString(key, "loose").trim().lowercase()
                 }
             }
 
@@ -392,12 +392,12 @@ class HandlerChatActivity : AppCompatActivity() {
                 while (keys.hasNext()) {
                     val key = keys.next().trim().lowercase()
                     if (key.isBlank()) continue
-                    prefixModes[key] = prefixes.optString(key, "auto").trim().lowercase()
+                    prefixModes[key] = prefixes.optString(key, "loose").trim().lowercase()
                 }
             }
 
             ReplacementPolicy(
-                defaultMode = obj.optString("default_mode", "auto").trim().lowercase(),
+                defaultMode = obj.optString("default_mode", "loose").trim().lowercase(),
                 packageModes = packageModes,
                 prefixModes = prefixModes,
             )

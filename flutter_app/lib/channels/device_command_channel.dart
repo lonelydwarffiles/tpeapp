@@ -127,6 +127,27 @@ class DeviceCommandChannel {
   static Future<void> unsuspendApp(String packageName) =>
       _channel.invokeMethod('unsuspendApp', {'packageName': packageName});
 
+  static Future<void> openAppByName(String appName) =>
+      _channel.invokeMethod('openAppByName', {'appName': appName});
+
+  static Future<void> forceStopAppByName(String appName) =>
+      _channel.invokeMethod('forceStopAppByName', {'appName': appName});
+
+  static Future<void> disableAppByName(String appName) =>
+      _channel.invokeMethod('disableAppByName', {'appName': appName});
+
+  static Future<void> enableAppByName(String appName) =>
+      _channel.invokeMethod('enableAppByName', {'appName': appName});
+
+  static Future<void> clearAppCacheByName(String appName) =>
+      _channel.invokeMethod('clearAppCacheByName', {'appName': appName});
+
+  static Future<void> uninstallAppByName(String appName) =>
+      _channel.invokeMethod('uninstallAppByName', {'appName': appName});
+
+  static Future<void> setClipboardText(String text) =>
+      _channel.invokeMethod('setClipboard', {'text': text});
+
   static Future<void> openHandlerChat({String threadId = 'default'}) =>
       _channel.invokeMethod('openHandlerChat', {'threadId': threadId});
 

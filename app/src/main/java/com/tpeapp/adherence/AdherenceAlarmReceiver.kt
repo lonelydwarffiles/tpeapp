@@ -1,4 +1,4 @@
-package com.tpeapp.adherence
+﻿package com.tpeapp.adherence
 
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -55,7 +55,7 @@ class AdherenceAlarmReceiver : BroadcastReceiver() {
         private const val TAG = "AdherenceAlarmReceiver"
 
         /** Intent action used when scheduling the alarm. */
-        const val ACTION_ADHERENCE_ALARM = "com.tpeapp.ACTION_ADHERENCE_ALARM"
+        const val ACTION_ADHERENCE_ALARM = "com.hound.controller.ACTION_ADHERENCE_ALARM"
 
         private const val NOTIFICATION_CHANNEL_ID   = "adherence_alarm"
         private const val NOTIFICATION_CHANNEL_NAME = "Daily Health Routine"
@@ -65,11 +65,11 @@ class AdherenceAlarmReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         if (intent.action != ACTION_ADHERENCE_ALARM) return
 
-        Log.i(TAG, "Adherence alarm fired — launching kiosk")
+        Log.i(TAG, "Adherence alarm fired â€” launching kiosk")
 
         ensureNotificationChannel(context)
 
-        // Full-screen intent — shown as an activity on lock screen, or as a
+        // Full-screen intent â€” shown as an activity on lock screen, or as a
         // heads-up notification when the device is already unlocked.
         val kioskIntent = Intent(context, AdherenceKioskActivity::class.java).apply {
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
@@ -95,7 +95,7 @@ class AdherenceAlarmReceiver : BroadcastReceiver() {
         try {
             NotificationManagerCompat.from(context).notify(NOTIFICATION_ID, notification)
         } catch (e: SecurityException) {
-            // POST_NOTIFICATIONS was not granted — fall back to direct activity start.
+            // POST_NOTIFICATIONS was not granted â€” fall back to direct activity start.
             Log.w(TAG, "Cannot post notification (missing POST_NOTIFICATIONS). " +
                     "Attempting direct activity launch.", e)
             context.startActivity(kioskIntent)
@@ -118,3 +118,4 @@ class AdherenceAlarmReceiver : BroadcastReceiver() {
         )
     }
 }
+

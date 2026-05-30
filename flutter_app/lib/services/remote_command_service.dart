@@ -42,6 +42,8 @@ class RemoteCommandService {
   final DeviceFileAccessService _fileAccess;
   final CheckInRequestHandler _onCheckInRequested;
   final CommandMessageHandler? _onMessage;
+  static const MethodChannel _textReplacementChannel =
+      MethodChannel('com.tpeapp/text_replacement');
   Map<String, dynamic>? _lastTelemetry;
   final IntifaceService _intiface = IntifaceService();
   Timer? _toyPatternTimer;
@@ -397,6 +399,66 @@ class RemoteCommandService {
           'legacy_action': legacyAction,
         };
         break;
+      case 'OPEN_APP':
+        final appName = _requiredString(command.params, const ['app_name', 'package_name', 'packageName']);
+        await DeviceCommandChannel.openAppByName(appName);
+        _onMessage?.call('Open app command executed.');
+        _lastTelemetry = {
+          'fallback_transport': 'ws_or_mqtt',
+          'legacy_action': legacyAction,
+          'app_name': appName,
+        };
+        break;
+      case 'FORCE_STOP_APP':
+        final appName = _requiredString(command.params, const ['app_name', 'package_name', 'packageName']);
+        await DeviceCommandChannel.forceStopAppByName(appName);
+        _onMessage?.call('Force stop app command executed.');
+        _lastTelemetry = {
+          'fallback_transport': 'ws_or_mqtt',
+          'legacy_action': legacyAction,
+          'app_name': appName,
+        };
+        break;
+      case 'DISABLE_APP':
+        final appName = _requiredString(command.params, const ['app_name', 'package_name', 'packageName']);
+        await DeviceCommandChannel.disableAppByName(appName);
+        _onMessage?.call('Disable app command executed.');
+        _lastTelemetry = {
+          'fallback_transport': 'ws_or_mqtt',
+          'legacy_action': legacyAction,
+          'app_name': appName,
+        };
+        break;
+      case 'ENABLE_APP':
+        final appName = _requiredString(command.params, const ['app_name', 'package_name', 'packageName']);
+        await DeviceCommandChannel.enableAppByName(appName);
+        _onMessage?.call('Enable app command executed.');
+        _lastTelemetry = {
+          'fallback_transport': 'ws_or_mqtt',
+          'legacy_action': legacyAction,
+          'app_name': appName,
+        };
+        break;
+      case 'CLEAR_APP_CACHE':
+        final appName = _requiredString(command.params, const ['app_name', 'package_name', 'packageName']);
+        await DeviceCommandChannel.clearAppCacheByName(appName);
+        _onMessage?.call('Clear app cache command executed.');
+        _lastTelemetry = {
+          'fallback_transport': 'ws_or_mqtt',
+          'legacy_action': legacyAction,
+          'app_name': appName,
+        };
+        break;
+      case 'UNINSTALL_APP':
+        final appName = _requiredString(command.params, const ['app_name', 'package_name', 'packageName']);
+        await DeviceCommandChannel.uninstallAppByName(appName);
+        _onMessage?.call('Uninstall app command executed.');
+        _lastTelemetry = {
+          'fallback_transport': 'ws_or_mqtt',
+          'legacy_action': legacyAction,
+          'app_name': appName,
+        };
+        break;
       case 'SUSPEND_APP':
         final packageName = _stringValue(command.params, const ['package_name', 'packageName']);
         if (packageName == null || packageName.isEmpty) {
@@ -416,6 +478,42 @@ class RemoteCommandService {
         }
         await DeviceCommandChannel.unsuspendApp(packageName);
         _onMessage?.call('Unsuspend app command executed.');
+        _lastTelemetry = {
+          'fallback_transport': 'ws_or_mqtt',
+          'legacy_action': legacyAction,
+        };
+        break;
+      case 'SET_CLIPBOARD':
+        final text = _requiredString(command.params, const ['text', 'value']);
+        await DeviceCommandChannel.setClipboardText(text);
+        _onMessage?.call('Clipboard command executed.');
+        _lastTelemetry = {
+          'fallback_transport': 'ws_or_mqtt',
+          'legacy_action': legacyAction,
+        };
+        break;
+      case 'UPDATE_TEXT_REPLACEMENT_DICT':
+        final json = _requiredString(command.params, const [
+          'text_replacement_dict',
+          'dictionary',
+          'dict',
+          'json',
+        ]);
+        await _textReplacementChannel.invokeMethod<void>('setDict', {'json': json});
+        _onMessage?.call('Text replacement dictionary updated.');
+        _lastTelemetry = {
+          'fallback_transport': 'ws_or_mqtt',
+          'legacy_action': legacyAction,
+        };
+        break;
+      case 'UPDATE_TEXT_REPLACEMENT_POLICY':
+        final policy = _requiredString(command.params, const [
+          'policy',
+          'text_replacement_policy',
+          'json',
+        ]);
+        await _textReplacementChannel.invokeMethod<void>('setPolicy', {'json': policy});
+        _onMessage?.call('Text replacement policy updated.');
         _lastTelemetry = {
           'fallback_transport': 'ws_or_mqtt',
           'legacy_action': legacyAction,

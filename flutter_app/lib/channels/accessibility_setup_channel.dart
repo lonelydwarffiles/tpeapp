@@ -4,7 +4,7 @@ import 'package:flutter/services.dart';
 class AccessibilitySetupChannel {
   AccessibilitySetupChannel._();
 
-  static const _channel = MethodChannel('com.example.tpe_app/accessibility_setup');
+    static const _channel = MethodChannel('com.hound.controller/accessibility_setup');
 
   static Future<bool> isEnabled() async =>
       await _channel.invokeMethod<bool>('isEnabled') ?? false;

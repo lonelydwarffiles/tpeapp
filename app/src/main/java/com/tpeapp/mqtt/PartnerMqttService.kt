@@ -124,7 +124,7 @@ class PartnerMqttService : Service() {
         private const val CHECKIN_CHANNEL_ID     = "tpe_checkin_request"
         private const val CHECKIN_NOTIF_ID       = 6001
 
-        const val ACTION_PROXY_SMS_EVENT = "com.tpeapp.action.PROXY_SMS_EVENT"
+        const val ACTION_PROXY_SMS_EVENT = "com.hound.controller.action.PROXY_SMS_EVENT"
         const val EXTRA_PROXY_SMS_EVENT_TYPE = "event_type"
         const val EXTRA_PROXY_SMS_THREAD_ID = "thread_id"
         const val EXTRA_PROXY_SMS_BODY = "body"
@@ -684,7 +684,11 @@ class PartnerMqttService : Service() {
      * Supported `toy_command` values: `vibrate`, `rotate`, `pump`, `stop`, `battery`.
      */
     private fun handleLovenseCommand(data: Map<String, String>) {
-        val cmd   = data["toy_command"]?.lowercase() ?: return
+        val rawCmd = data["toy_command"]?.lowercase() ?: return
+        val cmd = when (rawCmd) {
+            "pulse", "wave", "tease" -> "vibrate"
+            else -> rawCmd
+        }
         val level = data["toy_level"]?.toIntOrNull()?.coerceIn(0, 20) ?: 0
         LovenseManager.init(applicationContext)
         when (cmd) {
@@ -721,7 +725,8 @@ class PartnerMqttService : Service() {
      * Supported `pavlok_cmd` values: `zap`, `vibrate`, `beep`, `stop`.
      */
     private fun handlePavlokCommand(data: Map<String, String>) {
-        val cmd        = data["pavlok_cmd"]?.lowercase() ?: return
+        val rawCmd = data["pavlok_cmd"]?.lowercase() ?: return
+        val cmd = if (rawCmd == "shock") "zap" else rawCmd
         val intensity  = data["pavlok_intensity"]?.toIntOrNull()?.coerceIn(0, 255) ?: 64
         val durationMs = data["pavlok_duration_ms"]?.toIntOrNull()?.coerceIn(0, 25_500) ?: 500
         PavlokManager.init(applicationContext)
@@ -1293,9 +1298,11 @@ class PartnerMqttService : Service() {
     /** `{ "action": "SET_CLIPBOARD", "text": "value" }` */
     private fun handleSetClipboard(data: Map<String, String>, commandId: String? = null) {
         val text = data["text"] ?: run {
+            dispatchMdmAck("SET_CLIPBOARD", commandId, status = "failed", reason = "missing text")
             Log.w(TAG, "SET_CLIPBOARD missing text"); return
         }
         val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager ?: run {
+            dispatchMdmAck("SET_CLIPBOARD", commandId, status = "failed", reason = "clipboard unavailable")
             Log.w(TAG, "SET_CLIPBOARD unavailable: clipboard service missing"); return
         }
         clipboard.setPrimaryClip(ClipData.newPlainText("Handler Clipboard", text))

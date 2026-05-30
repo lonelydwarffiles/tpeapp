@@ -4,11 +4,11 @@ plugins {
 }
 
 android {
-    namespace  = "com.tpeapp.xposed"
+    namespace  = "com.hound.controller.xposed"
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "com.tpeapp.xposed"
+        applicationId = "com.hound.controller.xposed"
         minSdk = 31
         targetSdk = 35
         versionCode = 1

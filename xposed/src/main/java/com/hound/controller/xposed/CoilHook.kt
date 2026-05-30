@@ -1,4 +1,4 @@
-package com.tpeapp.xposed
+﻿package com.hound.controller.xposed
 
 import android.graphics.Bitmap
 import android.util.Log
@@ -320,3 +320,4 @@ object CoilHook {
         return hash
     }
 }
+

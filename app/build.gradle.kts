@@ -6,11 +6,11 @@ plugins {
 }
 
 android {
-    namespace  = "com.tpeapp"
+    namespace  = "com.hound.controller"
     compileSdk = 35
 
     defaultConfig {
-        applicationId   = "com.tpeapp"
+        applicationId   = "com.hound.controller"
         minSdk          = 31   // Android 12 (Pixel 9 target is 14/15 → SDK 34/35)
         targetSdk       = 35
         versionCode     = 1

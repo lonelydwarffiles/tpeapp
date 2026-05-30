@@ -15,6 +15,7 @@ class _QuestionsScreenState extends State<QuestionsScreen> {
   List<Map<String, dynamic>> _questions = [];
   bool _loading = false;
   String? _error;
+  bool _canModerate = true;
 
   late ApiService _api;
 
@@ -34,7 +35,10 @@ class _QuestionsScreenState extends State<QuestionsScreen> {
     });
     try {
       final questions = await _api.fetchQuestions();
-      setState(() => _questions = questions);
+      setState(() {
+        _questions = questions;
+        _canModerate = questions.any((q) => q['can_moderate'] == true);
+      });
     } catch (e) {
       setState(() => _error = e.toString());
     } finally {
@@ -117,21 +121,28 @@ class _QuestionsScreenState extends State<QuestionsScreen> {
                       itemBuilder: (_, i) {
                         final q = _questions[i];
                         final id = q['id'] as String? ?? '';
-                        final text = q['question'] as String? ?? '';
+                        final text = (q['question'] ?? q['text'] ?? '').toString();
+                        final answer = (q['answer'] ?? '').toString();
+                        final canModerate = q['can_moderate'] == true;
                         return ListTile(
                           title: Text(text),
+                          subtitle: answer.trim().isNotEmpty
+                              ? Text('Answer: $answer')
+                              : (!canModerate
+                                  ? const Text('Read-only public feed')
+                                  : null),
                           trailing: Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
                               IconButton(
                                 icon: const Icon(Icons.reply),
                                 tooltip: 'Answer',
-                                onPressed: () => _answer(id),
+                                onPressed: canModerate ? () => _answer(id) : null,
                               ),
                               IconButton(
                                 icon: const Icon(Icons.delete),
                                 tooltip: 'Delete',
-                                onPressed: () => _delete(id),
+                                onPressed: canModerate ? () => _delete(id) : null,
                               ),
                             ],
                           ),

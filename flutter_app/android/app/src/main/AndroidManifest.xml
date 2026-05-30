@@ -15,7 +15,7 @@
     <uses-permission android:name="android.permission.health.READ_STEPS" />
 
     <application
-        android:label="tpe_app"
+        android:label="Maplebox"
         android:name="${applicationName}"
         android:extractNativeLibs="false"
         android:icon="@mipmap/ic_launcher">
@@ -65,6 +65,10 @@
 
          In particular, this is used by the Flutter engine in io.flutter.plugin.text.ProcessTextPlugin. -->
     <queries>
+        <package android:name="com.google.android.apps.healthdata" />
+        <intent>
+            <action android:name="androidx.health.ACTION_SHOW_PERMISSIONS_RATIONALE" />
+        </intent>
         <intent>
             <action android:name="android.intent.action.PROCESS_TEXT"/>
             <data android:mimeType="text/plain"/>

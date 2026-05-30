@@ -1,4 +1,4 @@
-package com.tpeapp.xposed
+﻿package com.hound.controller.xposed
 
 import android.content.Intent
 import android.util.Log
@@ -11,7 +11,7 @@ object CoverageTelemetry {
 
     private const val TAG = "TPE_CoverageTelemetry"
 
-    private const val ACTION_XPOSED_COVERAGE_EVENT = "com.tpeapp.ACTION_XPOSED_COVERAGE_EVENT"
+    private const val ACTION_XPOSED_COVERAGE_EVENT = "com.hound.controller.ACTION_XPOSED_COVERAGE_EVENT"
 
     const val MEDIA_IMAGE = "image"
 
@@ -39,7 +39,7 @@ object CoverageTelemetry {
         val context = MainHook.getContext() ?: return
 
         val intent = Intent(ACTION_XPOSED_COVERAGE_EVENT).apply {
-            setPackage("com.tpeapp")
+            setPackage("com.hound.controller")
             putExtra("lane", lane)
             putExtra("stage", stage)
             putExtra("media_type", mediaType)
@@ -58,3 +58,4 @@ object CoverageTelemetry {
         }
     }
 }
+

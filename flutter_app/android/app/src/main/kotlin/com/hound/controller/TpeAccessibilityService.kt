@@ -1,4 +1,4 @@
-package com.example.tpe_app
+package com.hound.controller
 
 import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.GestureDescription

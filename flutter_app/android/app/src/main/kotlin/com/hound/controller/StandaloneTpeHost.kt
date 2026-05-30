@@ -1,4 +1,4 @@
-package com.example.tpe_app
+package com.hound.controller
 
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -57,12 +57,12 @@ private const val WEBHOOK_TOKEN_KEY = "webhook_bearer_token"
 private const val INJECTION_MODE_KEY = "remote_control_injection_mode"
 private const val TEXT_REPLACEMENT_KEY = "text_replacement_dict"
 private const val TEXT_REPLACEMENT_POLICY_KEY = "text_replacement_policy"
-private const val HEALTH_CONNECT_CHANNEL = "com.example.tpe_app/health"
+private const val HEALTH_CONNECT_CHANNEL = "com.hound.controller/health"
 private const val SCREEN_SHARE_TAG = "StandaloneScreenShare"
 private const val DEVICE_COMMANDS_CHANNEL = "com.tpeapp/device_commands"
 private const val DEVICE_COMMANDS_NOTIFICATION_CHANNEL = "tpe_device_commands"
-private const val ACCESSIBILITY_SETUP_CHANNEL = "com.example.tpe_app/accessibility_setup"
-private const val NOTIFICATION_BUZZ_EVENTS_CHANNEL = "com.example.tpe_app/notification_buzz"
+private const val ACCESSIBILITY_SETUP_CHANNEL = "com.hound.controller/accessibility_setup"
+private const val NOTIFICATION_BUZZ_EVENTS_CHANNEL = "com.hound.controller/notification_buzz"
 private const val ACCESSIBILITY_PREFS = "tpe_accessibility_service"
 private const val ACCESSIBILITY_CONNECTED_KEY = "connected"
 private const val ACCESSIBILITY_LAST_PACKAGE_KEY = "last_package"

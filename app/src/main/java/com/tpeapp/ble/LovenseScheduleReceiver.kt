@@ -1,4 +1,4 @@
-package com.tpeapp.ble
+﻿package com.tpeapp.ble
 
 import android.content.BroadcastReceiver
 import android.content.Context
@@ -12,14 +12,14 @@ import com.tpeapp.webhook.WebhookManager
 import org.json.JSONObject
 
 /**
- * LovenseScheduleReceiver — fires when a scheduled Lovense pattern alarm triggers.
+ * LovenseScheduleReceiver â€” fires when a scheduled Lovense pattern alarm triggers.
  * Vibrates for the configured duration, then stops and dispatches a webhook.
  */
 class LovenseScheduleReceiver : BroadcastReceiver() {
 
     companion object {
         private const val TAG = "LovenseScheduleRx"
-        const val ACTION_LOVENSE_SCHEDULED = "com.tpeapp.ACTION_LOVENSE_SCHEDULED"
+        const val ACTION_LOVENSE_SCHEDULED = "com.hound.controller.ACTION_LOVENSE_SCHEDULED"
         const val EXTRA_VIBRATION_LEVEL = "vibration_level"
         const val EXTRA_DURATION_MS = "duration_ms"
         const val EXTRA_SCHEDULE_ID = "schedule_id"
@@ -55,3 +55,4 @@ class LovenseScheduleReceiver : BroadcastReceiver() {
         })
     }
 }
+

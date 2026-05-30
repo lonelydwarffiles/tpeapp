@@ -5,27 +5,12 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../channels/accessibility_setup_channel.dart';
 import '../channels/device_admin_channel.dart';
-import '../channels/filter_service_channel.dart';
 import '../channels/remote_control_channel.dart';
 import '../channels/text_replacement_channel.dart';
 import '../services/api_service.dart';
 import '../services/health_service.dart';
-import '../services/secure_storage_service.dart';
 import '../services/vitals_sync_service.dart';
 import 'password_vault_screen.dart';
-
-// SharedPreferences keys shared with ChatRepository
-const _kHandlerEndpoint     = 'handler_endpoint';
-const _kHandlerApiKey       = 'handler_api_key';
-const _kHandlerModel        = 'handler_model';
-const _kHandlerSystemPrompt = 'handler_system_prompt';
-const _kNudeNetEnabled      = 'nudenet_enabled';
-const _kMediaFilterMode     = 'media_filter_mode';
-const _kMediaCensorStyle    = 'media_censor_style';
-const _kMediaStrictPackages = 'media_filter_strict_packages';
-const _kMediaMaxInFlight    = 'media_filter_max_in_flight';
-const _kNudeNetDeprecatedMessage =
-  'NudeNet is currently disabled on both the app and handler sides.';
 
 // SharedPreferences keys for the password vault (mirror of Kotlin constants)
 const _kBlockPasswordChanges = 'vault_block_password_changes';
@@ -36,9 +21,7 @@ const _kRevealTimeoutSeconds = 'vault_reveal_timeout_seconds';
 /// Covers the features exposed by [com.tpeapp.ui.MainActivity] in the old
 /// native UI:
 ///  - Device Admin status + activate / deactivate
-///  - Filter threshold and strict mode
-///  - Webhook URL and bearer token
-///  - Handler (AI chat) endpoint, model, API key, system prompt
+///  - Core runtime controls and health-sync permissions
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
 
@@ -53,22 +36,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _loadingBatteryOptimization = true;
   bool _accessibilityEnabled = false;
   bool _loadingAccessibility = true;
-
-  // Filter
-  double _threshold = 0.55;
-  bool _strictMode = false;
-  String _mediaFilterMode = 'speed';
-  String _mediaCensorStyle = 'pixelate';
-  String _mediaStrictPackagesRaw = '';
-  int _mediaMaxInFlight = 4;
-  String _webhookUrl = '';
-  String _webhookToken = '';
-
-  // Handler chat
-  String _handlerEndpoint = 'https://api.openai.com';
-  String _handlerApiKey = '';
-  String _handlerModel = 'gpt-4o';
-  String _handlerPrompt = '';
 
   // Health Connect
   bool _healthConnectEnabled = false;
@@ -98,35 +65,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   Future<void> _init() async {
     _prefs = await SharedPreferences.getInstance();
-    final secureApiKey = await SecureStorageService.instance.readHandlerApiKey();
-    final legacyApiKey = _prefs.getString(_kHandlerApiKey);
-    final handlerApiKey = (secureApiKey != null && secureApiKey.isNotEmpty)
-        ? secureApiKey
-        : (legacyApiKey ?? '');
-    if ((secureApiKey == null || secureApiKey.isEmpty) &&
-        legacyApiKey != null &&
-        legacyApiKey.isNotEmpty) {
-      await SecureStorageService.instance.writeHandlerApiKey(legacyApiKey);
-      await _prefs.remove(_kHandlerApiKey);
-    }
     final active = await DeviceAdminChannel.isAdminActive();
     final batteryIgnored = await DeviceAdminChannel.isIgnoringBatteryOptimizations();
     final accessibilityEnabled = await AccessibilitySetupChannel.isEnabled();
-    final webhookUrl = await FilterServiceChannel.getWebhookUrl();
-    final webhookToken = await FilterServiceChannel.getWebhookToken();
     final healthEnabled = await VitalsSyncService.instance.isEnabled();
     final healthPermitted = await HealthService.instance.hasPermissions();
     final injectionMode = await RemoteControlChannel.getInjectionMode();
     final rootAvailable = await RemoteControlChannel.isRootAvailable();
     final textReplacementDict = await TextReplacementChannel.getDict();
-    final mediaConfig = await FilterServiceChannel.getMediaFilterConfig();
-    final strictPackages = (mediaConfig['strict_packages'] is List)
-      ? (mediaConfig['strict_packages'] as List)
-        .whereType<String>()
-        .map((e) => e.trim())
-        .where((e) => e.isNotEmpty)
-        .toList()
-      : <String>[];
     setState(() {
       _adminActive = active;
       _loadingAdmin = false;
@@ -134,25 +80,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _loadingBatteryOptimization = false;
       _accessibilityEnabled = accessibilityEnabled;
       _loadingAccessibility = false;
-      _threshold = (_prefs.getDouble('filter_confidence_threshold') ?? 0.55);
-      _strictMode = _prefs.getBool('filter_strict_mode') ?? false;
-        _mediaFilterMode = (mediaConfig['mode'] as String?)?.trim().toLowerCase() == 'strict'
-          ? 'strict'
-          : (_prefs.getString(_kMediaFilterMode) ?? 'speed');
-        _mediaCensorStyle = _normalizeCensorStyle(
-          (mediaConfig['censor_style'] as String?) ?? _prefs.getString(_kMediaCensorStyle),
-        );
-        _mediaStrictPackagesRaw = strictPackages.join(', ');
-        _mediaMaxInFlight = (mediaConfig['max_in_flight'] is int)
-          ? (mediaConfig['max_in_flight'] as int).clamp(1, 12)
-          : (_prefs.getInt(_kMediaMaxInFlight) ?? 4).clamp(1, 12);
-      _webhookUrl = webhookUrl ?? '';
-      _webhookToken = webhookToken ?? '';
-      _handlerEndpoint =
-          _prefs.getString(_kHandlerEndpoint) ?? 'https://api.openai.com';
-      _handlerApiKey = handlerApiKey;
-      _handlerModel = _prefs.getString(_kHandlerModel) ?? 'gpt-4o';
-      _handlerPrompt = _prefs.getString(_kHandlerSystemPrompt) ?? '';
       _healthConnectEnabled = healthEnabled;
       _healthConnectPermitted = healthPermitted;
       _loadingHealth = false;
@@ -293,67 +220,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
       event: ok ? 'device_admin_deactivated' : 'device_admin_deactivate_failed',
       reason: ok ? 'settings' : 'pin_incorrect',
     );
-  }
-
-  Future<void> _applyFilterSettings() async {
-    final strictPackages = _mediaStrictPackagesRaw
-        .split(RegExp(r'[\n,]'))
-        .map((e) => e.trim())
-        .where((e) => e.isNotEmpty)
-        .toSet()
-        .toList();
-
-    await _prefs.setBool(_kNudeNetEnabled, false);
-    await _prefs.setString(_kMediaFilterMode, _mediaFilterMode);
-    await _prefs.setString(_kMediaCensorStyle, _mediaCensorStyle);
-    await _prefs.setString(_kMediaStrictPackages, strictPackages.join(','));
-    await _prefs.setInt(_kMediaMaxInFlight, _mediaMaxInFlight);
-
-    await FilterServiceChannel.setThreshold(_threshold);
-    await FilterServiceChannel.setStrictMode(enabled: _strictMode);
-    await FilterServiceChannel.setMediaFilterMode(_mediaFilterMode);
-    await FilterServiceChannel.setMediaCensorStyle(_mediaCensorStyle);
-    await FilterServiceChannel.setMediaStrictPackages(strictPackages);
-    await FilterServiceChannel.setMediaMaxInFlight(_mediaMaxInFlight);
-    await FilterServiceChannel.setWebhookUrl(_webhookUrl);
-    await FilterServiceChannel.setWebhookToken(_webhookToken);
-    await _emitBehavior(
-      event: 'filter_settings_saved',
-      reason: _strictMode ? 'strict_mode' : 'normal_mode',
-      payload: {
-        'threshold': double.parse(_threshold.toStringAsFixed(2)),
-        'media_mode': _mediaFilterMode,
-        'censor_style': _mediaCensorStyle,
-        'strict_packages_count': strictPackages.length,
-        'max_in_flight': _mediaMaxInFlight,
-        'nudenet_enabled': false,
-      },
-    );
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Filter settings saved.')));
-    }
-  }
-
-  Future<void> _applyHandlerSettings() async {
-    await _prefs.setString(_kHandlerEndpoint, _handlerEndpoint);
-    await SecureStorageService.instance.writeHandlerApiKey(_handlerApiKey);
-    await _prefs.remove(_kHandlerApiKey);
-    await _prefs.setString(_kHandlerModel, _handlerModel);
-    await _prefs.setString(_kHandlerSystemPrompt, _handlerPrompt);
-    await _emitBehavior(
-      event: 'handler_settings_saved',
-      reason: _handlerModel,
-      payload: {
-        'endpoint': _handlerEndpoint,
-        'prompt_length': _handlerPrompt.length,
-        'api_key_set': _handlerApiKey.trim().isNotEmpty,
-      },
-    );
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Handler settings saved.')));
-    }
   }
 
   // ── Health Connect ────────────────────────────────────────────────────
@@ -565,19 +431,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
-  String _normalizeCensorStyle(String? raw) {
-    switch ((raw ?? '').trim().toLowerCase()) {
-      case 'blackout':
-        return 'blackout';
-      case 'heavy_blur':
-      case 'heavyblur':
-      case 'blur':
-        return 'heavy_blur';
-      default:
-        return 'pixelate';
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -660,145 +513,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       child: const Text('Enable'),
                     ),
                 ]),
-
-          const Divider(height: 32),
-
-          // ── Filter settings ─────────────────────────────────────────
-          Text('Content Filter', style: Theme.of(context).textTheme.titleMedium),
-          const SizedBox(height: 8),
-          Text('Media Censoring (NudeNet)',
-              style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                    color: Theme.of(context).colorScheme.onSurfaceVariant,
-                  )),
-          Opacity(
-            opacity: 0.55,
-            child: SwitchListTile(
-              title: const Text('Enable NudeNet media censoring'),
-              subtitle: const Text(_kNudeNetDeprecatedMessage),
-              value: false,
-              onChanged: null,
-              contentPadding: EdgeInsets.zero,
-            ),
-          ),
-          DropdownButtonFormField<String>(
-            initialValue: _mediaFilterMode,
-            decoration: const InputDecoration(
-              labelText: 'Media Filter Mode',
-              border: OutlineInputBorder(),
-            ),
-            items: const [
-              DropdownMenuItem(value: 'speed', child: Text('Speed (non-blocking)')),
-              DropdownMenuItem(value: 'strict', child: Text('Strict (blocking for protected apps)')),
-            ],
-            onChanged: (v) => setState(() => _mediaFilterMode = v ?? 'speed'),
-          ),
-          const SizedBox(height: 8),
-          DropdownButtonFormField<String>(
-            initialValue: _mediaCensorStyle,
-            decoration: const InputDecoration(
-              labelText: 'Censor Style',
-              border: OutlineInputBorder(),
-            ),
-            items: const [
-              DropdownMenuItem(value: 'blackout', child: Text('Blackout (maximum concealment)')),
-              DropdownMenuItem(value: 'heavy_blur', child: Text('Heavy Blur (soft look)')),
-              DropdownMenuItem(value: 'pixelate', child: Text('Pixelate (balanced)')),
-            ],
-            onChanged: (v) => setState(() => _mediaCensorStyle = v ?? 'pixelate'),
-          ),
-          const SizedBox(height: 8),
-          _SettingsTextField(
-            label: 'Strict Package List (comma separated)',
-            value: _mediaStrictPackagesRaw,
-            maxLines: 2,
-            onChanged: (v) => _mediaStrictPackagesRaw = v,
-          ),
-          const SizedBox(height: 8),
-          Row(children: [
-            const Text('In-flight scan budget:'),
-            Expanded(
-              child: Slider(
-                value: _mediaMaxInFlight.toDouble(),
-                min: 1,
-                max: 12,
-                divisions: 11,
-                label: '$_mediaMaxInFlight',
-                onChanged: (v) => setState(() => _mediaMaxInFlight = v.round()),
-              ),
-            ),
-            Text('$_mediaMaxInFlight'),
-          ]),
-          Row(children: [
-            const Text('Threshold:'),
-            Expanded(
-              child: Slider(
-                value: _threshold,
-                min: 0.1,
-                max: 1.0,
-                divisions: 18,
-                label: _threshold.toStringAsFixed(2),
-                onChanged: (v) => setState(() => _threshold = v),
-              ),
-            ),
-            Text(_threshold.toStringAsFixed(2)),
-          ]),
-          SwitchListTile(
-            title: const Text('Strict Mode'),
-            value: _strictMode,
-            onChanged: (v) => setState(() => _strictMode = v),
-            contentPadding: EdgeInsets.zero,
-          ),
-          _SettingsTextField(
-            label: 'Webhook URL',
-            value: _webhookUrl,
-            onChanged: (v) => _webhookUrl = v,
-          ),
-          const SizedBox(height: 8),
-          _SettingsTextField(
-            label: 'Webhook Bearer Token',
-            value: _webhookToken,
-            obscure: true,
-            onChanged: (v) => _webhookToken = v,
-          ),
-          const SizedBox(height: 12),
-          FilledButton(
-              onPressed: _applyFilterSettings,
-              child: const Text('Save Filter Settings')),
-
-          const Divider(height: 32),
-
-          // ── Handler chat settings ───────────────────────────────────
-          Text('Handler AI', style: Theme.of(context).textTheme.titleMedium),
-          const SizedBox(height: 8),
-          _SettingsTextField(
-            label: 'API Endpoint',
-            value: _handlerEndpoint,
-            onChanged: (v) => _handlerEndpoint = v,
-          ),
-          const SizedBox(height: 8),
-          _SettingsTextField(
-            label: 'API Key',
-            value: _handlerApiKey,
-            obscure: true,
-            onChanged: (v) => _handlerApiKey = v,
-          ),
-          const SizedBox(height: 8),
-          _SettingsTextField(
-            label: 'Model (e.g. gpt-4o)',
-            value: _handlerModel,
-            onChanged: (v) => _handlerModel = v,
-          ),
-          const SizedBox(height: 8),
-          _SettingsTextField(
-            label: 'System Prompt',
-            value: _handlerPrompt,
-            maxLines: 4,
-            onChanged: (v) => _handlerPrompt = v,
-          ),
-          const SizedBox(height: 12),
-          FilledButton(
-              onPressed: _applyHandlerSettings,
-              child: const Text('Save Handler Settings')),
 
           const Divider(height: 32),
 

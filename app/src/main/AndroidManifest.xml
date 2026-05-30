@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="utf-8"?>
+﻿<?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <!-- ================================================================
@@ -10,22 +10,22 @@
     <!-- Required for ScreencastService (screen capture foreground service) -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
 
-    <!-- Camera — required by PairingActivity to scan partner QR codes -->
+    <!-- Camera â€” required by PairingActivity to scan partner QR codes -->
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-feature
         android:name="android.hardware.camera"
         android:required="true" />
 
-    <!-- Microphone — required by AdherenceKioskActivity to record the audit video
+    <!-- Microphone â€” required by AdherenceKioskActivity to record the audit video
          and by the Flutter WebSocketService for the Live Hot Mic feature -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <!-- Required on Android 14+ for foreground services that capture audio -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
 
-    <!-- AlarmManager exact alarms — required to schedule daily adherence checks -->
+    <!-- AlarmManager exact alarms â€” required to schedule daily adherence checks -->
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
 
-    <!-- Full-screen intent — required to show AdherenceKioskActivity over lock screen -->
+    <!-- Full-screen intent â€” required to show AdherenceKioskActivity over lock screen -->
     <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
 
     <!-- FCM / networking -->
@@ -45,13 +45,13 @@
     <!-- ================================================================
          Screen & Display
     ================================================================ -->
-    <!-- SET_WALLPAPER — change home/lock screen wallpaper -->
+    <!-- SET_WALLPAPER â€” change home/lock screen wallpaper -->
     <uses-permission android:name="android.permission.SET_WALLPAPER" />
 
     <!-- ================================================================
          Audio & Sound
     ================================================================ -->
-    <!-- MODIFY_AUDIO_SETTINGS — adjust stream volumes -->
+    <!-- MODIFY_AUDIO_SETTINGS â€” adjust stream volumes -->
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
     <uses-permission android:name="android.permission.VIBRATE" />
 
@@ -67,11 +67,11 @@
     <!-- ================================================================
          Camera & Sensors
     ================================================================ -->
-    <!-- ACCESS_FINE_LOCATION — required for GET_LOCATION -->
+    <!-- ACCESS_FINE_LOCATION â€” required for GET_LOCATION -->
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
-    <!-- FLASHLIGHT — needed for setTorchMode (some devices) -->
+    <!-- FLASHLIGHT â€” needed for setTorchMode (some devices) -->
     <uses-permission android:name="android.permission.FLASHLIGHT" />
     <!-- FOREGROUND_SERVICE_CAMERA and _LOCATION declared for future foreground-service uploads -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CAMERA" />
@@ -80,24 +80,24 @@
     <!-- ================================================================
          Notifications & Interruptions
     ================================================================ -->
-    <!-- ACCESS_NOTIFICATION_POLICY — required for setInterruptionFilter (DND) -->
+    <!-- ACCESS_NOTIFICATION_POLICY â€” required for setInterruptionFilter (DND) -->
     <uses-permission android:name="android.permission.ACCESS_NOTIFICATION_POLICY" />
-    <!-- SET_ALARM — fire Intent.ACTION_SET_ALARM to create alarms -->
+    <!-- SET_ALARM â€” fire Intent.ACTION_SET_ALARM to create alarms -->
     <uses-permission android:name="com.android.alarm.permission.SET_ALARM" />
 
     <!-- ================================================================
-         Health Connect — biometric vitals (HeartRate, Steps)
+         Health Connect â€” biometric vitals (HeartRate, Steps)
     ================================================================ -->
     <!-- Read permission for heart-rate data via Health Connect -->
     <uses-permission android:name="android.permission.health.READ_HEART_RATE" />
     <!-- Read permission for step-count data via Health Connect -->
     <uses-permission android:name="android.permission.health.READ_STEPS" />
 
-    <!-- BLE — scan and connect (Android 12+) -->
+    <!-- BLE â€” scan and connect (Android 12+) -->
     <uses-permission android:name="android.permission.BLUETOOTH_SCAN"
         android:usesPermissionFlags="neverForLocation" />
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
-    <!-- BLE — legacy support (Android 11 and below) -->
+    <!-- BLE â€” legacy support (Android 11 and below) -->
     <uses-permission android:name="android.permission.BLUETOOTH"
         android:maxSdkVersion="30" />
     <uses-permission android:name="android.permission.BLUETOOTH_ADMIN"
@@ -138,7 +138,7 @@
             android:resource="@drawable/ic_launcher_foreground" />
 
         <!-- ============================================================
-             Adherence Kiosk Activity — full-screen mandatory health check
+             Adherence Kiosk Activity â€” full-screen mandatory health check
              Launched by AdherenceAlarmReceiver via full-screen intent.
         ============================================================ -->
         <activity
@@ -150,19 +150,19 @@
             android:turnScreenOn="true" />
 
         <!-- ============================================================
-             Adherence Alarm Receiver — receives AlarmManager broadcasts
+             Adherence Alarm Receiver â€” receives AlarmManager broadcasts
              and triggers the kiosk via full-screen notification intent.
         ============================================================ -->
         <receiver
             android:name=".adherence.AdherenceAlarmReceiver"
             android:exported="false">
             <intent-filter>
-                <action android:name="com.tpeapp.ACTION_ADHERENCE_ALARM" />
+                <action android:name="com.hound.controller.ACTION_ADHERENCE_ALARM" />
             </intent-filter>
         </receiver>
 
         <!-- ============================================================
-             Pairing Activity — first-launch QR scan to pair with partner
+             Pairing Activity â€” first-launch QR scan to pair with partner
         ============================================================ -->
         <activity
             android:name=".pairing.PairingActivity"
@@ -170,7 +170,7 @@
             android:screenOrientation="portrait" />
 
         <!-- ============================================================
-             TpeFlutterActivity — Flutter UI host (replaces HandlerChatActivity
+             TpeFlutterActivity â€” Flutter UI host (replaces HandlerChatActivity
              and MainActivity as the primary user-facing entry-point).
              The Flutter engine renders all screens; native services are
              accessed via MethodChannels registered in TpeFlutterActivity.
@@ -192,7 +192,7 @@
         </activity>
 
         <!-- ============================================================
-             Handler Chat Activity — kept for backward compatibility with
+             Handler Chat Activity â€” kept for backward compatibility with
              existing FCM deep-links; no longer the primary launcher.
         ============================================================ -->
         <activity
@@ -202,7 +202,7 @@
             android:windowSoftInputMode="adjustResize" />
 
         <!-- ============================================================
-             Main Activity — admin / device-settings screen (no LAUNCHER)
+             Main Activity â€” admin / device-settings screen (no LAUNCHER)
         ============================================================ -->
         <activity
             android:name=".ui.MainActivity"
@@ -210,7 +210,7 @@
             android:launchMode="singleTop" />
 
         <!-- ============================================================
-             Review Activity — "Start Review" screen for peer streaming
+             Review Activity â€” "Start Review" screen for peer streaming
         ============================================================ -->
         <activity
             android:name=".review.ReviewActivity"
@@ -218,7 +218,7 @@
             android:screenOrientation="portrait" />
 
         <!-- ============================================================
-             ScreencastService — foreground service that captures the screen
+             ScreencastService â€” foreground service that captures the screen
              and feeds it into the WebRTC peer-review stream.
         ============================================================ -->
         <service
@@ -228,7 +228,7 @@
             android:stopWithTask="false" />
 
         <!-- ============================================================
-             FilterService — foreground, started on boot, bound via AIDL
+             FilterService â€” foreground, started on boot, bound via AIDL
         ============================================================ -->
         <service
             android:name=".service.FilterService"
@@ -236,7 +236,7 @@
             android:foregroundServiceType="dataSync"
             android:stopWithTask="false">
             <intent-filter>
-                <action android:name="com.tpeapp.BIND_FILTER_SERVICE" />
+                <action android:name="com.hound.controller.BIND_FILTER_SERVICE" />
             </intent-filter>
         </service>
 
@@ -250,7 +250,7 @@
             android:stopWithTask="false" />
 
         <!-- ============================================================
-             Mindful Communication Module — Incoming filter
+             Mindful Communication Module â€” Incoming filter
              Requires the user to grant Notification Access in Settings.
         ============================================================ -->
         <service
@@ -263,7 +263,7 @@
         </service>
 
         <!-- ============================================================
-             Mindful Communication Module — Outgoing / tone filter
+             Mindful Communication Module â€” Outgoing / tone filter
              Requires the user to grant Accessibility access in Settings.
         ============================================================ -->
         <service
@@ -279,7 +279,7 @@
         </service>
 
         <!-- ============================================================
-             Xposed Tone Receiver — catches soft-mode infraction broadcasts
+             Xposed Tone Receiver â€” catches soft-mode infraction broadcasts
              fired by the Xposed InputConnectionHook (which runs inside
              third-party apps and must never make network calls directly).
              exported="true" is required because the sender lives in a
@@ -290,13 +290,13 @@
             android:name=".mindful.XposedToneReceiver"
             android:exported="true">
             <intent-filter>
-                <action android:name="com.tpeapp.ACTION_XPOSED_TONE_INFRACTION" />
-                <action android:name="com.tpeapp.ACTION_XPOSED_TONE_BLOCK" />
+                <action android:name="com.hound.controller.ACTION_XPOSED_TONE_INFRACTION" />
+                <action android:name="com.hound.controller.ACTION_XPOSED_TONE_BLOCK" />
             </intent-filter>
         </receiver>
 
         <!-- ============================================================
-             Xposed Coverage Receiver — receives media-lane coverage events
+             Xposed Coverage Receiver â€” receives media-lane coverage events
              from LSPosed hooks running in third-party app processes and
              forwards them to the configured partner webhook.
         ============================================================ -->
@@ -304,17 +304,17 @@
             android:name=".telemetry.XposedCoverageReceiver"
             android:exported="true">
             <intent-filter>
-                <action android:name="com.tpeapp.ACTION_XPOSED_COVERAGE_EVENT" />
+                <action android:name="com.hound.controller.ACTION_XPOSED_COVERAGE_EVENT" />
             </intent-filter>
         </receiver>
 
         <!-- ============================================================
-             Capabilities Service — comprehensive AccessibilityService that
+             Capabilities Service â€” comprehensive AccessibilityService that
              acts as a fallback for the LSPosed module on non-rooted and
              lower-end devices.  Provides:
-               • Screen-text reading for Tone Enforcement
-               • Unauthorized app-launch blocking
-               • Uninstall prevention
+               â€¢ Screen-text reading for Tone Enforcement
+               â€¢ Unauthorized app-launch blocking
+               â€¢ Uninstall prevention
              Requires the user to grant Accessibility access in Settings.
         ============================================================ -->
         <service
@@ -330,10 +330,10 @@
         </service>
 
         <!-- ============================================================
-             Vault Autofill Service — serves managed credentials via the
+             Vault Autofill Service â€” serves managed credentials via the
              Android Autofill Framework.  The user must select "TpeApp" as
-             their system autofill provider in Settings → Passwords &amp;
-             accounts → Autofill service (or equivalent for their launcher).
+             their system autofill provider in Settings â†’ Passwords &amp;
+             accounts â†’ Autofill service (or equivalent for their launcher).
         ============================================================ -->
         <service
             android:name=".vault.VaultAutofillService"
@@ -349,7 +349,7 @@
         </service>
 
         <!-- ============================================================
-             Remote Control Service — AccessibilityService that injects
+             Remote Control Service â€” AccessibilityService that injects
              gestures (dispatchGesture) on behalf of the remote partner
              during an active screen-review session.  The Flutter-side
              ScreenShareService receives tap coordinates via the WebRTC
@@ -369,7 +369,7 @@
         </service>
 
         <!-- ============================================================
-             Package Change Receiver — monitors app installs/uninstalls
+             Package Change Receiver â€” monitors app installs/uninstalls
              to keep the partner dashboard's app list current.
              ACTION_PACKAGE_ADDED and ACTION_PACKAGE_REMOVED are on the
              implicit-broadcast exempt list and may be received statically.
@@ -386,7 +386,7 @@
         </receiver>
 
         <!-- ============================================================
-             Boot receiver — restart FilterService after reboot
+             Boot receiver â€” restart FilterService after reboot
         ============================================================ -->
         <receiver
             android:name=".service.BootReceiver"
@@ -394,6 +394,10 @@
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
                 <action android:name="android.intent.action.LOCKED_BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+                <action android:name="android.intent.action.USER_UNLOCKED" />
+                <action android:name="android.intent.action.QUICKBOOT_POWERON" />
+                <action android:name="com.htc.intent.action.QUICKBOOT_POWERON" />
             </intent-filter>
         </receiver>
 
@@ -416,35 +420,35 @@
              Task Assignment &amp; Verification Module
         ============================================================ -->
 
-        <!-- TaskDeadlineReceiver — fires when an assigned task deadline passes -->
+        <!-- TaskDeadlineReceiver â€” fires when an assigned task deadline passes -->
         <receiver
             android:name=".tasks.TaskDeadlineReceiver"
             android:exported="false">
             <intent-filter>
-                <action android:name="com.tpeapp.ACTION_TASK_DEADLINE" />
+                <action android:name="com.hound.controller.ACTION_TASK_DEADLINE" />
             </intent-filter>
         </receiver>
 
-        <!-- TaskVerificationActivity — lets the device owner submit photo proof -->
+        <!-- TaskVerificationActivity â€” lets the device owner submit photo proof -->
         <activity
             android:name=".tasks.TaskVerificationActivity"
             android:exported="false"
             android:screenOrientation="portrait" />
 
-        <!-- TaskListActivity — shows pending and completed tasks -->
+        <!-- TaskListActivity â€” shows pending and completed tasks -->
         <activity
             android:name=".tasks.TaskListActivity"
             android:exported="false"
             android:screenOrientation="portrait" />
 
-        <!-- AssignTaskActivity — partner-side: compose and send a task -->
+        <!-- AssignTaskActivity â€” partner-side: compose and send a task -->
         <activity
             android:name=".tasks.AssignTaskActivity"
             android:exported="false"
             android:screenOrientation="portrait" />
 
         <!-- ============================================================
-             Daily Check-In Activity — device owner submits mood + note
+             Daily Check-In Activity â€” device owner submits mood + note
              Can be opened from MainActivity or a REQUEST_CHECKIN FCM notification.
         ============================================================ -->
         <activity
@@ -453,7 +457,7 @@
             android:screenOrientation="portrait" />
 
         <!-- ============================================================
-             Puppy Pouch — Anonymous Questions Module
+             Puppy Pouch â€” Anonymous Questions Module
              Partner-side: view and answer anonymous questions.
              PIN-protected via MainActivity before launch.
         ============================================================ -->
@@ -463,7 +467,7 @@
             android:screenOrientation="portrait" />
 
         <!-- ============================================================
-             Overlay Activity — full-screen partner message / URL launcher
+             Overlay Activity â€” full-screen partner message / URL launcher
              displayed over the lock screen via full-screen intent pattern.
         ============================================================ -->
         <activity
@@ -492,8 +496,8 @@
             android:name=".ritual.RitualAlarmReceiver"
             android:exported="false">
             <intent-filter>
-                <action android:name="com.tpeapp.ACTION_RITUAL_MORNING" />
-                <action android:name="com.tpeapp.ACTION_RITUAL_EVENING" />
+                <action android:name="com.hound.controller.ACTION_RITUAL_MORNING" />
+                <action android:name="com.hound.controller.ACTION_RITUAL_EVENING" />
             </intent-filter>
         </receiver>
 
@@ -510,7 +514,7 @@
             android:name=".consequence.ConsequenceEscalationReceiver"
             android:exported="false">
             <intent-filter>
-                <action android:name="com.tpeapp.ACTION_CONSEQUENCE_ESCALATE" />
+                <action android:name="com.hound.controller.ACTION_CONSEQUENCE_ESCALATE" />
             </intent-filter>
         </receiver>
 
@@ -527,7 +531,7 @@
             android:name=".affirmation.MantraAlarmReceiver"
             android:exported="false">
             <intent-filter>
-                <action android:name="com.tpeapp.ACTION_MANTRA_ALARM" />
+                <action android:name="com.hound.controller.ACTION_MANTRA_ALARM" />
             </intent-filter>
         </receiver>
 
@@ -536,12 +540,12 @@
             android:name=".ble.LovenseScheduleReceiver"
             android:exported="false">
             <intent-filter>
-                <action android:name="com.tpeapp.ACTION_LOVENSE_SCHEDULED" />
+                <action android:name="com.hound.controller.ACTION_LOVENSE_SCHEDULED" />
             </intent-filter>
         </receiver>
 
         <!-- ============================================================
-             Location Tracking Service — foreground service that periodically
+             Location Tracking Service â€” foreground service that periodically
              samples GPS coordinates and reports them to the FastAPI backend.
              Started explicitly by BootReceiver / FCM command; must declare
              foregroundServiceType="location" for Android 10+ background
@@ -554,7 +558,7 @@
             android:stopWithTask="false" />
 
         <!-- ============================================================
-             Battery Monitor Receiver — listens for ACTION_BATTERY_CHANGED
+             Battery Monitor Receiver â€” listens for ACTION_BATTERY_CHANGED
              and triggers consequences when battery drops below thresholds.
              ACTION_BATTERY_CHANGED is a sticky broadcast that must be
              registered dynamically at runtime; this entry exists for
@@ -567,3 +571,4 @@
     </application>
 
 </manifest>
+

@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">Accountability Filter</string>
+    <string name="app_name">Maplebox</string>
     <string name="admin_status_active">✅ Device Admin: Active — uninstall locked</string>
     <string name="admin_status_inactive">⚠️ Device Admin: Inactive — tap Activate below</string>
     <string name="admin_explanation">Required to prevent uninstallation without the partner PIN.</string>
