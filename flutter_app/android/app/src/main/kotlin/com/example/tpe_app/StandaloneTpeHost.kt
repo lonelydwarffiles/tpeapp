@@ -19,8 +19,12 @@ import android.os.PowerManager
 import android.provider.Settings
 import android.speech.tts.TextToSpeech
 import android.util.Log
+import androidx.activity.ComponentActivity
+import androidx.activity.result.ActivityResultLauncher
 import androidx.core.content.ContextCompat
 import androidx.core.app.NotificationCompat
+import androidx.health.connect.client.HealthConnectClient
+import androidx.health.connect.client.PermissionController
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodCall
@@ -46,6 +50,7 @@ private const val WEBHOOK_URL_KEY = "webhook_url"
 private const val WEBHOOK_TOKEN_KEY = "webhook_bearer_token"
 private const val INJECTION_MODE_KEY = "remote_control_injection_mode"
 private const val TEXT_REPLACEMENT_KEY = "text_replacement_dict"
+private const val HEALTH_CONNECT_CHANNEL = "com.example.tpe_app/health"
 private const val SCREEN_SHARE_TAG = "StandaloneScreenShare"
 private const val DEVICE_COMMANDS_CHANNEL = "com.tpeapp/device_commands"
 private const val DEVICE_COMMANDS_NOTIFICATION_CHANNEL = "tpe_device_commands"
@@ -53,12 +58,16 @@ private var cachedRootAvailable: Boolean? = null
 private var deviceMediaPlayer: MediaPlayer? = null
 private var deviceTts: TextToSpeech? = null
 private var deviceTtsReady: Boolean = false
+private var healthConnectPermissionsLauncher: ActivityResultLauncher<Set<String>>? = null
+private var pendingHealthPermissions: Set<String> = emptySet()
+private var pendingHealthPermissionsResult: MethodChannel.Result? = null
 
 object StandaloneTpeHost {
     fun register(flutterEngine: FlutterEngine, activity: MainActivity) {
         val messenger = flutterEngine.dartExecutor.binaryMessenger
         val context = activity.applicationContext
 
+        registerHealthConnect(messenger, activity)
         registerFilterService(messenger, context)
         registerPartnerPin(messenger, context)
         registerDeviceAdmin(messenger, activity)
@@ -69,6 +78,68 @@ object StandaloneTpeHost {
         registerPasswordVault(messenger, context)
         registerDeviceCommands(messenger, context)
         registerNoOpMethods(messenger, "com.tpeapp/ble")
+    }
+
+    private fun registerHealthConnect(
+        messenger: io.flutter.plugin.common.BinaryMessenger,
+        activity: MainActivity,
+    ) {
+        val componentActivity = activity as? ComponentActivity ?: return
+
+        healthConnectPermissionsLauncher =
+            componentActivity.registerForActivityResult(
+                PermissionController.createRequestPermissionResultContract()
+            ) { granted ->
+                val requested = pendingHealthPermissions
+                val success = requested.isNotEmpty() && granted.containsAll(requested)
+                pendingHealthPermissionsResult?.success(success)
+                pendingHealthPermissionsResult = null
+                pendingHealthPermissions = emptySet()
+            }
+
+        MethodChannel(messenger, HEALTH_CONNECT_CHANNEL).setMethodCallHandler { call, result ->
+            when (call.method) {
+                "requestPermissions" -> {
+                    val status = HealthConnectClient.getSdkStatus(activity)
+                    if (status != HealthConnectClient.SDK_AVAILABLE) {
+                        launchHealthConnectInstall(activity)
+                        result.success(false)
+                        return@setMethodCallHandler
+                    }
+
+                    val launcher = healthConnectPermissionsLauncher
+                    if (launcher == null) {
+                        result.success(false)
+                        return@setMethodCallHandler
+                    }
+
+                    pendingHealthPermissions = setOf(
+                        "android.permission.health.READ_HEART_RATE",
+                        "android.permission.health.READ_STEPS",
+                    )
+                    pendingHealthPermissionsResult = result
+                    launcher.launch(pendingHealthPermissions)
+                }
+
+                else -> result.notImplemented()
+            }
+        }
+    }
+
+    private fun launchHealthConnectInstall(context: Context) {
+        val uriString =
+            "market://details?id=com.google.android.apps.healthdata&url=healthconnect%3A%2F%2Fonboarding"
+        runCatching {
+            context.startActivity(
+                Intent(Intent.ACTION_VIEW).apply {
+                    setPackage("com.android.vending")
+                    data = Uri.parse(uriString)
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    putExtra("overlay", true)
+                    putExtra("callerId", context.packageName)
+                }
+            )
+        }
     }
 
     private fun registerDeviceCommands(

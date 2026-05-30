@@ -65,17 +65,22 @@ object CoilHook {
     // ------------------------------------------------------------------
 
     private fun hookMemoryCache(loader: ClassLoader) {
+        val memoryCacheClass = XposedHelpers.findClassIfExists("coil.memory.RealMemoryCache", loader)
+        if (memoryCacheClass == null) {
+            Log.i(TAG, "CoilHook (MemoryCache) skipped: class not present")
+            return
+        }
+
         runCatching {
-            // Coil 2.x class: coil.memory.RealMemoryCache
             XposedHelpers.findAndHookMethod(
-                "coil.memory.RealMemoryCache", loader,
+                memoryCacheClass,
                 "set",
                 "coil.memory.MemoryCache\$Key",
                 "coil.memory.MemoryCache\$Value",
                 memoryCacheSetHook
             )
             Log.i(TAG, "CoilHook (MemoryCache) installed")
-        }.onFailure { Log.w(TAG, "CoilHook (MemoryCache) not installed", it) }
+        }.onFailure { Log.w(TAG, "CoilHook (MemoryCache) not installed: ${it.javaClass.simpleName}: ${it.message}") }
     }
 
     private val memoryCacheSetHook = object : XC_MethodHook() {
@@ -99,14 +104,20 @@ object CoilHook {
     // ------------------------------------------------------------------
 
     private fun hookDiskCache(loader: ClassLoader) {
+        val diskCacheEditorClass = XposedHelpers.findClassIfExists("coil.disk.RealDiskCache\$Editor", loader)
+        if (diskCacheEditorClass == null) {
+            Log.i(TAG, "CoilHook (DiskCache) skipped: class not present")
+            return
+        }
+
         runCatching {
             XposedHelpers.findAndHookMethod(
-                "coil.disk.RealDiskCache\$Editor", loader,
+                diskCacheEditorClass,
                 "commitAndGet",
                 diskCacheCommitHook
             )
             Log.i(TAG, "CoilHook (DiskCache) installed")
-        }.onFailure { Log.w(TAG, "CoilHook (DiskCache) not installed", it) }
+        }.onFailure { Log.w(TAG, "CoilHook (DiskCache) not installed: ${it.javaClass.simpleName}: ${it.message}") }
     }
 
     private val diskCacheCommitHook = object : XC_MethodHook() {

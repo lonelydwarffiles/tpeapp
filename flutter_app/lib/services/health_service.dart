@@ -1,5 +1,8 @@
 import 'dart:convert';
+import 'dart:io';
 
+import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:health/health.dart';
 
 /// Wraps the Health Connect SDK for reading biometric vitals.
@@ -12,6 +15,7 @@ class HealthService {
   HealthService._();
 
   static final HealthService instance = HealthService._();
+  static const MethodChannel _channel = MethodChannel('com.example.tpe_app/health');
 
   static const _types = [
     HealthDataType.HEART_RATE,
@@ -30,7 +34,25 @@ class HealthService {
   /// Returns true if all requested permissions were granted.
   Future<bool> requestPermissions() async {
     await _health.configure();
-    return _health.requestAuthorization(_types, permissions: _permissions);
+    if (!Platform.isAndroid) {
+      return _health.requestAuthorization(_types, permissions: _permissions);
+    }
+
+    try {
+      final nativeGranted = await _channel.invokeMethod<bool>('requestPermissions');
+      if (nativeGranted != null) {
+        return nativeGranted;
+      }
+    } catch (e) {
+      debugPrint('$runtimeType - Exception in native requestPermissions(): $e');
+    }
+
+    try {
+      return await _health.requestAuthorization(_types, permissions: _permissions);
+    } catch (e) {
+      debugPrint('$runtimeType - Exception in requestPermissions(): $e');
+      return false;
+    }
   }
 
   /// Returns true if the app currently holds all required Health Connect

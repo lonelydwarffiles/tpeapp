@@ -181,13 +181,9 @@ class FilterService : Service() {
                     Log.i(TAG, "Text-replacement policy updated")
                 }
                 PREF_NUDENET_ENABLED -> {
-                    val requested = prefs.getBoolean(key, false)
+                    val requested = false
                     val wasEnabled = nudeNetEnabled
                     nudeNetEnabled = requested
-                    if (requested && !wasEnabled) {
-                        Log.i(TAG, "NudeNet enabled via settings update")
-                        initClassifierAsync()
-                    }
                     if (!requested && wasEnabled) {
                         Log.i(TAG, "NudeNet disabled via settings update")
                         // Null the field before closing so that any in-flight scan that
@@ -195,6 +191,10 @@ class FilterService : Service() {
                         val old = classifier
                         classifier = null
                         old?.close()
+                    }
+                    if (prefs.getBoolean(key, false)) {
+                        prefs.edit().putBoolean(PREF_NUDENET_ENABLED, false).apply()
+                        Log.i(TAG, "Ignoring NudeNet enable request; feature is forced off")
                     }
                 }
                 PREF_MEDIA_FILTER_MODE -> {
@@ -279,7 +279,11 @@ class FilterService : Service() {
         strictModeEnabled = prefs.getBoolean(PREF_STRICT_MODE, false)
         threshold = effectiveThreshold(prefs.getFloat(PREF_THRESHOLD, DEFAULT_THRESHOLD))
         val persistedNudeNetEnabled = prefs.getBoolean(PREF_NUDENET_ENABLED, false)
-        nudeNetEnabled = persistedNudeNetEnabled
+        nudeNetEnabled = false
+        if (persistedNudeNetEnabled) {
+            prefs.edit().putBoolean(PREF_NUDENET_ENABLED, false).apply()
+            Log.i(TAG, "Cleared persisted NudeNet enable flag; feature is forced off")
+        }
         mediaFilterMode = normalizeMode(prefs.getString(PREF_MEDIA_FILTER_MODE, "speed"))
         mediaCensorStyle = normalizeCensorStyle(prefs.getString(PREF_MEDIA_CENSOR_STYLE, "pixelate"))
         mediaStrictPackagesJson = normalizeStrictPackagesJson(

@@ -1,8 +1,11 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'app.dart';
+import 'services/api_service.dart';
 import 'services/task_repository.dart';
 import 'services/chat_repository.dart';
 import 'services/kiosk_task_controller.dart';
@@ -18,6 +21,15 @@ void main() async {
 
   // Seed default pronoun/pup-lingo replacements on first launch.
   await TextReplacementChannel.ensureDefaults();
+  unawaited(() async {
+    try {
+      await ApiService(prefs).pushTextReplacementDict(
+        dict: await TextReplacementChannel.getDict(),
+      );
+    } catch (_) {
+      // Best-effort sync only.
+    }
+  }());
 
   // Initialise WorkManager so the vitals-sync background task can be
   // registered or resumed when the user enables Health Connect sync.

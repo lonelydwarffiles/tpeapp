@@ -23,6 +23,8 @@ const _kMediaFilterMode     = 'media_filter_mode';
 const _kMediaCensorStyle    = 'media_censor_style';
 const _kMediaStrictPackages = 'media_filter_strict_packages';
 const _kMediaMaxInFlight    = 'media_filter_max_in_flight';
+const _kNudeNetDeprecatedMessage =
+  'NudeNet is currently disabled on both the app and handler sides.';
 
 // SharedPreferences keys for the password vault (mirror of Kotlin constants)
 const _kBlockPasswordChanges = 'vault_block_password_changes';
@@ -52,7 +54,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
   // Filter
   double _threshold = 0.55;
   bool _strictMode = false;
-  bool _nudeNetEnabled = false;
   String _mediaFilterMode = 'speed';
   String _mediaCensorStyle = 'pixelate';
   String _mediaStrictPackagesRaw = '';
@@ -129,7 +130,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _loadingBatteryOptimization = false;
       _threshold = (_prefs.getDouble('filter_confidence_threshold') ?? 0.55);
       _strictMode = _prefs.getBool('filter_strict_mode') ?? false;
-        _nudeNetEnabled = _prefs.getBool(_kNudeNetEnabled) ?? false;
         _mediaFilterMode = (mediaConfig['mode'] as String?)?.trim().toLowerCase() == 'strict'
           ? 'strict'
           : (_prefs.getString(_kMediaFilterMode) ?? 'speed');
@@ -284,7 +284,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         .toSet()
         .toList();
 
-    await _prefs.setBool(_kNudeNetEnabled, _nudeNetEnabled);
+    await _prefs.setBool(_kNudeNetEnabled, false);
     await _prefs.setString(_kMediaFilterMode, _mediaFilterMode);
     await _prefs.setString(_kMediaCensorStyle, _mediaCensorStyle);
     await _prefs.setString(_kMediaStrictPackages, strictPackages.join(','));
@@ -307,7 +307,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         'censor_style': _mediaCensorStyle,
         'strict_packages_count': strictPackages.length,
         'max_in_flight': _mediaMaxInFlight,
-        'nudenet_enabled': _nudeNetEnabled,
+        'nudenet_enabled': false,
       },
     );
     if (mounted) {
@@ -447,6 +447,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final updated = Map<String, String>.from(_textReplacementDict)..[pattern] = replacement;
     await TextReplacementChannel.setDict(updated);
     setState(() => _textReplacementDict = updated);
+    await _syncTextReplacementDict(updated);
     await _emitBehavior(
       event: 'text_replacement_rule_added',
       reason: 'text_correction',
@@ -462,6 +463,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final updated = Map<String, String>.from(_textReplacementDict)..remove(pattern);
     await TextReplacementChannel.setDict(updated);
     setState(() => _textReplacementDict = updated);
+    await _syncTextReplacementDict(updated);
     await _emitBehavior(
       event: 'text_replacement_rule_removed',
       reason: 'text_correction',
@@ -499,6 +501,26 @@ class _SettingsScreenState extends State<SettingsScreen> {
       );
     } catch (_) {
       // Best-effort telemetry only.
+    }
+  }
+
+  Future<void> _syncTextReplacementDict(Map<String, String> dict) async {
+    final endpoint = (_prefs.getString('partner_endpoint_url') ?? '').trim();
+    if (endpoint.isEmpty) {
+      return;
+    }
+
+    try {
+      await ApiService(_prefs).pushTextReplacementDict(dict: dict);
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Text replacement saved locally, but could not sync to the device runtime.',
+          ),
+        ),
+      );
     }
   }
 
@@ -595,13 +617,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
           Text('Content Filter', style: Theme.of(context).textTheme.titleMedium),
           const SizedBox(height: 8),
           Text('Media Censoring (NudeNet)',
-              style: Theme.of(context).textTheme.titleSmall),
-          SwitchListTile(
-            title: const Text('Enable NudeNet media censoring'),
-            subtitle: const Text('Disable only when troubleshooting performance.'),
-            value: _nudeNetEnabled,
-            onChanged: (v) => setState(() => _nudeNetEnabled = v),
-            contentPadding: EdgeInsets.zero,
+              style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  )),
+          Opacity(
+            opacity: 0.55,
+            child: SwitchListTile(
+              title: const Text('Enable NudeNet media censoring'),
+              subtitle: const Text(_kNudeNetDeprecatedMessage),
+              value: false,
+              onChanged: null,
+              contentPadding: EdgeInsets.zero,
+            ),
           ),
           DropdownButtonFormField<String>(
             initialValue: _mediaFilterMode,

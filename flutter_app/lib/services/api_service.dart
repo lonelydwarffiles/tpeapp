@@ -421,6 +421,28 @@ class ApiService {
     }
   }
 
+  /// Pushes a text-replacement dictionary to the device runtime through the
+  /// partner backend's admin MQTT bridge.
+  Future<void> pushTextReplacementDict({
+    required Map<String, String> dict,
+    String? deviceId,
+  }) async {
+    final payload = {
+      'action': 'UPDATE_TEXT_REPLACEMENT_DICT',
+      'text_replacement_dict': jsonEncode(dict),
+      if ((deviceId ?? _deviceId) != null) 'device_id': deviceId ?? _deviceId,
+    };
+
+    final response = await http
+        .post(
+          Uri.parse('$_endpoint/api/admin/tpe/push'),
+          headers: _basicAuthHeaders,
+          body: jsonEncode(payload),
+        )
+        .timeout(_timeout);
+    _assertSuccess(response, 'Push text replacement dictionary');
+  }
+
   // ── Behavioral telemetry ───────────────────────────────────────────────
 
   /// Sends a high-signal app behavior event to `{endpoint}/api/tpe/webhook`.

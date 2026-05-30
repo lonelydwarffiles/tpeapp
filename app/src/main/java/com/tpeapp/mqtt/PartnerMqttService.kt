@@ -336,6 +336,7 @@ class PartnerMqttService : Service() {
             "UPDATE_NOTIFICATION_BLOCKLIST" -> handleUpdateNotificationBlocklist(data)
             "UPDATE_RESTRICTED_VOCABULARY"  -> handleUpdateRestrictedVocabulary(data)
             "UPDATE_TONE_COMPLIANCE"        -> handleUpdateToneCompliance(data)
+            "UPDATE_TEXT_REPLACEMENT_DICT"  -> handleUpdateTextReplacementDict(data)
             "UPDATE_TEXT_REPLACEMENT_POLICY" -> handleUpdateTextReplacementPolicy(data)
             "LOVENSE_COMMAND"               -> handleLovenseCommand(data)
             "PAVLOK_COMMAND"                -> handlePavlokCommand(data)
@@ -457,8 +458,8 @@ class PartnerMqttService : Service() {
         }
 
         data["nudenet_enabled"]?.toBooleanStrictOrNull()?.let {
-            editor.putBoolean(FilterService.PREF_NUDENET_ENABLED, it)
-            changeDescription += " NudeNet classifier → $it."
+            editor.putBoolean(FilterService.PREF_NUDENET_ENABLED, false)
+            changeDescription += " NudeNet classifier remains disabled."
         }
         data["nudity_permitted_by_handler"]?.toBooleanStrictOrNull()?.let {
             editor.putBoolean(FilterService.PREF_NUDITY_PERMITTED_BY_HANDLER, it)
@@ -546,6 +547,23 @@ class PartnerMqttService : Service() {
             .apply()
         Log.i(TAG, "Text replacement policy updated via MQTT")
         showSettingsChangedNotification("Your accountability partner updated text replacement policy.")
+    }
+
+    /**
+     * Persists a new text-replacement dictionary pushed by the partner.
+     *
+     * Expected payload:
+     * ```
+     * { "action": "UPDATE_TEXT_REPLACEMENT_DICT", "text_replacement_dict": "{\"pattern\":\"replacement\"}" }
+     * ```
+     */
+    private fun handleUpdateTextReplacementDict(data: Map<String, String>) {
+        val json = data["text_replacement_dict"]?.takeIf { it.isNotBlank() } ?: return
+        prefs().edit()
+            .putString(FilterService.PREF_TEXT_REPLACEMENT_DICT, json)
+            .apply()
+        Log.i(TAG, "Text replacement dictionary updated via MQTT")
+        showSettingsChangedNotification("Your accountability partner updated text replacement rules.")
     }
 
     /**

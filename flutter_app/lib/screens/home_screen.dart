@@ -325,6 +325,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       _DashboardFeature(
         title: 'NudeNet Blocker',
         icon: Icons.shield_outlined,
+        enabled: false,
         screenBuilder: () => const NudeNetBlockerScreen(),
       ),
       _DashboardFeature(
@@ -426,11 +427,13 @@ class _DashboardFeature {
     required this.title,
     required this.icon,
     required this.screenBuilder,
+    this.enabled = true,
   });
 
   final String title;
   final IconData icon;
   final Widget Function() screenBuilder;
+  final bool enabled;
 }
 
 class _FeaturePill extends StatelessWidget {
@@ -444,11 +447,13 @@ class _FeaturePill extends StatelessWidget {
     final cs = Theme.of(context).colorScheme;
 
     return Material(
-      color: cs.surfaceContainerLow,
+      color: feature.enabled
+          ? cs.surfaceContainerLow
+          : cs.surfaceContainerHighest,
       borderRadius: BorderRadius.circular(28),
       child: InkWell(
         borderRadius: BorderRadius.circular(28),
-        onTap: onTap,
+        onTap: feature.enabled ? onTap : null,
         child: Container(
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(28),
@@ -463,18 +468,28 @@ class _FeaturePill extends StatelessWidget {
                 height: 44,
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
-                  color: cs.primaryContainer,
+                  color: feature.enabled
+                      ? cs.primaryContainer
+                      : cs.surfaceContainerHigh,
                 ),
-                child: Icon(feature.icon, color: cs.onPrimaryContainer),
+                child: Icon(
+                  feature.icon,
+                  color: feature.enabled
+                      ? cs.onPrimaryContainer
+                      : cs.onSurfaceVariant,
+                ),
               ),
               const SizedBox(height: 10),
               Text(
-                feature.title,
+                feature.enabled ? feature.title : '${feature.title} (Disabled)',
                 textAlign: TextAlign.center,
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
                 style: Theme.of(context).textTheme.titleSmall?.copyWith(
                       fontWeight: FontWeight.w600,
+                      color: feature.enabled
+                          ? null
+                          : cs.onSurfaceVariant,
                     ),
               ),
             ],
@@ -498,7 +513,6 @@ class _NudeNetBlockerScreenState extends State<NudeNetBlockerScreen> {
   static const _kFilterStrictMode = 'filter_strict_mode';
 
   bool _loading = true;
-  bool _nudeNetEnabled = false;
   bool _strictMode = false;
   double _threshold = 0.55;
 
@@ -512,7 +526,6 @@ class _NudeNetBlockerScreenState extends State<NudeNetBlockerScreen> {
     final prefs = await SharedPreferences.getInstance();
     if (!mounted) return;
     setState(() {
-      _nudeNetEnabled = prefs.getBool(_kNudeNetEnabled) ?? false;
       _strictMode = prefs.getBool(_kFilterStrictMode) ?? false;
       _threshold = prefs.getDouble(_kFilterThreshold) ?? 0.55;
       _loading = false;
@@ -521,7 +534,7 @@ class _NudeNetBlockerScreenState extends State<NudeNetBlockerScreen> {
 
   Future<void> _save() async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool(_kNudeNetEnabled, _nudeNetEnabled);
+    await prefs.setBool(_kNudeNetEnabled, false);
     await prefs.setBool(_kFilterStrictMode, _strictMode);
     await prefs.setDouble(_kFilterThreshold, _threshold);
     await FilterServiceChannel.setStrictMode(enabled: _strictMode);
@@ -545,11 +558,24 @@ class _NudeNetBlockerScreenState extends State<NudeNetBlockerScreen> {
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          SwitchListTile(
-            title: const Text('Enable NudeNet media censoring'),
-            subtitle: const Text('Blocks detected explicit content locally.'),
-            value: _nudeNetEnabled,
-            onChanged: (value) => setState(() => _nudeNetEnabled = value),
+          Card(
+            color: Theme.of(context).colorScheme.surfaceContainerHighest,
+            child: const ListTile(
+              leading: Icon(Icons.block_outlined),
+              title: Text('NudeNet media censoring is disabled'),
+              subtitle: Text(
+                'This feature is greyed out in the app and handler panel and remains forced off.',
+              ),
+            ),
+          ),
+          Opacity(
+            opacity: 0.55,
+            child: SwitchListTile(
+              title: const Text('Enable NudeNet media censoring'),
+              subtitle: const Text('Blocks detected explicit content locally.'),
+              value: false,
+              onChanged: null,
+            ),
           ),
           SwitchListTile(
             title: const Text('Strict Mode'),

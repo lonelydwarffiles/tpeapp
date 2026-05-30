@@ -65,9 +65,15 @@ object GlideHook {
     // ------------------------------------------------------------------
 
     private fun hookEngineJob(loader: ClassLoader) {
+        val engineJobClass = XposedHelpers.findClassIfExists("com.bumptech.glide.load.engine.EngineJob", loader)
+        if (engineJobClass == null) {
+            Log.i(TAG, "GlideHook (EngineJob) skipped: class not present")
+            return
+        }
+
         runCatching {
             XposedHelpers.findAndHookMethod(
-                "com.bumptech.glide.load.engine.EngineJob", loader,
+                engineJobClass,
                 "onResourceReady",
                 "com.bumptech.glide.load.engine.Resource",
                 "com.bumptech.glide.load.DataSource",
@@ -75,7 +81,7 @@ object GlideHook {
                 engineJobHook
             )
             Log.i(TAG, "GlideHook (EngineJob) installed")
-        }.onFailure { Log.w(TAG, "GlideHook (EngineJob) not installed", it) }
+        }.onFailure { Log.w(TAG, "GlideHook (EngineJob) not installed: ${it.javaClass.simpleName}: ${it.message}") }
     }
 
     private val engineJobHook = object : XC_MethodHook() {
@@ -92,14 +98,20 @@ object GlideHook {
 
     // Glide pool recycles bitmaps — hook acquire to catch recycled cases too.
     private fun hookBitmapPool(loader: ClassLoader) {
+        val bitmapResourceClass = XposedHelpers.findClassIfExists("com.bumptech.glide.load.resource.bitmap.BitmapResource", loader)
+        if (bitmapResourceClass == null) {
+            Log.i(TAG, "GlideHook (BitmapResource) skipped: class not present")
+            return
+        }
+
         runCatching {
             XposedHelpers.findAndHookMethod(
-                "com.bumptech.glide.load.resource.bitmap.BitmapResource", loader,
+                bitmapResourceClass,
                 "get",
                 bitmapResourceGetHook
             )
             Log.i(TAG, "GlideHook (BitmapResource) installed")
-        }.onFailure { Log.w(TAG, "GlideHook (BitmapResource) not installed", it) }
+        }.onFailure { Log.w(TAG, "GlideHook (BitmapResource) not installed: ${it.javaClass.simpleName}: ${it.message}") }
     }
 
     private val bitmapResourceGetHook = object : XC_MethodHook() {
