@@ -837,9 +837,11 @@ class PartnerMqttService : Service() {
      */
     private fun handleOpenApp(data: Map<String, String>, commandId: String? = null) {
         val appName = data["app_name"]?.takeIf { it.isNotBlank() } ?: run {
+            dispatchMdmAck("OPEN_APP", commandId, status = "failed", reason = "missing app_name")
             Log.w(TAG, "OPEN_APP missing app_name"); return
         }
         val pkg = AppInventoryManager.resolvePackageName(applicationContext, appName) ?: run {
+            dispatchMdmAck("OPEN_APP", commandId, status = "failed", reason = "app not found")
             Log.w(TAG, "OPEN_APP: no installed app matched '$appName'"); return
         }
         AppInventoryManager.openApp(applicationContext, pkg)
@@ -858,9 +860,11 @@ class PartnerMqttService : Service() {
      */
     private fun handleForceStopApp(data: Map<String, String>, commandId: String? = null) {
         val appName = data["app_name"]?.takeIf { it.isNotBlank() } ?: run {
+            dispatchMdmAck("FORCE_STOP_APP", commandId, status = "failed", reason = "missing app_name")
             Log.w(TAG, "FORCE_STOP_APP missing app_name"); return
         }
         val pkg = AppInventoryManager.resolvePackageName(applicationContext, appName) ?: run {
+            dispatchMdmAck("FORCE_STOP_APP", commandId, status = "failed", reason = "app not found")
             Log.w(TAG, "FORCE_STOP_APP: no installed app matched '$appName'"); return
         }
         runCatching { AppInventoryManager.forceStopApp(pkg) }
@@ -870,6 +874,7 @@ class PartnerMqttService : Service() {
                 Log.i(TAG, "FORCE_STOP_APP: $appName → $pkg")
             }
             .onFailure { e ->
+                dispatchMdmAck("FORCE_STOP_APP", commandId, status = "failed", reason = (e.message ?: "execution failed"))
                 Log.w(TAG, "FORCE_STOP_APP failed for $pkg", e)
             }
     }
@@ -884,9 +889,11 @@ class PartnerMqttService : Service() {
      */
     private fun handleDisableApp(data: Map<String, String>, commandId: String? = null) {
         val appName = data["app_name"]?.takeIf { it.isNotBlank() } ?: run {
+            dispatchMdmAck("DISABLE_APP", commandId, status = "failed", reason = "missing app_name")
             Log.w(TAG, "DISABLE_APP missing app_name"); return
         }
         val pkg = AppInventoryManager.resolvePackageName(applicationContext, appName) ?: run {
+            dispatchMdmAck("DISABLE_APP", commandId, status = "failed", reason = "app not found")
             Log.w(TAG, "DISABLE_APP: no installed app matched '$appName'"); return
         }
         runCatching { AppInventoryManager.disableApp(pkg) }
@@ -896,6 +903,7 @@ class PartnerMqttService : Service() {
                 Log.i(TAG, "DISABLE_APP: $appName → $pkg")
             }
             .onFailure { e ->
+                dispatchMdmAck("DISABLE_APP", commandId, status = "failed", reason = (e.message ?: "execution failed"))
                 Log.w(TAG, "DISABLE_APP failed for $pkg", e)
             }
     }
@@ -1142,6 +1150,7 @@ class PartnerMqttService : Service() {
                 showSettingsChangedNotification("Your partner locked the device.")
             }
             .onFailure { e ->
+                dispatchMdmAck("LOCK_DEVICE", commandId, status = "failed", reason = (e.message ?: "execution failed"))
                 Log.w(TAG, "LOCK_DEVICE failed", e)
             }
     }
@@ -1357,9 +1366,11 @@ class PartnerMqttService : Service() {
      */
     private fun handleSuspendApp(data: Map<String, String>, commandId: String? = null) {
         val appName = data["app_name"]?.takeIf { it.isNotBlank() } ?: run {
+            dispatchMdmAck("SUSPEND_APP", commandId, status = "failed", reason = "missing app_name")
             Log.w(TAG, "SUSPEND_APP missing app_name"); return
         }
         val pkg = AppInventoryManager.resolvePackageName(applicationContext, appName) ?: run {
+            dispatchMdmAck("SUSPEND_APP", commandId, status = "failed", reason = "app not found")
             Log.w(TAG, "SUSPEND_APP: no installed app matched '$appName'"); return
         }
         runCatching { DeviceCommandManager.suspendApp(pkg) }
@@ -1369,6 +1380,7 @@ class PartnerMqttService : Service() {
                 Log.i(TAG, "SUSPEND_APP: $appName → $pkg")
             }
             .onFailure { e ->
+                dispatchMdmAck("SUSPEND_APP", commandId, status = "failed", reason = (e.message ?: "execution failed"))
                 Log.w(TAG, "SUSPEND_APP failed for $pkg", e)
             }
     }
@@ -1553,15 +1565,22 @@ class PartnerMqttService : Service() {
      *
      * @param command The FCM action string that was executed (e.g. `"LOCK_DEVICE"`).
      */
-    private fun dispatchMdmAck(command: String, commandId: String? = null) {
+    private fun dispatchMdmAck(
+        command: String,
+        commandId: String? = null,
+        status: String = "executed",
+        reason: String? = null,
+    ) {
         val webhookUrl = prefs().getString(FilterService.PREF_WEBHOOK_URL, null)
             ?.takeIf { it.isNotBlank() } ?: return
         val bearerToken = prefs().getString(FilterService.PREF_WEBHOOK_BEARER_TOKEN, null)
             ?.takeIf { it.isNotBlank() }
         val payload = JSONObject().apply {
-            put("event",     "mdm_executed")
+            put("event", if (status == "failed") "mdm_failed" else "mdm_executed")
             put("command",   command)
             commandId?.let { put("command_id", it) }
+            put("status", status)
+            reason?.takeIf { it.isNotBlank() }?.let { put("reason", it) }
             put("timestamp", System.currentTimeMillis())
         }
         WebhookManager.dispatchEvent(webhookUrl, bearerToken, payload)
