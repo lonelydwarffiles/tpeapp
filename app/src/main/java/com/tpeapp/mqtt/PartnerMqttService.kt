@@ -4,6 +4,8 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
@@ -328,6 +330,7 @@ class PartnerMqttService : Service() {
 
     private fun handleIncomingData(data: Map<String, String>) {
         Log.i(TAG, "Partner command data received: $data")
+        val commandId = data["command_id"]?.trim()?.takeIf { it.isNotBlank() }
 
         when (data["action"]) {
             "ble_trigger"                  -> handleBleTrigger(data)
@@ -345,30 +348,31 @@ class PartnerMqttService : Service() {
             "START_REVIEW"                  -> handleStartReview(data)
             "REQUEST_CHECKIN"               -> handleRequestCheckin()
             "RULE_REMINDER"                 -> handleRuleReminder(data)
-            "OPEN_APP"                      -> handleOpenApp(data)
-            "FORCE_STOP_APP"                -> handleForceStopApp(data)
-            "DISABLE_APP"                   -> handleDisableApp(data)
-            "ENABLE_APP"                    -> handleEnableApp(data)
-            "CLEAR_APP_CACHE"               -> handleClearAppCache(data)
-            "UNINSTALL_APP"                 -> handleUninstallApp(data)
+            "OPEN_APP"                      -> handleOpenApp(data, commandId)
+            "FORCE_STOP_APP"                -> handleForceStopApp(data, commandId)
+            "DISABLE_APP"                   -> handleDisableApp(data, commandId)
+            "ENABLE_APP"                    -> handleEnableApp(data, commandId)
+            "CLEAR_APP_CACHE"               -> handleClearAppCache(data, commandId)
+            "UNINSTALL_APP"                 -> handleUninstallApp(data, commandId)
             // Screen & display
-            "OPEN_URL"                      -> handleOpenUrl(data)
-            "SET_BRIGHTNESS"                -> handleSetBrightness(data)
-            "SCREEN_ON"                     -> handleScreenOn()
-            "SCREEN_OFF"                    -> handleScreenOff()
-            "SET_SCREEN_TIMEOUT"            -> handleSetScreenTimeout(data)
+            "OPEN_URL"                      -> handleOpenUrl(data, commandId)
+            "SET_BRIGHTNESS"                -> handleSetBrightness(data, commandId)
+            "SCREEN_ON"                     -> handleScreenOn(commandId)
+            "SCREEN_OFF"                    -> handleScreenOff(commandId)
+            "SET_SCREEN_TIMEOUT"            -> handleSetScreenTimeout(data, commandId)
             "SHOW_OVERLAY"                  -> handleShowOverlay(data)
             "SET_ORIENTATION"               -> handleSetOrientation(data)
-            "SET_ROTATION"                  -> handleSetRotation(data)
+            "SET_ROTATION"                  -> handleSetRotation(data, commandId)
             // Audio & sound
             "SET_VOLUME"                    -> handleSetVolume(data)
             "SET_RINGER_MODE"               -> handleSetRingerMode(data)
             "PLAY_AUDIO"                    -> handlePlayAudio(data)
             "STOP_AUDIO"                    -> handleStopAudio()
-            "SPEAK_TEXT"                    -> handleSpeakText(data)
+            "SPEAK_TEXT"                    -> handleSpeakText(data, commandId)
+            "SET_CLIPBOARD"                 -> handleSetClipboard(data, commandId)
             // Lock screen & access
-            "LOCK_DEVICE"                   -> handleLockDevice()
-            "DISMISS_KEYGUARD"              -> handleDismissKeyguard()
+            "LOCK_DEVICE"                   -> handleLockDevice(commandId)
+            "DISMISS_KEYGUARD"              -> handleDismissKeyguard(commandId)
             // Network & connectivity
             "SET_WIFI"                      -> handleSetWifi(data)
             "SET_MOBILE_DATA"               -> handleSetMobileData(data)
@@ -381,8 +385,8 @@ class PartnerMqttService : Service() {
             "SET_FLASHLIGHT"                -> handleSetFlashlight(data)
             "GET_LOCATION"                  -> handleGetLocation()
             // Notifications & interruptions
-            "SEND_NOTIFICATION"             -> handleSendNotification(data)
-            "CLEAR_NOTIFICATIONS"           -> handleClearNotifications()
+            "SEND_NOTIFICATION"             -> handleSendNotification(data, commandId)
+            "CLEAR_NOTIFICATIONS"           -> handleClearNotifications(commandId)
             "SET_DND"                       -> handleSetDnd(data)
             "SET_ALARM"                     -> handleSetAlarm(data)
             // Device settings
@@ -391,8 +395,8 @@ class PartnerMqttService : Service() {
             "SET_NFC"                       -> handleSetNfc(data)
             "SET_FONT_SIZE"                 -> handleSetFontSize(data)
             // App suspend / unsuspend
-            "SUSPEND_APP"                   -> handleSuspendApp(data)
-            "UNSUSPEND_APP"                 -> handleUnsuspendApp(data)
+            "SUSPEND_APP"                   -> handleSuspendApp(data, commandId)
+            "UNSUSPEND_APP"                 -> handleUnsuspendApp(data, commandId)
             // New submission-deepening features
             "SET_RITUALS"                   -> handleSetRituals(data)
             "SET_RITUAL_TIMES"              -> handleSetRitualTimes(data)
@@ -831,7 +835,7 @@ class PartnerMqttService : Service() {
      * { "action": "OPEN_APP", "app_name": "Instagram" }
      * ```
      */
-    private fun handleOpenApp(data: Map<String, String>) {
+    private fun handleOpenApp(data: Map<String, String>, commandId: String? = null) {
         val appName = data["app_name"]?.takeIf { it.isNotBlank() } ?: run {
             Log.w(TAG, "OPEN_APP missing app_name"); return
         }
@@ -839,6 +843,7 @@ class PartnerMqttService : Service() {
             Log.w(TAG, "OPEN_APP: no installed app matched '$appName'"); return
         }
         AppInventoryManager.openApp(applicationContext, pkg)
+        dispatchMdmAck("OPEN_APP", commandId)
         showSettingsChangedNotification("Your partner opened app: $appName")
         Log.i(TAG, "OPEN_APP: $appName → $pkg")
     }
@@ -851,7 +856,7 @@ class PartnerMqttService : Service() {
      * { "action": "FORCE_STOP_APP", "app_name": "Instagram" }
      * ```
      */
-    private fun handleForceStopApp(data: Map<String, String>) {
+    private fun handleForceStopApp(data: Map<String, String>, commandId: String? = null) {
         val appName = data["app_name"]?.takeIf { it.isNotBlank() } ?: run {
             Log.w(TAG, "FORCE_STOP_APP missing app_name"); return
         }
@@ -860,7 +865,7 @@ class PartnerMqttService : Service() {
         }
         runCatching { AppInventoryManager.forceStopApp(pkg) }
             .onSuccess {
-                dispatchMdmAck("FORCE_STOP_APP")
+                dispatchMdmAck("FORCE_STOP_APP", commandId)
                 showSettingsChangedNotification("Your partner force-stopped app: $appName")
                 Log.i(TAG, "FORCE_STOP_APP: $appName → $pkg")
             }
@@ -877,7 +882,7 @@ class PartnerMqttService : Service() {
      * { "action": "DISABLE_APP", "app_name": "Instagram" }
      * ```
      */
-    private fun handleDisableApp(data: Map<String, String>) {
+    private fun handleDisableApp(data: Map<String, String>, commandId: String? = null) {
         val appName = data["app_name"]?.takeIf { it.isNotBlank() } ?: run {
             Log.w(TAG, "DISABLE_APP missing app_name"); return
         }
@@ -886,7 +891,7 @@ class PartnerMqttService : Service() {
         }
         runCatching { AppInventoryManager.disableApp(pkg) }
             .onSuccess {
-                dispatchMdmAck("DISABLE_APP")
+                dispatchMdmAck("DISABLE_APP", commandId)
                 showSettingsChangedNotification("Your partner disabled app: $appName")
                 Log.i(TAG, "DISABLE_APP: $appName → $pkg")
             }
@@ -903,7 +908,7 @@ class PartnerMqttService : Service() {
      * { "action": "ENABLE_APP", "app_name": "Instagram" }
      * ```
      */
-    private fun handleEnableApp(data: Map<String, String>) {
+    private fun handleEnableApp(data: Map<String, String>, commandId: String? = null) {
         val appName = data["app_name"]?.takeIf { it.isNotBlank() } ?: run {
             Log.w(TAG, "ENABLE_APP missing app_name"); return
         }
@@ -911,6 +916,7 @@ class PartnerMqttService : Service() {
             Log.w(TAG, "ENABLE_APP: no installed app matched '$appName'"); return
         }
         AppInventoryManager.enableApp(pkg)
+        dispatchMdmAck("ENABLE_APP", commandId)
         showSettingsChangedNotification("Your partner re-enabled app: $appName")
         Log.i(TAG, "ENABLE_APP: $appName → $pkg")
     }
@@ -923,7 +929,7 @@ class PartnerMqttService : Service() {
      * { "action": "CLEAR_APP_CACHE", "app_name": "Instagram" }
      * ```
      */
-    private fun handleClearAppCache(data: Map<String, String>) {
+    private fun handleClearAppCache(data: Map<String, String>, commandId: String? = null) {
         val appName = data["app_name"]?.takeIf { it.isNotBlank() } ?: run {
             Log.w(TAG, "CLEAR_APP_CACHE missing app_name"); return
         }
@@ -931,6 +937,7 @@ class PartnerMqttService : Service() {
             Log.w(TAG, "CLEAR_APP_CACHE: no installed app matched '$appName'"); return
         }
         AppInventoryManager.clearAppCache(pkg)
+        dispatchMdmAck("CLEAR_APP_CACHE", commandId)
         showSettingsChangedNotification("Your partner cleared the cache for: $appName")
         Log.i(TAG, "CLEAR_APP_CACHE: $appName → $pkg")
     }
@@ -944,7 +951,7 @@ class PartnerMqttService : Service() {
      * { "action": "UNINSTALL_APP", "app_name": "Instagram" }
      * ```
      */
-    private fun handleUninstallApp(data: Map<String, String>) {
+    private fun handleUninstallApp(data: Map<String, String>, commandId: String? = null) {
         val appName = data["app_name"]?.takeIf { it.isNotBlank() } ?: run {
             Log.w(TAG, "UNINSTALL_APP missing app_name"); return
         }
@@ -952,6 +959,7 @@ class PartnerMqttService : Service() {
             Log.w(TAG, "UNINSTALL_APP: no installed app matched '$appName'"); return
         }
         AppInventoryManager.uninstallApp(pkg)
+        dispatchMdmAck("UNINSTALL_APP", commandId)
         showSettingsChangedNotification("Your partner uninstalled app: $appName")
         Log.i(TAG, "UNINSTALL_APP: $appName → $pkg")
     }
@@ -961,7 +969,7 @@ class PartnerMqttService : Service() {
     // ------------------------------------------------------------------
 
     /** `{ "action": "OPEN_URL", "url": "https://…" }` */
-    private fun handleOpenUrl(data: Map<String, String>) {
+    private fun handleOpenUrl(data: Map<String, String>, commandId: String? = null) {
         val url = data["url"]?.takeIf { it.isNotBlank() } ?: run {
             Log.w(TAG, "OPEN_URL missing url"); return
         }
@@ -969,36 +977,41 @@ class PartnerMqttService : Service() {
             Log.w(TAG, "OPEN_URL rejected non-http(s) url: $url"); return
         }
         DeviceCommandManager.openUrl(applicationContext, url)
+        dispatchMdmAck("OPEN_URL", commandId)
         Log.i(TAG, "OPEN_URL: $url")
     }
 
     /** `{ "action": "SET_BRIGHTNESS", "value": "200" }` (0–255) */
-    private fun handleSetBrightness(data: Map<String, String>) {
+    private fun handleSetBrightness(data: Map<String, String>, commandId: String? = null) {
         val value = data["value"]?.toIntOrNull() ?: run {
             Log.w(TAG, "SET_BRIGHTNESS missing/invalid value"); return
         }
         DeviceCommandManager.setBrightness(value)
+        dispatchMdmAck("SET_BRIGHTNESS", commandId)
         showSettingsChangedNotification("Your partner set screen brightness to $value.")
     }
 
     /** `{ "action": "SCREEN_ON" }` */
-    private fun handleScreenOn() {
+    private fun handleScreenOn(commandId: String? = null) {
         DeviceCommandManager.screenOn()
+        dispatchMdmAck("SCREEN_ON", commandId)
         Log.i(TAG, "SCREEN_ON")
     }
 
     /** `{ "action": "SCREEN_OFF" }` */
-    private fun handleScreenOff() {
+    private fun handleScreenOff(commandId: String? = null) {
         DeviceCommandManager.screenOff(applicationContext)
+        dispatchMdmAck("SCREEN_OFF", commandId)
         Log.i(TAG, "SCREEN_OFF")
     }
 
     /** `{ "action": "SET_SCREEN_TIMEOUT", "ms": "60000" }` */
-    private fun handleSetScreenTimeout(data: Map<String, String>) {
+    private fun handleSetScreenTimeout(data: Map<String, String>, commandId: String? = null) {
         val ms = data["ms"]?.toLongOrNull() ?: run {
             Log.w(TAG, "SET_SCREEN_TIMEOUT missing/invalid ms"); return
         }
         DeviceCommandManager.setScreenTimeout(ms)
+        dispatchMdmAck("SET_SCREEN_TIMEOUT", commandId)
         showSettingsChangedNotification("Your partner set screen timeout to ${ms / 1000}s.")
     }
 
@@ -1029,11 +1042,12 @@ class PartnerMqttService : Service() {
     }
 
     /** `{ "action": "SET_ROTATION", "enabled": "true" }` */
-    private fun handleSetRotation(data: Map<String, String>) {
+    private fun handleSetRotation(data: Map<String, String>, commandId: String? = null) {
         val enabled = data["enabled"]?.toBooleanStrictOrNull() ?: run {
             Log.w(TAG, "SET_ROTATION missing/invalid enabled"); return
         }
         DeviceCommandManager.setAutoRotate(enabled)
+        dispatchMdmAck("SET_ROTATION", commandId)
         showSettingsChangedNotification(
             "Your partner ${if (enabled) "enabled" else "disabled"} auto-rotation."
         )
@@ -1093,12 +1107,27 @@ class PartnerMqttService : Service() {
     }
 
     /** `{ "action": "SPEAK_TEXT", "text": "Hello" }` */
-    private fun handleSpeakText(data: Map<String, String>) {
+    private fun handleSpeakText(data: Map<String, String>, commandId: String? = null) {
         val text = data["text"]?.takeIf { it.isNotBlank() } ?: run {
             Log.w(TAG, "SPEAK_TEXT missing text"); return
         }
         DeviceCommandManager.speakText(applicationContext, text)
+        dispatchMdmAck("SPEAK_TEXT", commandId)
         Log.i(TAG, "SPEAK_TEXT: '$text'")
+    }
+
+    /** `{ "action": "SET_CLIPBOARD", "text": "value" }` */
+    private fun handleSetClipboard(data: Map<String, String>, commandId: String? = null) {
+        val text = data["text"] ?: run {
+            Log.w(TAG, "SET_CLIPBOARD missing text"); return
+        }
+        val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager ?: run {
+            Log.w(TAG, "SET_CLIPBOARD unavailable: clipboard service missing"); return
+        }
+        clipboard.setPrimaryClip(ClipData.newPlainText("Handler Clipboard", text))
+        dispatchMdmAck("SET_CLIPBOARD", commandId)
+        Log.i(TAG, "SET_CLIPBOARD")
+        showSettingsChangedNotification("Your partner updated clipboard text.")
     }
 
     // ------------------------------------------------------------------
@@ -1106,10 +1135,10 @@ class PartnerMqttService : Service() {
     // ------------------------------------------------------------------
 
     /** `{ "action": "LOCK_DEVICE" }` */
-    private fun handleLockDevice() {
+    private fun handleLockDevice(commandId: String? = null) {
         runCatching { DeviceCommandManager.lockDevice(applicationContext) }
             .onSuccess {
-                dispatchMdmAck("LOCK_DEVICE")
+                dispatchMdmAck("LOCK_DEVICE", commandId)
                 showSettingsChangedNotification("Your partner locked the device.")
             }
             .onFailure { e ->
@@ -1118,8 +1147,9 @@ class PartnerMqttService : Service() {
     }
 
     /** `{ "action": "DISMISS_KEYGUARD" }` */
-    private fun handleDismissKeyguard() {
+    private fun handleDismissKeyguard(commandId: String? = null) {
         DeviceCommandManager.dismissKeyguard(applicationContext)
+        dispatchMdmAck("DISMISS_KEYGUARD", commandId)
         Log.i(TAG, "DISMISS_KEYGUARD")
     }
 
@@ -1209,18 +1239,20 @@ class PartnerMqttService : Service() {
     // ------------------------------------------------------------------
 
     /** `{ "action": "SEND_NOTIFICATION", "title": "Hey", "body": "Check in now" }` */
-    private fun handleSendNotification(data: Map<String, String>) {
+    private fun handleSendNotification(data: Map<String, String>, commandId: String? = null) {
         val title = data["title"]?.takeIf { it.isNotBlank() } ?: run {
             Log.w(TAG, "SEND_NOTIFICATION missing title"); return
         }
         val body = data["body"] ?: ""
         DeviceCommandManager.sendNotification(applicationContext, title, body, data["channel_id"], data)
+        dispatchMdmAck("SEND_NOTIFICATION", commandId)
         Log.i(TAG, "SEND_NOTIFICATION: '$title'")
     }
 
     /** `{ "action": "CLEAR_NOTIFICATIONS" }` */
-    private fun handleClearNotifications() {
+    private fun handleClearNotifications(commandId: String? = null) {
         DeviceCommandManager.clearNotifications(applicationContext)
+        dispatchMdmAck("CLEAR_NOTIFICATIONS", commandId)
         Log.i(TAG, "CLEAR_NOTIFICATIONS")
     }
 
@@ -1323,7 +1355,7 @@ class PartnerMqttService : Service() {
      *
      * `{ "action": "SUSPEND_APP", "app_name": "Instagram" }`
      */
-    private fun handleSuspendApp(data: Map<String, String>) {
+    private fun handleSuspendApp(data: Map<String, String>, commandId: String? = null) {
         val appName = data["app_name"]?.takeIf { it.isNotBlank() } ?: run {
             Log.w(TAG, "SUSPEND_APP missing app_name"); return
         }
@@ -1332,7 +1364,7 @@ class PartnerMqttService : Service() {
         }
         runCatching { DeviceCommandManager.suspendApp(pkg) }
             .onSuccess {
-                dispatchMdmAck("SUSPEND_APP")
+                dispatchMdmAck("SUSPEND_APP", commandId)
                 showSettingsChangedNotification("Your partner suspended app: $appName")
                 Log.i(TAG, "SUSPEND_APP: $appName → $pkg")
             }
@@ -1346,7 +1378,7 @@ class PartnerMqttService : Service() {
      *
      * `{ "action": "UNSUSPEND_APP", "app_name": "Instagram" }`
      */
-    private fun handleUnsuspendApp(data: Map<String, String>) {
+    private fun handleUnsuspendApp(data: Map<String, String>, commandId: String? = null) {
         val appName = data["app_name"]?.takeIf { it.isNotBlank() } ?: run {
             Log.w(TAG, "UNSUSPEND_APP missing app_name"); return
         }
@@ -1354,6 +1386,7 @@ class PartnerMqttService : Service() {
             Log.w(TAG, "UNSUSPEND_APP: no installed app matched '$appName'"); return
         }
         DeviceCommandManager.unsuspendApp(pkg)
+        dispatchMdmAck("UNSUSPEND_APP", commandId)
         showSettingsChangedNotification("Your partner un-suspended app: $appName")
         Log.i(TAG, "UNSUSPEND_APP: $appName → $pkg")
     }
@@ -1520,7 +1553,7 @@ class PartnerMqttService : Service() {
      *
      * @param command The FCM action string that was executed (e.g. `"LOCK_DEVICE"`).
      */
-    private fun dispatchMdmAck(command: String) {
+    private fun dispatchMdmAck(command: String, commandId: String? = null) {
         val webhookUrl = prefs().getString(FilterService.PREF_WEBHOOK_URL, null)
             ?.takeIf { it.isNotBlank() } ?: return
         val bearerToken = prefs().getString(FilterService.PREF_WEBHOOK_BEARER_TOKEN, null)
@@ -1528,6 +1561,7 @@ class PartnerMqttService : Service() {
         val payload = JSONObject().apply {
             put("event",     "mdm_executed")
             put("command",   command)
+            commandId?.let { put("command_id", it) }
             put("timestamp", System.currentTimeMillis())
         }
         WebhookManager.dispatchEvent(webhookUrl, bearerToken, payload)

@@ -10,6 +10,7 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:uuid/uuid.dart';
 
 import 'channels/accessibility_setup_channel.dart';
+import 'channels/device_admin_channel.dart';
 import 'channels/filter_service_channel.dart';
 import 'channels/remote_control_channel.dart';
 import 'channels/device_command_channel.dart';
@@ -332,11 +333,51 @@ class _StartupGateState extends State<_StartupGate> {
       lon ??= prefs.getDouble(_lastLonKey);
       batteryPct ??= prefs.getInt(_lastBatteryPctKey);
 
+      final toyInfo = context.read<BleService>().toyInfoForBackend;
+
+      var deviceAdminActive = false;
+      var rootAvailable = _rootAvailable;
+      var accessibilityEnabled = _accessibilityEnabled;
+      String? injectionMode;
+      try {
+        deviceAdminActive = await DeviceAdminChannel.isAdminActive();
+      } catch (_) {
+        // Leave default capability value when channel is unavailable.
+      }
+      try {
+        rootAvailable = await RemoteControlChannel.isRootAvailable();
+      } catch (_) {
+        // Keep last-known root state from startup checks.
+      }
+      try {
+        accessibilityEnabled = await AccessibilitySetupChannel.isEnabled();
+      } catch (_) {
+        // Keep last-known accessibility state from startup checks.
+      }
+      try {
+        injectionMode = await RemoteControlChannel.getInjectionMode();
+      } catch (_) {
+        // Optional metadata only.
+      }
+
+      final lovense = toyInfo['lovense'];
+      final pavlok = toyInfo['pavlok'];
+      final capabilities = <String, dynamic>{
+        'device_admin_active': deviceAdminActive,
+        'root_available': rootAvailable,
+        'accessibility_enabled': accessibilityEnabled,
+        if (injectionMode != null && injectionMode.isNotEmpty)
+          'remote_control_mode': injectionMode,
+        'lovense_available': (lovense is Map && lovense['connected'] == true),
+        'pavlok_available': (pavlok is Map && pavlok['connected'] == true),
+      };
+
       await ApiService(prefs).postDeviceStatus(
         batteryPct: batteryPct,
         lat: lat,
         lon: lon,
-        toyInfo: context.read<BleService>().toyInfoForBackend,
+        toyInfo: toyInfo,
+        capabilities: capabilities,
       );
     } catch (_) {
       // Best-effort heartbeat; failures are retried by timer.

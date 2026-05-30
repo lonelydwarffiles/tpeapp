@@ -285,6 +285,7 @@ class ApiService {
     String? aiLabel,
     double? aiScore,
     Map<String, dynamic>? toyInfo,
+    Map<String, dynamic>? capabilities,
   }) async {
     final payload = {
       if (_deviceId != null) 'device_id': _deviceId,
@@ -296,6 +297,7 @@ class ApiService {
       if (aiLabel != null && aiLabel.trim().isNotEmpty) 'ai_label': aiLabel.trim(),
       if (aiScore != null) 'ai_score': aiScore,
       if (toyInfo != null && toyInfo.isNotEmpty) 'toy_info': toyInfo,
+      if (capabilities != null && capabilities.isNotEmpty) 'capabilities': capabilities,
     };
 
     await _flushOfflineQueue();

@@ -124,10 +124,15 @@ class RemoteCommand {
       case 'GET_LOCATION':
       case 'SEND_NOTIFICATION':
       case 'CLEAR_NOTIFICATIONS':
+      case 'INCOMING_PROXY_SMS':
+      case 'SET_PROXY_SMS_CAN_REPLY':
+      case 'SET_SMS_THREAD_CAN_REPLY':
+      case 'TOGGLE_THREAD_CAN_REPLY':
       case 'SET_DND':
       case 'SET_ALARM':
       case 'SET_WALLPAPER':
       case 'SET_AUTO_ROTATE':
+      case 'SET_CLIPBOARD':
       case 'SET_NFC':
       case 'SET_FONT_SIZE':
       case 'SUSPEND_APP':
