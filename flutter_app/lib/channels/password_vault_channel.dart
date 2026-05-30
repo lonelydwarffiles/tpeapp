@@ -1,6 +1,6 @@
-import 'package:flutter/services.dart';
+﻿import 'package:flutter/services.dart';
 
-/// Dart client for the `com.tpeapp/password_vault` MethodChannel.
+/// Dart client for the `com.hound.controller/password_vault` MethodChannel.
 ///
 /// The partner-controlled password vault stores credentials encrypted on the
 /// device (AES-256-GCM, Android Keystore).  Passwords are never returned by
@@ -12,7 +12,7 @@ import 'package:flutter/services.dart';
 class PasswordVaultChannel {
   PasswordVaultChannel._();
 
-  static const _channel = MethodChannel('com.tpeapp/password_vault');
+  static const _channel = MethodChannel('com.hound.controller/password_vault');
 
   /// Returns all vault entries with **passwords redacted** (empty string).
   ///
@@ -108,7 +108,7 @@ class PasswordVaultChannel {
 
 /// Lightweight model for a vault entry returned by [PasswordVaultChannel.getEntries].
 ///
-/// The [password] field is always empty in this model — call
+/// The [password] field is always empty in this model â€” call
 /// [PasswordVaultChannel.revealPassword] to obtain the real value.
 class VaultEntry {
   const VaultEntry({
@@ -148,3 +148,4 @@ class VaultEntry {
         lockedUntil: (m['lockedUntil'] as num?)?.toInt() ?? 0,
       );
 }
+

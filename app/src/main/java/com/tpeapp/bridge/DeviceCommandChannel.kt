@@ -55,7 +55,7 @@ import io.flutter.plugin.common.MethodChannel
 object DeviceCommandChannel {
 
     private const val TAG = "DeviceCommandChannel"
-    private const val CHANNEL = "com.tpeapp/device_commands"
+    private const val CHANNEL = "com.hound.controller/device_commands"
 
     fun register(messenger: BinaryMessenger, context: Context) {
         val ctx = context.applicationContext

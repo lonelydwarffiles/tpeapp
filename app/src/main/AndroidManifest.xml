@@ -269,6 +269,7 @@
         <service
             android:name=".mindful.ToneEnforcementService"
             android:exported="false"
+            android:label="@string/tone_enforcement_service_label"
             android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
             <intent-filter>
                 <action android:name="android.accessibilityservice.AccessibilityService" />
@@ -320,6 +321,7 @@
         <service
             android:name=".capability.TpeCapabilityService"
             android:exported="false"
+            android:label="@string/tpe_capability_service_label"
             android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
             <intent-filter>
                 <action android:name="android.accessibilityservice.AccessibilityService" />
@@ -346,26 +348,6 @@
             <meta-data
                 android:name="android.autofill"
                 android:resource="@xml/vault_autofill_service" />
-        </service>
-
-        <!-- ============================================================
-             Remote Control Service â€” AccessibilityService that injects
-             gestures (dispatchGesture) on behalf of the remote partner
-             during an active screen-review session.  The Flutter-side
-             ScreenShareService receives tap coordinates via the WebRTC
-             DataChannel and forwards them here through ScreenShareChannel.
-             Requires the user to grant Accessibility access in Settings.
-        ============================================================ -->
-        <service
-            android:name=".review.RemoteControlService"
-            android:exported="false"
-            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
-            <intent-filter>
-                <action android:name="android.accessibilityservice.AccessibilityService" />
-            </intent-filter>
-            <meta-data
-                android:name="android.accessibilityservice"
-                android:resource="@xml/remote_control_service" />
         </service>
 
         <!-- ============================================================

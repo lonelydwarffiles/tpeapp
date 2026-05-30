@@ -43,8 +43,8 @@ import io.flutter.plugin.common.MethodChannel
 object BleChannel {
 
     private const val TAG = "BleChannel"
-    private const val CHANNEL        = "com.tpeapp/ble"
-    private const val EVENTS_CHANNEL = "com.tpeapp/ble_events"
+    private const val CHANNEL        = "com.hound.controller/ble"
+    private const val EVENTS_CHANNEL = "com.hound.controller/ble_events"
 
     fun register(messenger: BinaryMessenger, context: Context) {
         val ctx = context.applicationContext

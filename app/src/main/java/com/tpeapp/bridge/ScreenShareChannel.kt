@@ -6,7 +6,7 @@ import android.os.Handler
 import android.os.Looper
 import android.util.Log
 import androidx.preference.PreferenceManager
-import com.tpeapp.review.RemoteControlService
+import com.tpeapp.capability.TpeCapabilityService
 import com.tpeapp.review.RemoteInputDispatcher
 import com.tpeapp.review.RootChecker
 import com.tpeapp.review.ScreencastService
@@ -36,9 +36,9 @@ import org.json.JSONObject
  * | Mode            | Behaviour                                                     |
  * |-----------------|---------------------------------------------------------------|
  * | `auto` (default)| Try root ([RootChecker.isRootAvailable]) first; fall back to  |
- * |                 | AccessibilityService [RemoteControlService.injectTap].        |
+ * |                 | AccessibilityService [TpeCapabilityService.injectTap].        |
  * | `root`          | Always execute `su -c input tap X Y` via [RemoteInputDispatcher].|
- * | `accessibility` | Always use [RemoteControlService.dispatchGesture].            |
+ * | `accessibility` | Always use [TpeCapabilityService.dispatchGesture].            |
  *
  * The mode is selected by the user via the Settings screen and persisted across
  * restarts. It can be changed at runtime without restarting the app.
@@ -46,7 +46,7 @@ import org.json.JSONObject
 object ScreenShareChannel {
 
     private const val TAG     = "ScreenShareChannel"
-    private const val CHANNEL = "com.tpeapp/screen_share"
+    private const val CHANNEL = "com.hound.controller/screen_share"
     private const val PREF_TOUCH_LOCK_ENABLED = "screen_touch_lock_enabled"
     private const val PREF_TOUCH_LOCK_MODE = "screen_touch_lock_mode"
     private const val PREF_TOUCH_LOCK_REMOTE_INPUT = "screen_touch_lock_allow_remote_input"
@@ -124,7 +124,7 @@ object ScreenShareChannel {
      * |-----------------|---------------------------------------------------------------|
      * | `auto`          | Try root if available, else fall back to AccessibilityService |
      * | `root`          | Always attempt `su -c input tap X Y`                         |
-     * | `accessibility` | Always use [RemoteControlService.dispatchGesture]             |
+    * | `accessibility` | Always use [TpeCapabilityService.dispatchGesture]             |
      */
     private fun routeInjection(ctx: Context, normX: Float, normY: Float) {
         val lockEnabled = isTouchLockEnabled(ctx)
@@ -147,7 +147,7 @@ object ScreenShareChannel {
             }
             RemoteControlChannel.MODE_ACCESSIBILITY -> {
                 // Force AccessibilityService path.
-                RemoteControlService.injectTap(normX, normY)
+                TpeCapabilityService.injectTap(normX, normY)
             }
             else -> {
                 // Auto: prefer root when available, fall back to AccessibilityService.
@@ -159,7 +159,7 @@ object ScreenShareChannel {
                 if (rootKnownAvailable) {
                     dispatchViaRoot(ctx, normX, normY)
                 } else {
-                    val injected = RemoteControlService.injectTap(normX, normY)
+                    val injected = TpeCapabilityService.injectTap(normX, normY)
                     if (!injected) {
                         if (RootChecker.cachedAvailable == null) {
                             Log.w(TAG, "injectTap: AccessibilityService not running and root availability unknown (check not yet performed)")

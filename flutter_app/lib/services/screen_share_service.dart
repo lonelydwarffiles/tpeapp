@@ -20,8 +20,8 @@ import '../channels/screen_share_channel.dart';
 ///  4. If remote control is enabled, creates an [RTCDataChannel] named
 ///     `remote-control` and listens for JSON tap/swipe/keyevent messages
 ///     from the partner.  Each received `tap` event is forwarded via
-///     [ScreenShareChannel.injectTap] to the standalone native accessibility
-///     companion service or `su -c` fallback.
+///     [ScreenShareChannel.injectTap] to the merged native capability
+///     accessibility service or `su -c` fallback.
 ///
 /// Signaling envelope schema (matches Camera-Site relay and [StreamCoordinator]):
 /// ```json
@@ -251,7 +251,7 @@ class ScreenShareService {
       final x = (json['x'] as num?)?.toDouble();
       final y = (json['y'] as num?)?.toDouble();
       if (x != null && y != null) {
-        // Forward normalised coordinates to the native RemoteControlService
+        // Forward normalised coordinates to the merged native capability service
         // (AccessibilityService) via MethodChannel.
         ScreenShareChannel.injectTap(x, y).catchError((Object e) {
           debugPrint('[ScreenShareService] injectTap error: $e');

@@ -27,7 +27,7 @@ import io.flutter.plugin.common.MethodChannel
 object FilterServiceChannel {
 
     private const val TAG = "FilterServiceChannel"
-    private const val CHANNEL = "com.tpeapp/filter_service"
+    private const val CHANNEL = "com.hound.controller/filter_service"
 
     fun register(messenger: BinaryMessenger, context: Context) {
         MethodChannel(messenger, CHANNEL).setMethodCallHandler { call, result ->

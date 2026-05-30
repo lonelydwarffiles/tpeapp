@@ -3,6 +3,7 @@ import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 /// Pure-Dart BLE layer for Lovense and Pavlok devices.
@@ -962,25 +963,43 @@ class BleService extends ChangeNotifier {
   }) async {
     final allById = <String, BluetoothDevice>{};
     final matchedById = <String, BluetoothDevice>{};
-    await FlutterBluePlus.stopScan();
-    _scanSub?.cancel();
+    await _ensureScanPermissions();
 
-    // Run a manual scan window because timeout-based scans can be stopped
-    // prematurely on some Android stacks/devices.
-    await FlutterBluePlus.startScan();
-    _scanSub = FlutterBluePlus.scanResults.listen((results) {
-      for (final result in results) {
-        allById[result.device.remoteId.str] = result.device;
-        if (matcher(result.device)) {
-          matchedById[result.device.remoteId.str] = result.device;
+    final supported = await FlutterBluePlus.isSupported;
+    if (!supported) {
+      throw StateError('Bluetooth LE is not supported on this device.');
+    }
+    final adapterState = await FlutterBluePlus.adapterState.first
+        .timeout(const Duration(seconds: 3));
+    if (adapterState != BluetoothAdapterState.on) {
+      throw StateError('Bluetooth is off. Turn it on and try scanning again.');
+    }
+
+    try {
+      await FlutterBluePlus.stopScan();
+      await _scanSub?.cancel();
+      _scanSub = null;
+
+      // Run a manual scan window because timeout-based scans can be stopped
+      // prematurely on some Android stacks/devices.
+      await FlutterBluePlus.startScan();
+      _scanSub = FlutterBluePlus.scanResults.listen((results) {
+        for (final result in results) {
+          allById[result.device.remoteId.str] = result.device;
+          if (matcher(result.device)) {
+            matchedById[result.device.remoteId.str] = result.device;
+          }
         }
-      }
-    });
+      });
 
-    await Future<void>.delayed(timeout);
-    await FlutterBluePlus.stopScan();
-    await _scanSub?.cancel();
-    _scanSub = null;
+      await Future<void>.delayed(timeout);
+    } catch (error) {
+      throw StateError('BLE scan failed: $error');
+    } finally {
+      await FlutterBluePlus.stopScan();
+      await _scanSub?.cancel();
+      _scanSub = null;
+    }
 
     // If strict matching finds nothing, still show discovered devices so users
     // can pick explicitly from the modal instead of seeing an empty result.
@@ -990,6 +1009,43 @@ class BleService extends ChangeNotifier {
     devices.sort((a, b) =>
         _readableDeviceName(a).compareTo(_readableDeviceName(b)));
     return devices;
+  }
+
+  Future<void> _ensureScanPermissions() async {
+    final statuses = <Permission, PermissionStatus>{
+      Permission.bluetoothScan: await Permission.bluetoothScan.status,
+      Permission.bluetoothConnect: await Permission.bluetoothConnect.status,
+      Permission.locationWhenInUse: await Permission.locationWhenInUse.status,
+    };
+
+    final needsRequest = statuses.entries
+        .where((entry) => !entry.value.isGranted)
+        .map((entry) => entry.key)
+        .toList(growable: false);
+    if (needsRequest.isEmpty) {
+      return;
+    }
+
+    final requested = await needsRequest.request();
+    final denied = requested.entries
+        .where((entry) => !entry.value.isGranted)
+        .map((entry) => entry.key)
+        .toList(growable: false);
+    if (denied.isEmpty) {
+      return;
+    }
+
+    final permanentlyDenied = requested.entries
+        .where((entry) => entry.value.isPermanentlyDenied)
+        .map((entry) => entry.key)
+        .toList(growable: false);
+    if (permanentlyDenied.isNotEmpty) {
+      throw StateError(
+        'Bluetooth permissions are permanently denied. Open app settings and allow Bluetooth + Location.',
+      );
+    }
+
+    throw StateError('Bluetooth scan requires Bluetooth + Location permissions.');
   }
 
   String _readableDeviceName(BluetoothDevice device) {

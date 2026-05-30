@@ -1,22 +1,22 @@
-import 'dart:async';
+﻿import 'dart:async';
 
 import 'package:flutter/services.dart';
 
 import '../services/ble_service.dart';
 
-/// Dart client for the `com.tpeapp/ble` MethodChannel.
+/// Dart client for the `com.hound.controller/ble` MethodChannel.
 ///
 /// Sends commands to the native [BleChannel] which delegates to
 /// [LovenseManager] and [PavlokManager] on the Kotlin side.
 ///
 /// The underlying BLE connections are shared with [ConsequenceDispatcher]
-/// (punishment / reward stimuli) — commands sent from Dart coexist safely
+/// (punishment / reward stimuli) â€” commands sent from Dart coexist safely
 /// with FCM-triggered commands.
 class BleChannel {
   BleChannel._();
 
   static final BleService _service = BleService();
-  static const MethodChannel _native = MethodChannel('com.tpeapp/ble');
+  static const MethodChannel _native = MethodChannel('com.hound.controller/ble');
   static Timer? _lovenseTimedStopTimer;
 
   // A/B switch for Lovense path: native bridge (SDK-ready) vs Dart BLE.
@@ -31,7 +31,7 @@ class BleChannel {
     _useNativeLovense = useNative;
   }
 
-  // ── Lovense ──────────────────────────────────────────────────────────
+  // â”€â”€ Lovense â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   /// Starts a BLE scan for the first Lovense toy in range.
   static Future<void> lovenseScan() async {
@@ -60,7 +60,7 @@ class BleChannel {
     await _service.lovenseDisconnect();
   }
 
-  /// Sets vibration intensity (0–20).
+  /// Sets vibration intensity (0â€“20).
   static Future<void> lovenseVibrate(int level) async {
     final safeLevel = level.clamp(0, 20);
     if (_useNativeLovense) {
@@ -83,7 +83,7 @@ class BleChannel {
     _scheduleLovenseStop(durationMs.clamp(0, 1200000));
   }
 
-  /// Sets rotation intensity (0–20).
+  /// Sets rotation intensity (0â€“20).
   static Future<void> lovenseRotate(int level) async {
     final safeLevel = level.clamp(0, 20);
     if (_useNativeLovense) {
@@ -106,7 +106,7 @@ class BleChannel {
     _scheduleLovenseStop(durationMs.clamp(0, 1200000));
   }
 
-  /// Sets air-pump intensity (0–3).
+  /// Sets air-pump intensity (0â€“3).
   static Future<void> lovensePump(int level) async {
     final safeLevel = level.clamp(0, 3);
     if (_useNativeLovense) {
@@ -149,7 +149,7 @@ class BleChannel {
     await _service.lovenseBattery();
   }
 
-  // ── Pavlok ──────────────────────────────────────────────────────────
+  // â”€â”€ Pavlok â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   /// Starts a BLE scan for a Pavlok wristband in range.
   static Future<void> pavlokScan() => _service.pavlokScan();
@@ -161,7 +161,7 @@ class BleChannel {
   static Future<void> pavlokDisconnect() => _service.pavlokDisconnect();
 
   /// Delivers an electric zap.
-  /// [intensity] 0–255; [durationMs] in milliseconds.
+  /// [intensity] 0â€“255; [durationMs] in milliseconds.
   static Future<void> pavlokZap({int intensity = 64, int durationMs = 500}) =>
       _service.pavlokZap(intensity: intensity, durationMs: durationMs);
 
@@ -203,3 +203,4 @@ class BleChannel {
     });
   }
 }
+

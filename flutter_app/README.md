@@ -10,12 +10,12 @@ tpeapp/
 │   └── src/main/java/com/tpeapp/
 │       ├── bridge/               ← NEW: MethodChannel host bridges
 │       │   ├── TpeFlutterActivity.kt     Flutter entry-point (extends FlutterActivity)
-│       │   ├── FilterServiceChannel.kt   com.tpeapp/filter_service
-│       │   ├── DeviceAdminChannel.kt     com.tpeapp/device_admin
-│       │   ├── PartnerPinChannel.kt      com.tpeapp/partner_pin
-│       │   ├── BleChannel.kt             com.tpeapp/ble + com.tpeapp/ble_events
-│       │   ├── MqttChannel.kt            com.tpeapp/mqtt_events
-│       │   └── DeviceCommandChannel.kt   com.tpeapp/device_commands
+│       │   ├── FilterServiceChannel.kt   com.hound.controller/filter_service
+│       │   ├── DeviceAdminChannel.kt     com.hound.controller/device_admin
+│       │   ├── PartnerPinChannel.kt      com.hound.controller/partner_pin
+│       │   ├── BleChannel.kt             com.hound.controller/ble + com.hound.controller/ble_events
+│       │   ├── MqttChannel.kt            com.hound.controller/mqtt_events
+│       │   └── DeviceCommandChannel.kt   com.hound.controller/device_commands
 │       ├── service/FilterService.kt      ← KEPT NATIVE (AIDL + TFLite)
 │       ├── mdm/                          ← KEPT NATIVE (Device Admin)
 │       ├── mqtt/PartnerMqttService.kt     ← KEPT NATIVE (persistent MQTT command handler)
@@ -72,13 +72,13 @@ tpeapp/
 
 | Dart channel name | Kotlin bridge | Purpose |
 |---|---|---|
-| `com.tpeapp/filter_service` | `FilterServiceChannel` | Start service, threshold, strict mode, webhook |
-| `com.tpeapp/device_admin` | `DeviceAdminChannel` | Admin status, activate/deactivate, PIN ops |
-| `com.tpeapp/partner_pin` | `PartnerPinChannel` | Standalone PIN management |
-| `com.tpeapp/ble` | `BleChannel` | Lovense & Pavlok commands |
-| `com.tpeapp/ble_events` | `BleChannel` (EventChannel) | BLE connection state → Dart |
-| `com.tpeapp/mqtt_events` | `MqttChannel` (EventChannel) | MQTT command payloads → Dart UI |
-| `com.tpeapp/device_commands` | `DeviceCommandChannel` | Remote device controls |
+| `com.hound.controller/filter_service` | `FilterServiceChannel` | Start service, threshold, strict mode, webhook |
+| `com.hound.controller/device_admin` | `DeviceAdminChannel` | Admin status, activate/deactivate, PIN ops |
+| `com.hound.controller/partner_pin` | `PartnerPinChannel` | Standalone PIN management |
+| `com.hound.controller/ble` | `BleChannel` | Lovense & Pavlok commands |
+| `com.hound.controller/ble_events` | `BleChannel` (EventChannel) | BLE connection state → Dart |
+| `com.hound.controller/mqtt_events` | `MqttChannel` (EventChannel) | MQTT command payloads → Dart UI |
+| `com.hound.controller/device_commands` | `DeviceCommandChannel` | Remote device controls |
 
 ## Building
 

@@ -11,7 +11,6 @@ import com.tpeapp.databinding.ActivityMainBinding
 import com.tpeapp.mdm.AppDeviceAdminReceiver
 import com.tpeapp.mdm.PartnerPinManager
 import com.tpeapp.checkin.CheckInActivity
-import com.tpeapp.pairing.PairingActivity
 import com.tpeapp.questions.QuestionsActivity
 import com.tpeapp.review.ReviewActivity
 import com.tpeapp.service.FilterService
@@ -41,17 +40,6 @@ class MainActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-
-        // Redirect to PairingActivity on first launch (before the device has
-        // been paired with an Accountability Partner).
-        if (!androidx.preference.PreferenceManager
-                .getDefaultSharedPreferences(this)
-                .getBoolean(PairingActivity.PREF_IS_PAIRED, false)
-        ) {
-            startActivity(Intent(this, PairingActivity::class.java))
-            finish()
-            return
-        }
 
         binding        = ActivityMainBinding.inflate(layoutInflater)
         dpm            = getSystemService(DevicePolicyManager::class.java)

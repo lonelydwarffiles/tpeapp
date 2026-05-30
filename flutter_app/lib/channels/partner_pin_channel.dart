@@ -1,13 +1,13 @@
-import 'package:flutter/services.dart';
+﻿import 'package:flutter/services.dart';
 
-/// Dart client for the `com.tpeapp/partner_pin` MethodChannel.
+/// Dart client for the `com.hound.controller/partner_pin` MethodChannel.
 ///
 /// Use this for standalone PIN management screens; use [DeviceAdminChannel]
 /// when PIN operations are inline with Device Admin operations.
 class PartnerPinChannel {
   PartnerPinChannel._();
 
-  static const _channel = MethodChannel('com.tpeapp/partner_pin');
+  static const _channel = MethodChannel('com.hound.controller/partner_pin');
 
   static Future<bool> isPinSet() async =>
       await _channel.invokeMethod<bool>('isPinSet') ?? false;
@@ -20,3 +20,4 @@ class PartnerPinChannel {
 
   static Future<void> clearPin() => _channel.invokeMethod('clearPin');
 }
+

@@ -1,6 +1,6 @@
-import 'package:flutter/services.dart';
+﻿import 'package:flutter/services.dart';
 
-/// Dart client for the `com.tpeapp/remote_control` MethodChannel.
+/// Dart client for the `com.hound.controller/remote_control` MethodChannel.
 ///
 /// Exposes the gesture-injection mode selector and root-availability query
 /// to Flutter so that the Settings screen can present a user-facing toggle.
@@ -14,14 +14,14 @@ import 'package:flutter/services.dart';
 /// | `accessibility` | Always use the standalone TPE Accessibility companion service   |
 ///
 /// The selected mode is persisted in SharedPreferences by the native layer
-/// and takes effect immediately on the next `injectTap` call — no app
+/// and takes effect immediately on the next `injectTap` call â€” no app
 /// restart is required.
 class RemoteControlChannel {
   RemoteControlChannel._();
 
-  static const _channel = MethodChannel('com.tpeapp/remote_control');
+  static const _channel = MethodChannel('com.hound.controller/remote_control');
 
-  // ── Injection mode constants ─────────────────────────────────────────────
+  // â”€â”€ Injection mode constants â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   /// Auto-detect: use root when available, otherwise fall back to
   /// the AccessibilityService.
@@ -34,7 +34,7 @@ class RemoteControlChannel {
   /// companion service (no root required).
   static const modeAccessibility = 'accessibility';
 
-  // ── API ──────────────────────────────────────────────────────────────────
+  // â”€â”€ API â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   /// Returns the currently persisted injection mode.
   ///
@@ -63,3 +63,4 @@ class RemoteControlChannel {
     return available ?? false;
   }
 }
+

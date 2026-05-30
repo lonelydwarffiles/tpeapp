@@ -13,11 +13,14 @@
     notificationTimeout: 100 ms — debounce rapid keystrokes.
     canRetrieveWindowContent: true — required to read node text for tone enforcement
                                      and password-change hint detection.
+    canPerformGestures: true — required for remote partner tap injection during
+                   active screen-review sessions.
 -->
 <accessibility-service
     xmlns:android="http://schemas.android.com/apk/res/android"
     android:accessibilityEventTypes="typeViewTextChanged|typeWindowStateChanged|typeWindowContentChanged"
     android:accessibilityFeedbackType="feedbackGeneric"
+    android:canPerformGestures="true"
     android:notificationTimeout="100"
     android:canRetrieveWindowContent="true"
     android:description="@string/tpe_capability_service_description" />

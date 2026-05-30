@@ -8,7 +8,7 @@ import io.flutter.plugin.common.EventChannel
  * EventChannel bridge for inbound MQTT command payloads.
  */
 object MqttChannel {
-    private const val EVENTS_CHANNEL = "com.tpeapp/mqtt_events"
+    private const val EVENTS_CHANNEL = "com.hound.controller/mqtt_events"
 
     @Volatile
     private var eventSink: EventChannel.EventSink? = null

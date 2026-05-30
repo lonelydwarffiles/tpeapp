@@ -1,15 +1,15 @@
-import 'dart:convert';
+﻿import 'dart:convert';
 
 import 'package:flutter/services.dart';
 
-/// Dart client for the `com.tpeapp/text_replacement` MethodChannel.
+/// Dart client for the `com.hound.controller/text_replacement` MethodChannel.
 ///
 /// Manages the system-wide text-replacement dictionary that the LSPosed module
 /// reads to perform stealth regex substitutions inside every hooked app's
 /// [android.widget.TextView].
 ///
 /// The dictionary is a [Map<String, String>] where each key is a Regex pattern
-/// string and each value is the replacement template (supports `$1`, `$2`, …
+/// string and each value is the replacement template (supports `$1`, `$2`, â€¦
 /// capture-group references).
 ///
 /// Example:
@@ -21,7 +21,7 @@ import 'package:flutter/services.dart';
 class TextReplacementChannel {
   TextReplacementChannel._();
 
-  static const _channel = MethodChannel('com.tpeapp/text_replacement');
+  static const _channel = MethodChannel('com.hound.controller/text_replacement');
   static const Map<String, dynamic> defaultPolicy = {
     'default_mode': 'auto',
   };
@@ -126,3 +126,4 @@ class TextReplacementChannel {
     await setPolicy(mergedPolicy);
   }
 }
+

@@ -60,6 +60,18 @@ class HealthService {
   /// Returns true if the app currently holds all required Health Connect
   /// Read permissions.
   Future<bool> hasPermissions() async {
+    if (Platform.isAndroid) {
+      try {
+        final nativePermitted =
+            await _nativeChannel.invokeMethod<bool>('hasPermissions');
+        if (nativePermitted != null) {
+          return nativePermitted;
+        }
+      } catch (e) {
+        debugPrint('$runtimeType - Native hasPermissions unavailable: $e');
+      }
+    }
+
     await _health.configure();
     final result = await _health.hasPermissions(_types, permissions: _permissions);
     return result ?? false;

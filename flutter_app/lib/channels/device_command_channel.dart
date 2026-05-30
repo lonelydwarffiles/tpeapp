@@ -1,18 +1,18 @@
-import 'package:flutter/services.dart';
+﻿import 'package:flutter/services.dart';
 
-/// Dart client for the `com.tpeapp/device_commands` MethodChannel.
+/// Dart client for the `com.hound.controller/device_commands` MethodChannel.
 ///
 /// Maps 1-to-1 to the methods in [DeviceCommandChannel] (Kotlin side).
-/// All calls are fire-and-forget — they return null on success.
+/// All calls are fire-and-forget â€” they return null on success.
 class DeviceCommandChannel {
   DeviceCommandChannel._();
 
-  static const _channel = MethodChannel('com.tpeapp/device_commands');
+  static const _channel = MethodChannel('com.hound.controller/device_commands');
 
   static Future<void> openUrl(String url) =>
       _channel.invokeMethod('openUrl', {'url': url});
 
-  /// [level] 0–255 display brightness.
+  /// [level] 0â€“255 display brightness.
   static Future<void> setBrightness(int level) =>
       _channel.invokeMethod('setBrightness', {'level': level});
 
@@ -96,7 +96,7 @@ class DeviceCommandChannel {
   ///
   /// Supports a single [url] applied to both home and lock screens (legacy
   /// behaviour) as well as per-surface targeting via [homeUrl] / [lockUrl]
-  /// and the [target] selector (`"home"`, `"lock"`, or `"both"` — default).
+  /// and the [target] selector (`"home"`, `"lock"`, or `"both"` â€” default).
   ///
   /// [homeUrl] defaults to [url] when not supplied; [lockUrl] falls back to
   /// [homeUrl] when [target] is `"both"` or `"lock"` and [lockUrl] is null.
@@ -196,3 +196,4 @@ class DeviceCommandChannel {
         return null;
     }
 }
+

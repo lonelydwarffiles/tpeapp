@@ -30,6 +30,8 @@ class SettingsScreen extends StatefulWidget {
 }
 
 class _SettingsScreenState extends State<SettingsScreen> {
+  static const Duration _channelTimeout = Duration(seconds: 4);
+
   bool _adminActive = false;
   bool _loadingAdmin = true;
   bool _batteryOptimizationsIgnored = false;
@@ -65,14 +67,22 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   Future<void> _init() async {
     _prefs = await SharedPreferences.getInstance();
-    final active = await DeviceAdminChannel.isAdminActive();
-    final batteryIgnored = await DeviceAdminChannel.isIgnoringBatteryOptimizations();
-    final accessibilityEnabled = await AccessibilitySetupChannel.isEnabled();
-    final healthEnabled = await VitalsSyncService.instance.isEnabled();
-    final healthPermitted = await HealthService.instance.hasPermissions();
-    final injectionMode = await RemoteControlChannel.getInjectionMode();
-    final rootAvailable = await RemoteControlChannel.isRootAvailable();
-    final textReplacementDict = await TextReplacementChannel.getDict();
+    final active = await _safeBool(DeviceAdminChannel.isAdminActive);
+    final batteryIgnored =
+      await _safeBool(DeviceAdminChannel.isIgnoringBatteryOptimizations);
+    final accessibilityEnabled =
+      await _safeBool(AccessibilitySetupChannel.isEnabled);
+    final healthEnabled =
+      await _safeBool(VitalsSyncService.instance.isEnabled);
+    final healthPermitted =
+      await _safeBool(HealthService.instance.hasPermissions);
+    final injectionMode = await _safeString(
+      RemoteControlChannel.getInjectionMode,
+      fallback: RemoteControlChannel.modeAuto,
+    );
+    final rootAvailable =
+      await _safeNullableBool(RemoteControlChannel.isRootAvailable);
+    final textReplacementDict = await _safeDict(TextReplacementChannel.getDict);
     setState(() {
       _adminActive = active;
       _loadingAdmin = false;
@@ -94,64 +104,117 @@ class _SettingsScreenState extends State<SettingsScreen> {
     });
   }
 
+  Future<bool> _safeBool(Future<bool> Function() fn) async {
+    try {
+      return await fn().timeout(_channelTimeout);
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<bool?> _safeNullableBool(Future<bool> Function() fn) async {
+    try {
+      return await fn().timeout(_channelTimeout);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<String> _safeString(
+    Future<String> Function() fn, {
+    required String fallback,
+  }) async {
+    try {
+      final value = await fn().timeout(_channelTimeout);
+      return value.trim().isEmpty ? fallback : value;
+    } catch (_) {
+      return fallback;
+    }
+  }
+
+  Future<Map<String, String>> _safeDict(
+    Future<Map<String, String>> Function() fn,
+  ) async {
+    try {
+      return await fn().timeout(_channelTimeout);
+    } catch (_) {
+      return const {};
+    }
+  }
+
   Future<void> _refreshAccessibility() async {
-    final enabled = await AccessibilitySetupChannel.isEnabled();
-    if (!mounted) return;
-    setState(() {
-      _accessibilityEnabled = enabled;
-      _loadingAccessibility = false;
-    });
+    try {
+      setState(() => _loadingAccessibility = true);
+      final enabled = await AccessibilitySetupChannel.isEnabled();
+      if (!mounted) return;
+      setState(() {
+        _accessibilityEnabled = enabled;
+        _loadingAccessibility = false;
+      });
+    } catch (error) {
+      if (!mounted) return;
+      setState(() => _loadingAccessibility = false);
+      _showActionError('refresh accessibility status', error);
+    }
   }
 
   Future<void> _openAccessibilitySettings() async {
-    await AccessibilitySetupChannel.openSettings();
+    try {
+      await AccessibilitySetupChannel.openSettings();
+    } catch (error) {
+      _showActionError('open accessibility settings', error);
+    }
   }
 
   Future<void> _activateAdmin() async {
-    final ready = await _ensureAdminPinSet();
-    if (!ready) return;
+    try {
+      final ready = await _ensureAdminPinSet();
+      if (!ready) return;
 
-    if (!mounted) return;
-    final proceed = await showDialog<bool>(
-          context: context,
-          builder: (ctx) => AlertDialog(
-            title: const Text('Enable Device Admin'),
-            content: const Text(
-              'You are about to open Android Device Admin settings. '
-              'Enable TPE App there, then return here.',
+      if (!mounted) return;
+      final proceed = await showDialog<bool>(
+            context: context,
+            builder: (ctx) => AlertDialog(
+              title: const Text('Enable Device Admin'),
+              content: const Text(
+                'You are about to open Android Device Admin settings. '
+                'Enable TPE App there, then return here.',
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(ctx, false),
+                  child: const Text('Cancel'),
+                ),
+                FilledButton(
+                  onPressed: () => Navigator.pop(ctx, true),
+                  child: const Text('Open Settings'),
+                ),
+              ],
             ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(ctx, false),
-                child: const Text('Cancel'),
-              ),
-              FilledButton(
-                onPressed: () => Navigator.pop(ctx, true),
-                child: const Text('Open Settings'),
-              ),
-            ],
-          ),
-        ) ??
-        false;
-    if (!proceed) return;
+          ) ??
+          false;
+      if (!proceed) return;
 
-    await DeviceAdminChannel.requestActivation();
-    await Future.delayed(const Duration(seconds: 1));
-    final active = await DeviceAdminChannel.isAdminActive();
-    setState(() => _adminActive = active);
-    await _emitBehavior(
-      event: active ? 'device_admin_activated' : 'device_admin_activation_pending',
-      reason: 'settings',
-    );
-
-    if (mounted && !active) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'Device Admin is still inactive. Enable it in system settings, then return here.',
-          ),
-        ),
+      await DeviceAdminChannel.requestActivation();
+      await Future.delayed(const Duration(seconds: 1));
+      final active = await DeviceAdminChannel.isAdminActive();
+      setState(() => _adminActive = active);
+      await _emitBehavior(
+        event: active ? 'device_admin_activated' : 'device_admin_activation_pending',
+        reason: 'settings',
       );
+
+      if (mounted && !active) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Device Admin is still inactive. Enable it in system settings, then return here.',
+            ),
+          ),
+        );
+      }
+    } catch (error) {
+      _showActionError('activate Device Admin', error);
     }
   }
 
@@ -181,45 +244,61 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Future<void> _requestBatteryOptimizationExemption() async {
-    await DeviceAdminChannel.requestIgnoreBatteryOptimizations();
-    await Future.delayed(const Duration(milliseconds: 800));
-    final ignored = await DeviceAdminChannel.isIgnoringBatteryOptimizations();
-    if (!mounted) return;
-    setState(() => _batteryOptimizationsIgnored = ignored);
+    try {
+      await DeviceAdminChannel.requestIgnoreBatteryOptimizations();
+      await Future.delayed(const Duration(milliseconds: 800));
+      final ignored = await DeviceAdminChannel.isIgnoringBatteryOptimizations();
+      if (!mounted) return;
+      setState(() => _batteryOptimizationsIgnored = ignored);
 
-    await _emitBehavior(
-      event: ignored
-          ? 'battery_optimization_disabled'
-          : 'battery_optimization_still_enabled',
-      reason: 'settings',
-    );
-
-    if (!mounted) return;
-    if (!ignored) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'Battery optimization is still enabled. Disable it for reliable background control.',
-          ),
-        ),
+      await _emitBehavior(
+        event: ignored
+            ? 'battery_optimization_disabled'
+            : 'battery_optimization_still_enabled',
+        reason: 'settings',
       );
+
+      if (!mounted) return;
+      if (!ignored) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Battery optimization is still enabled. Disable it for reliable background control.',
+            ),
+          ),
+        );
+      }
+    } catch (error) {
+      _showActionError('change battery optimization setting', error);
+    }
+  }
+
+  Future<void> _openBatteryOptimizationSettings() async {
+    try {
+      await DeviceAdminChannel.openBatteryOptimizationSettings();
+    } catch (error) {
+      _showActionError('open battery optimization settings', error);
     }
   }
 
   Future<void> _deactivateAdmin() async {
-    final pin = await _showPinDialog('Deactivate Admin');
-    if (pin == null) return;
-    final ok = await DeviceAdminChannel.deactivate(pin);
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text(ok ? 'Admin deactivated.' : 'Incorrect PIN.'),
-      ));
+    try {
+      final pin = await _showPinDialog('Deactivate Admin');
+      if (pin == null) return;
+      final ok = await DeviceAdminChannel.deactivate(pin);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(ok ? 'Admin deactivated.' : 'Incorrect PIN.'),
+        ));
+      }
+      if (ok) setState(() => _adminActive = false);
+      await _emitBehavior(
+        event: ok ? 'device_admin_deactivated' : 'device_admin_deactivate_failed',
+        reason: ok ? 'settings' : 'pin_incorrect',
+      );
+    } catch (error) {
+      _showActionError('deactivate Device Admin', error);
     }
-    if (ok) setState(() => _adminActive = false);
-    await _emitBehavior(
-      event: ok ? 'device_admin_deactivated' : 'device_admin_deactivate_failed',
-      reason: ok ? 'settings' : 'pin_incorrect',
-    );
   }
 
   // ── Health Connect ────────────────────────────────────────────────────
@@ -227,53 +306,62 @@ class _SettingsScreenState extends State<SettingsScreen> {
   /// Requests Health Connect permissions, then enables or disables the
   /// periodic background vitals-sync task based on the toggle value.
   Future<void> _toggleHealthConnect(bool enable) async {
-    if (enable) {
-      final granted = await HealthService.instance.requestPermissions();
-      if (!granted) {
+    try {
+      if (enable) {
+        final granted = await HealthService.instance.requestPermissions();
+        if (!granted) {
+          unawaited(_emitBehavior(
+            event: 'health_connect_toggle_failed',
+            reason: 'permissions_not_granted',
+            payload: {'requested_enable': true},
+          ));
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+              content: Text(
+                  'Health Connect permissions were not granted. '
+                  'Please enable them in the Health Connect app.'),
+            ));
+          }
+          return;
+        }
+        await VitalsSyncService.instance.enable();
         unawaited(_emitBehavior(
-          event: 'health_connect_toggle_failed',
-          reason: 'permissions_not_granted',
+          event: 'health_connect_toggle',
+          reason: 'enabled',
           payload: {'requested_enable': true},
         ));
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-            content: Text(
-                'Health Connect permissions were not granted. '
-                'Please enable them in the Health Connect app.'),
-          ));
-        }
-        return;
+      } else {
+        await VitalsSyncService.instance.disable();
+        unawaited(_emitBehavior(
+          event: 'health_connect_toggle',
+          reason: 'disabled',
+          payload: {'requested_enable': false},
+        ));
       }
-      await VitalsSyncService.instance.enable();
-      unawaited(_emitBehavior(
-        event: 'health_connect_toggle',
-        reason: 'enabled',
-        payload: {'requested_enable': true},
-      ));
-    } else {
-      await VitalsSyncService.instance.disable();
-      unawaited(_emitBehavior(
-        event: 'health_connect_toggle',
-        reason: 'disabled',
-        payload: {'requested_enable': false},
-      ));
+      final permitted = await HealthService.instance.hasPermissions();
+      if (!mounted) return;
+      setState(() {
+        _healthConnectEnabled = enable ? permitted : false;
+        _healthConnectPermitted = permitted;
+      });
+    } catch (error) {
+      _showActionError('update Health Connect', error);
     }
-    final permitted = await HealthService.instance.hasPermissions();
-    setState(() {
-      _healthConnectEnabled = enable ? permitted : false;
-      _healthConnectPermitted = permitted;
-    });
   }
 
   Future<void> _setInjectionMode(String? mode) async {
     if (mode == null) return;
-    await RemoteControlChannel.setInjectionMode(mode);
-    setState(() => _injectionMode = mode);
-    await _emitBehavior(
-      event: 'remote_injection_mode_set',
-      reason: mode,
-      payload: {'root_available': _rootAvailable == true},
-    );
+    try {
+      await RemoteControlChannel.setInjectionMode(mode);
+      setState(() => _injectionMode = mode);
+      await _emitBehavior(
+        event: 'remote_injection_mode_set',
+        reason: mode,
+        payload: {'root_available': _rootAvailable == true},
+      );
+    } catch (error) {
+      _showActionError('set injection mode', error);
+    }
   }
 
   // ── Text Replacement Dictionary ──────────────────────────────────────
@@ -360,17 +448,40 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Future<void> _saveVaultSettings() async {
-    await _prefs.setBool(_kBlockPasswordChanges, _blockPasswordChanges);
-    await _prefs.setInt(_kRevealTimeoutSeconds, _revealTimeoutSeconds);
-    await _emitBehavior(
-      event: 'vault_settings_saved',
-      reason: _blockPasswordChanges ? 'blocking_enabled' : 'blocking_disabled',
-      payload: {'reveal_timeout_seconds': _revealTimeoutSeconds},
-    );
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Vault settings saved.')));
+    try {
+      await _prefs.setBool(_kBlockPasswordChanges, _blockPasswordChanges);
+      await _prefs.setInt(_kRevealTimeoutSeconds, _revealTimeoutSeconds);
+      await _emitBehavior(
+        event: 'vault_settings_saved',
+        reason: _blockPasswordChanges ? 'blocking_enabled' : 'blocking_disabled',
+        payload: {'reveal_timeout_seconds': _revealTimeoutSeconds},
+      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Vault settings saved.')));
+      }
+    } catch (error) {
+      _showActionError('save vault settings', error);
     }
+  }
+
+  void _showActionError(String action, Object error) {
+    if (!mounted) return;
+    final message = error
+        .toString()
+        .replaceAll(RegExp(r'^Exception:\s*'), '')
+        .replaceAll(RegExp(r'^PlatformException\([^,]+,\s*'), '')
+        .replaceAll(RegExp(r',\s*null\)$'), '')
+        .trim();
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          message.isEmpty
+              ? 'Failed to $action.'
+              : 'Failed to $action: $message',
+        ),
+      ),
+    );
   }
 
   Future<void> _emitBehavior({
@@ -473,7 +584,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   ),
                   if (_batteryOptimizationsIgnored)
                     OutlinedButton(
-                      onPressed: DeviceAdminChannel.openBatteryOptimizationSettings,
+                      onPressed: _openBatteryOptimizationSettings,
                       child: const Text('Open Settings'),
                     )
                   else

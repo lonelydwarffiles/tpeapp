@@ -1,22 +1,22 @@
-import 'package:flutter/services.dart';
+﻿import 'package:flutter/services.dart';
 
-/// Dart client for the `com.tpeapp/screen_share` MethodChannel.
+/// Dart client for the `com.hound.controller/screen_share` MethodChannel.
 ///
 /// Bridges the Flutter-side [ScreenShareService] (which manages the WebRTC
 /// peer connection and DataChannel) with the native Kotlin layer.
 ///
 /// Methods:
-///  - [injectTap] — forwards normalised tap coordinates received from the
+///  - [injectTap] â€” forwards normalised tap coordinates received from the
 ///    remote-control DataChannel to the standalone native accessibility
 ///    companion service or falls back to `su -c input tap X Y`.
-///  - [stopNativeScreenShare] — stops the companion native [ScreencastService]
+///  - [stopNativeScreenShare] â€” stops the companion native [ScreencastService]
 ///    if it was started separately.
 class ScreenShareChannel {
   ScreenShareChannel._();
 
-  static const _channel = MethodChannel('com.tpeapp/screen_share');
+  static const _channel = MethodChannel('com.hound.controller/screen_share');
 
-  /// Inject a tap gesture at normalised coordinates [x], [y] (both 0.0–1.0).
+  /// Inject a tap gesture at normalised coordinates [x], [y] (both 0.0â€“1.0).
   ///
     /// The native handler scales these to physical-pixel coordinates, then tries
     /// the standalone accessibility companion first. If that service is not
@@ -72,3 +72,4 @@ class ScreenShareChannel {
                 const <String, dynamic>{};
     }
 }
+

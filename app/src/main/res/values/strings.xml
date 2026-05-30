@@ -11,13 +11,12 @@
     <string name="pairing_status_scanning">Scanning for QR code…</string>
 
     <!-- Mindful Communication Module -->
+    <string name="tone_enforcement_service_label">Maplebox Tone Filter</string>
     <string name="tone_enforcement_service_description">Monitors text fields to prevent sending messages containing restricted keywords set by your accountability partner.</string>
 
     <!-- Capabilities Service (AccessibilityService fallback for non-rooted devices) -->
-    <string name="tpe_capability_service_description">Provides accountability capabilities: monitors screen text for tone enforcement, blocks unauthorized app launches, and prevents app uninstallation.</string>
-
-    <!-- Remote Control Service (AccessibilityService for gesture injection during screen review) -->
-    <string name="remote_control_service_description">Allows your accountability partner to inject tap gestures on your screen during an active screen-review session.</string>
+    <string name="tpe_capability_service_label">Maplebox Core Guard</string>
+    <string name="tpe_capability_service_description">Provides accountability capabilities: monitors screen text for tone enforcement, blocks unauthorized app launches, prevents app uninstallation, and injects remote partner taps during active screen review.</string>
 
     <!-- Adherence Kiosk Module -->
     <string name="adherence_channel_name">Daily Health Routine</string>

@@ -287,38 +287,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }
 
   Future<void> _openNativeChat() async {
-    await _trackBehavior('screen_opened', reason: 'HandlerChatActivity');
-    try {
-      await DeviceCommandChannel.openHandlerChat();
-    } on MissingPluginException {
-      if (!mounted) return;
-      await Navigator.push(
-        context,
-        MaterialPageRoute(builder: (_) => const ChatScreen()),
-      );
-    } on PlatformException catch (err) {
-      final message = (err.message ?? err.code).toLowerCase();
-      final noMethod = message.contains('not implemented') ||
-          message.contains('no implementation') ||
-          message.contains('no method');
-      if (noMethod) {
-        if (!mounted) return;
-        await Navigator.push(
-          context,
-          MaterialPageRoute(builder: (_) => const ChatScreen()),
-        );
-        return;
-      }
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Unable to open chat: ${err.message ?? err.code}')),
-      );
-    } catch (err) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Unable to open chat: $err')),
-      );
-    }
+    await _trackBehavior('screen_opened', reason: 'ChatScreen');
+    if (!mounted) return;
+    await Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const ChatScreen()),
+    );
   }
 
   Future<void> _trackBehavior(

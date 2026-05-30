@@ -3,6 +3,7 @@ package com.tpeapp.review
 import android.content.Context
 import android.util.Log
 import android.view.WindowManager
+import com.tpeapp.capability.TpeCapabilityService
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -14,9 +15,9 @@ import org.json.JSONObject
  * from the accountability partner and injects them into the device.
  *
  * Dispatch strategy (applied per event type):
- *  1. **[RemoteControlService]** — if the AccessibilityService is running, tap events are
+ *  1. **[TpeCapabilityService]** — if the AccessibilityService is running, tap events are
  *     injected via [dispatchGesture] (non-root, no special permissions beyond Accessibility).
- *  2. **Root shell** (`su -c "input ..."`) — fallback used when [RemoteControlService] is not
+ *  2. **Root shell** (`su -c "input ..."`) — fallback used when [TpeCapabilityService] is not
  *     available (service not enabled) and the device is rooted.
  *
  * Events are JSON objects with the following shape:
@@ -65,7 +66,7 @@ object RemoteInputDispatcher {
                         val normY = json.getDouble("y").toFloat()
                         // Prefer AccessibilityService dispatchGesture; fall back
                         // to root shell on rooted devices.
-                        if (!RemoteControlService.injectTap(normX, normY)) {
+                        if (!TpeCapabilityService.injectTap(normX, normY)) {
                             val px = (normX * screenW).toInt()
                             val py = (normY * screenH).toInt()
                             exec("input tap $px $py")

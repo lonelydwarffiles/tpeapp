@@ -23,7 +23,6 @@ import com.bumptech.glide.Glide
 import com.tpeapp.R
 import com.tpeapp.databinding.ActivityHandlerChatBinding
 import com.tpeapp.mqtt.PartnerMqttService
-import com.tpeapp.pairing.PairingActivity
 import com.tpeapp.service.FilterService
 import com.tpeapp.ui.MainActivity
 import kotlinx.coroutines.Dispatchers
@@ -36,8 +35,7 @@ import org.json.JSONObject
  * HandlerChatActivity — the main launcher screen.
  *
  * Shows a chat interface with "Handler", the AI companion powered by an
- * OpenAI-compatible API.  If the device is not yet paired it redirects to
- * [PairingActivity] first.
+ * OpenAI-compatible API.
  *
  * The overflow menu provides a shortcut to [MainActivity] (admin / settings)
  * behind the partner PIN.
@@ -116,15 +114,6 @@ class HandlerChatActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-
-        // Redirect to PairingActivity if not yet paired.
-        if (!PreferenceManager.getDefaultSharedPreferences(this)
-                .getBoolean(PairingActivity.PREF_IS_PAIRED, false)
-        ) {
-            startActivity(Intent(this, PairingActivity::class.java))
-            finish()
-            return
-        }
 
         binding = ActivityHandlerChatBinding.inflate(layoutInflater)
         setContentView(binding.root)

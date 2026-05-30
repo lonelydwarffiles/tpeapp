@@ -46,8 +46,11 @@ class TpeFlutterActivity : FlutterFragmentActivity() {
         super.configureFlutterEngine(flutterEngine)
         val messenger = flutterEngine.dartExecutor.binaryMessenger
 
+        PermissionsChannel.register(messenger, this)
+        HealthConnectChannel.register(messenger, this)
+        AccessibilitySetupChannel.register(messenger, this)
         FilterServiceChannel.register(messenger, applicationContext)
-        DeviceAdminChannel.register(messenger, applicationContext)
+        DeviceAdminChannel.register(messenger, this)
         PartnerPinChannel.register(messenger, applicationContext)
         BleChannel.register(messenger, applicationContext)
         MqttChannel.register(messenger, applicationContext)
@@ -56,6 +59,17 @@ class TpeFlutterActivity : FlutterFragmentActivity() {
         RemoteControlChannel.register(messenger, applicationContext)
         TextReplacementChannel.register(messenger, applicationContext)
         PasswordVaultChannel.register(messenger, applicationContext)
+    }
+
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<out String>,
+        grantResults: IntArray,
+    ) {
+        if (PermissionsChannel.onRequestPermissionsResult(this, requestCode)) {
+            return
+        }
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
     }
 
     private fun requestIgnoreBatteryOptimizationsIfNeeded() {

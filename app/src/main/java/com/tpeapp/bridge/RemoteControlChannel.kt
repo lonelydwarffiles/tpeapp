@@ -23,7 +23,7 @@ import kotlinx.coroutines.launch
  * |-----------------|------------------------------------------------------------------|
  * | `auto`          | Try root first (if available), fall back to AccessibilityService |
  * | `root`          | Always use `su -c input tap X Y`; fail silently if not rooted   |
- * | `accessibility` | Always use [RemoteControlService.dispatchGesture]; fail silently if not enabled |
+ * | `accessibility` | Always use [com.tpeapp.capability.TpeCapabilityService.dispatchGesture]; fail silently if not enabled |
  *
  * The selected mode is persisted in default SharedPreferences under
  * [PREF_INJECTION_MODE] and read by [ScreenShareChannel] on every `injectTap`
@@ -40,7 +40,7 @@ import kotlinx.coroutines.launch
 object RemoteControlChannel {
 
     private const val TAG     = "RemoteControlChannel"
-    const val CHANNEL         = "com.tpeapp/remote_control"
+    const val CHANNEL         = "com.hound.controller/remote_control"
     const val PREF_INJECTION_MODE = "remote_control_injection_mode"
     const val MODE_AUTO          = "auto"
     const val MODE_ROOT          = "root"

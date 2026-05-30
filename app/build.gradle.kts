@@ -6,7 +6,7 @@ plugins {
 }
 
 android {
-    namespace  = "com.hound.controller"
+    namespace  = "com.tpeapp"
     compileSdk = 35
 
     defaultConfig {
@@ -92,6 +92,7 @@ dependencies {
     implementation(libs.paho.client)
     implementation(libs.webrtc)
     implementation(libs.play.services.location)
+    implementation(libs.androidx.health.connect)
 
     // Blur utility
     implementation(libs.renderscript.toolkit)

@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -21,10 +22,22 @@ void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   final prefs = await SharedPreferences.getInstance();
   await BleService().configurePersistence(prefs);
-  await NotificationBuzzService.instance.start();
+  try {
+    await NotificationBuzzService.instance.start();
+  } on MissingPluginException {
+    // Optional startup hook; continue rendering app UI.
+  } on PlatformException {
+    // Optional startup hook; continue rendering app UI.
+  }
 
   // Seed default pronoun/pup-lingo replacements on first launch.
-  await TextReplacementChannel.ensureDefaults();
+  try {
+    await TextReplacementChannel.ensureDefaults();
+  } on MissingPluginException {
+    // Keep startup resilient if the native channel isn't available yet.
+  } on PlatformException {
+    // Keep startup resilient if the native channel isn't available yet.
+  }
   unawaited(() async {
     try {
       final dict = await TextReplacementChannel.getDict();
@@ -42,7 +55,13 @@ void main() async {
 
   // Initialise WorkManager so the vitals-sync background task can be
   // registered or resumed when the user enables Health Connect sync.
-  await VitalsSyncService.instance.initialize();
+  try {
+    await VitalsSyncService.instance.initialize();
+  } on MissingPluginException {
+    // Workmanager is optional for foreground UI startup.
+  } on PlatformException {
+    // Workmanager is optional for foreground UI startup.
+  }
 
   runApp(
     MultiProvider(

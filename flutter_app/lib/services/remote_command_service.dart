@@ -1,4 +1,4 @@
-import 'dart:async';
+﻿import 'dart:async';
 import 'dart:developer' as developer;
 
 import 'package:shared_preferences/shared_preferences.dart';
@@ -43,7 +43,7 @@ class RemoteCommandService {
   final CheckInRequestHandler _onCheckInRequested;
   final CommandMessageHandler? _onMessage;
   static const MethodChannel _textReplacementChannel =
-      MethodChannel('com.tpeapp/text_replacement');
+      MethodChannel('com.hound.controller/text_replacement');
   Map<String, dynamic>? _lastTelemetry;
   final IntifaceService _intiface = IntifaceService();
   Timer? _toyPatternTimer;

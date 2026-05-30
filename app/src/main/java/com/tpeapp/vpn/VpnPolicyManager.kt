@@ -21,7 +21,6 @@ object VpnPolicyManager {
 
     fun setPolicy(
         context: Context,
-        *,
         policyJson: String?,
         providerMode: String?,
     ) {
@@ -36,7 +35,6 @@ object VpnPolicyManager {
 
     fun setProviderProfile(
         context: Context,
-        *,
         providerMode: String?,
         profileId: String?,
         policyJson: String?,

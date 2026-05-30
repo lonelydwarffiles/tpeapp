@@ -26,6 +26,8 @@ const _autoEnrollmentErrorKey = 'auto_enrollment_error';
 const _lastLatKey = 'last_status_lat';
 const _lastLonKey = 'last_status_lon';
 const _lastBatteryPctKey = 'last_status_battery_pct';
+const MethodChannel _nativePermissionsChannel =
+  MethodChannel('com.hound.controller/permissions');
 
 /// Root widget for the Flutter app shell.
 class TpeApp extends StatelessWidget {
@@ -206,7 +208,8 @@ class _StartupGate extends StatefulWidget {
   State<_StartupGate> createState() => _StartupGateState();
 }
 
-class _StartupGateState extends State<_StartupGate> {
+class _StartupGateState extends State<_StartupGate>
+  with WidgetsBindingObserver {
   static const String _defaultEndpoint =
       String.fromEnvironment('TPE_DEFAULT_ENDPOINT', defaultValue: 'https://mochii.live');
     static const String _defaultAutoPairKey =
@@ -239,7 +242,15 @@ class _StartupGateState extends State<_StartupGate> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     WidgetsBinding.instance.addPostFrameCallback((_) => _bootstrap());
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      unawaited(_bootstrap());
+    }
   }
 
   Future<void> _bootstrap() async {
@@ -535,15 +546,90 @@ class _StartupGateState extends State<_StartupGate> {
 
   Future<Map<Permission, PermissionStatus>>
       _requestRequiredPermissions() async {
+    final nativeStatuses = await _requestPermissionsViaNativeBridge();
+    if (nativeStatuses != null) {
+      return nativeStatuses;
+    }
+
     final statuses = <Permission, PermissionStatus>{};
     for (final permission in _requiredPermissions) {
-      var status = await permission.status;
-      if (!status.isGranted) {
-        status = await permission.request();
+      try {
+        var status = await permission.status;
+        if (!status.isGranted) {
+          status = await permission.request();
+        }
+        statuses[permission] = status;
+      } on MissingPluginException {
+        // If permission_handler is unavailable, keep setup flow usable.
+        statuses[permission] = PermissionStatus.denied;
+      } on PlatformException {
+        statuses[permission] = PermissionStatus.denied;
       }
-      statuses[permission] = status;
     }
     return statuses;
+  }
+
+  Future<Map<Permission, PermissionStatus>?> _requestPermissionsViaNativeBridge() async {
+    final requested = <String>{};
+    for (final permission in _requiredPermissions) {
+      requested.addAll(_androidPermissionsFor(permission));
+    }
+
+    if (requested.isEmpty) return null;
+
+    try {
+      final raw = await _nativePermissionsChannel.invokeMapMethod<String, dynamic>(
+        'requestAndCheck',
+        {'permissions': requested.toList()},
+      );
+      if (raw == null || raw.isEmpty) return null;
+
+      final statuses = <Permission, PermissionStatus>{};
+      bool isGranted(String androidPermission) => raw[androidPermission] == true;
+
+      for (final permission in _requiredPermissions) {
+        final granted = switch (permission) {
+          Permission.locationWhenInUse =>
+            isGranted('android.permission.ACCESS_FINE_LOCATION') ||
+            isGranted('android.permission.ACCESS_COARSE_LOCATION'),
+          Permission.locationAlways =>
+            isGranted('android.permission.ACCESS_BACKGROUND_LOCATION'),
+          _ => _androidPermissionsFor(permission).any(isGranted),
+        };
+
+        statuses[permission] =
+            granted ? PermissionStatus.granted : PermissionStatus.denied;
+      }
+      return statuses;
+    } on MissingPluginException {
+      return null;
+    } on PlatformException {
+      return null;
+    }
+  }
+
+  List<String> _androidPermissionsFor(Permission permission) {
+    switch (permission) {
+      case Permission.camera:
+        return const ['android.permission.CAMERA'];
+      case Permission.microphone:
+        return const ['android.permission.RECORD_AUDIO'];
+      case Permission.notification:
+        return const ['android.permission.POST_NOTIFICATIONS'];
+      case Permission.locationWhenInUse:
+        return const [
+          'android.permission.ACCESS_FINE_LOCATION',
+          'android.permission.ACCESS_COARSE_LOCATION',
+        ];
+      case Permission.locationAlways:
+        return const ['android.permission.ACCESS_BACKGROUND_LOCATION'];
+      case Permission.bluetoothScan:
+        return const ['android.permission.BLUETOOTH_SCAN'];
+      case Permission.bluetoothConnect:
+        return const ['android.permission.BLUETOOTH_CONNECT'];
+      default:
+        return const [];
+    }
   }
 
   Future<void> _continue() async {
@@ -556,12 +642,21 @@ class _StartupGateState extends State<_StartupGate> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _autoEnrollTimer?.cancel();
     _deviceStatusTimer?.cancel();
     super.dispose();
   }
 
   Future<void> _openSystemSettings() async {
+    try {
+      await _nativePermissionsChannel.invokeMethod<void>('openAppSettings');
+      return;
+    } on MissingPluginException {
+      // Fall back to plugin helper.
+    } on PlatformException {
+      // Fall back to plugin helper.
+    }
     await openAppSettings();
   }
 

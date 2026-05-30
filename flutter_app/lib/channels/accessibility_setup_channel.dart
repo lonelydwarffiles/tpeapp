@@ -4,11 +4,26 @@ import 'package:flutter/services.dart';
 class AccessibilitySetupChannel {
   AccessibilitySetupChannel._();
 
-    static const _channel = MethodChannel('com.hound.controller/accessibility_setup');
+  static const _channel =
+      MethodChannel('com.hound.controller/accessibility_setup');
 
-  static Future<bool> isEnabled() async =>
-      await _channel.invokeMethod<bool>('isEnabled') ?? false;
+  static Future<bool> isEnabled() async {
+    try {
+      return await _channel.invokeMethod<bool>('isEnabled') ?? false;
+    } on PlatformException {
+      return false;
+    } on MissingPluginException {
+      return false;
+    }
+  }
 
-  static Future<void> openSettings() =>
-      _channel.invokeMethod<void>('openSettings');
+  static Future<void> openSettings() async {
+    try {
+      await _channel.invokeMethod<void>('openSettings');
+    } on PlatformException {
+      // Keep setup flow usable even if settings intent cannot be opened.
+    } on MissingPluginException {
+      // Keep setup flow usable during native channel rollout mismatches.
+    }
+  }
 }

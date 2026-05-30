@@ -26,7 +26,7 @@ import io.flutter.plugin.common.MethodChannel
 object PasswordVaultChannel {
 
     private const val TAG     = "PasswordVaultChannel"
-    private const val CHANNEL = "com.tpeapp/password_vault"
+    private const val CHANNEL = "com.hound.controller/password_vault"
 
     fun register(messenger: BinaryMessenger, context: Context) {
         val vault = PasswordVaultManager(context.applicationContext)

@@ -1,13 +1,13 @@
-import 'package:flutter/services.dart';
+﻿import 'package:flutter/services.dart';
 
-/// Dart client for the `com.tpeapp/device_admin` MethodChannel.
+/// Dart client for the `com.hound.controller/device_admin` MethodChannel.
 ///
 /// Mirrors the Device Admin and partner-PIN operations exposed by
 /// [DeviceAdminChannel] on the native side.
 class DeviceAdminChannel {
   DeviceAdminChannel._();
 
-  static const _channel = MethodChannel('com.tpeapp/device_admin');
+  static const _channel = MethodChannel('com.hound.controller/device_admin');
 
   /// Returns true if the app currently holds Device Admin rights.
   static Future<bool> isAdminActive() async =>
@@ -16,6 +16,10 @@ class DeviceAdminChannel {
   /// Launches the system Device Admin activation intent.
   static Future<void> requestActivation() =>
       _channel.invokeMethod('requestActivation');
+
+  /// Opens Android's Device Admin settings list.
+  static Future<void> openAdminSettings() =>
+      _channel.invokeMethod('openAdminSettings');
 
   /// Deactivates Device Admin after verifying [pin].
   /// Returns true if the PIN matched and admin was deactivated.
@@ -57,3 +61,4 @@ class DeviceAdminChannel {
   static Future<void> openBatteryOptimizationSettings() =>
       _channel.invokeMethod('openBatteryOptimizationSettings');
 }
+

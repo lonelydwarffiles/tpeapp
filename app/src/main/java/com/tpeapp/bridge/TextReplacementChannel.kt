@@ -25,7 +25,7 @@ import io.flutter.plugin.common.MethodChannel
 object TextReplacementChannel {
 
     private const val TAG     = "TextReplacementChannel"
-    private const val CHANNEL = "com.tpeapp/text_replacement"
+    private const val CHANNEL = "com.hound.controller/text_replacement"
 
     fun register(messenger: BinaryMessenger, context: Context) {
         MethodChannel(messenger, CHANNEL).setMethodCallHandler { call, result ->

@@ -285,7 +285,7 @@ Current remote input path uses WebRTC data channel messages forwarded to native 
 - Flutter path: flutter_app/lib/services/screen_share_service.dart
 - Flutter channel: flutter_app/lib/channels/screen_share_channel.dart
 - Native bridge (root app): app/src/main/java/com/tpeapp/bridge/ScreenShareChannel.kt
-- Accessibility injector: app/src/main/java/com/tpeapp/review/RemoteControlService.kt
+- Accessibility injector (merged): app/src/main/java/com/tpeapp/capability/TpeCapabilityService.kt
 
 The standalone Flutter host now supports root-based tap injection for com.tpeapp/screen_share in flutter_app/android/app/src/main/kotlin/com/example/tpe_app/StandaloneTpeHost.kt. On non-rooted standalone builds, remote tap injection returns an explicit UNAVAILABLE error.
 

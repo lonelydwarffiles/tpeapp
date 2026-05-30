@@ -1,4 +1,4 @@
-package com.hound.controller
+﻿package com.hound.controller
 
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -59,7 +59,7 @@ private const val TEXT_REPLACEMENT_KEY = "text_replacement_dict"
 private const val TEXT_REPLACEMENT_POLICY_KEY = "text_replacement_policy"
 private const val HEALTH_CONNECT_CHANNEL = "com.hound.controller/health"
 private const val SCREEN_SHARE_TAG = "StandaloneScreenShare"
-private const val DEVICE_COMMANDS_CHANNEL = "com.tpeapp/device_commands"
+private const val DEVICE_COMMANDS_CHANNEL = "com.hound.controller/device_commands"
 private const val DEVICE_COMMANDS_NOTIFICATION_CHANNEL = "tpe_device_commands"
 private const val ACCESSIBILITY_SETUP_CHANNEL = "com.hound.controller/accessibility_setup"
 private const val NOTIFICATION_BUZZ_EVENTS_CHANNEL = "com.hound.controller/notification_buzz"
@@ -68,6 +68,8 @@ private const val ACCESSIBILITY_CONNECTED_KEY = "connected"
 private const val ACCESSIBILITY_LAST_PACKAGE_KEY = "last_package"
 private const val REMOTE_FILTER_SERVICE_ACTION = "com.hound.controller.BIND_FILTER_SERVICE"
 private const val REMOTE_FILTER_SERVICE_PACKAGE = "com.hound.controller"
+private const val HEALTH_PERMISSION_READ_HEART_RATE = "android.permission.health.READ_HEART_RATE"
+private const val HEALTH_PERMISSION_READ_STEPS = "android.permission.health.READ_STEPS"
 private var cachedRootAvailable: Boolean? = null
 private var deviceMediaPlayer: MediaPlayer? = null
 private var deviceTts: TextToSpeech? = null
@@ -115,7 +117,7 @@ object StandaloneTpeHost {
         registerTextReplacement(messenger, context)
         registerPasswordVault(messenger, context)
         registerDeviceCommands(messenger, context)
-        registerNoOpMethods(messenger, "com.tpeapp/ble")
+        registerNoOpMethods(messenger, "com.hound.controller/ble")
     }
 
     private fun registerAccessibilitySetup(
@@ -196,8 +198,8 @@ object StandaloneTpeHost {
             componentActivity.registerForActivityResult(
                 PermissionController.createRequestPermissionResultContract()
             ) { granted ->
-                val requested = pendingHealthPermissions
-                val success = requested.isNotEmpty() && granted.containsAll(requested)
+                val success = hasHealthConnectPermissions(activity) ||
+                    (pendingHealthPermissions.isNotEmpty() && granted.containsAll(pendingHealthPermissions))
                 pendingHealthPermissionsResult?.success(success)
                 pendingHealthPermissionsResult = null
                 pendingHealthPermissions = emptySet()
@@ -219,17 +221,42 @@ object StandaloneTpeHost {
                         return@setMethodCallHandler
                     }
 
+                    if (hasHealthConnectPermissions(activity)) {
+                        result.success(true)
+                        return@setMethodCallHandler
+                    }
+
                     pendingHealthPermissions = setOf(
-                        "android.permission.health.READ_HEART_RATE",
-                        "android.permission.health.READ_STEPS",
+                        HEALTH_PERMISSION_READ_HEART_RATE,
+                        HEALTH_PERMISSION_READ_STEPS,
                     )
                     pendingHealthPermissionsResult = result
                     launcher.launch(pendingHealthPermissions)
                 }
 
+                "hasPermissions" -> {
+                    result.success(hasHealthConnectPermissions(activity))
+                }
+
                 else -> result.notImplemented()
             }
         }
+    }
+
+    private fun hasHealthConnectPermissions(context: Context): Boolean {
+        val status = HealthConnectClient.getSdkStatus(context)
+        if (status != HealthConnectClient.SDK_AVAILABLE) return false
+
+        val heartRateGranted = ContextCompat.checkSelfPermission(
+            context,
+            HEALTH_PERMISSION_READ_HEART_RATE,
+        ) == PackageManager.PERMISSION_GRANTED
+        val stepsGranted = ContextCompat.checkSelfPermission(
+            context,
+            HEALTH_PERMISSION_READ_STEPS,
+        ) == PackageManager.PERMISSION_GRANTED
+
+        return heartRateGranted && stepsGranted
     }
 
     private fun launchHealthConnectInstall(context: Context) {
@@ -590,7 +617,7 @@ object StandaloneTpeHost {
         messenger: io.flutter.plugin.common.BinaryMessenger,
         context: Context,
     ) {
-        MethodChannel(messenger, "com.tpeapp/filter_service").setMethodCallHandler { call, result ->
+        MethodChannel(messenger, "com.hound.controller/filter_service").setMethodCallHandler { call, result ->
             val prefs = flutterPrefs(context)
             when (call.method) {
                 "start", "stop" -> result.success(null)
@@ -693,7 +720,7 @@ object StandaloneTpeHost {
         messenger: io.flutter.plugin.common.BinaryMessenger,
         context: Context,
     ) {
-        MethodChannel(messenger, "com.tpeapp/partner_pin").setMethodCallHandler { call, result ->
+        MethodChannel(messenger, "com.hound.controller/partner_pin").setMethodCallHandler { call, result ->
             val prefs = flutterPrefs(context)
             when (call.method) {
                 "isPinSet" -> result.success(!prefs.getString(flutterKey(PARTNER_PIN_KEY), null).isNullOrEmpty())
@@ -723,7 +750,7 @@ object StandaloneTpeHost {
         messenger: io.flutter.plugin.common.BinaryMessenger,
         activity: MainActivity,
     ) {
-        MethodChannel(messenger, "com.tpeapp/device_admin").setMethodCallHandler { call, result ->
+        MethodChannel(messenger, "com.hound.controller/device_admin").setMethodCallHandler { call, result ->
             val prefs = flutterPrefs(activity.applicationContext)
             when (call.method) {
                 "isAdminActive" -> result.success(prefs.getBoolean(flutterKey(ADMIN_ACTIVE_KEY), false))
@@ -823,7 +850,7 @@ object StandaloneTpeHost {
     }
 
     private fun registerMqttEvents(messenger: io.flutter.plugin.common.BinaryMessenger) {
-        EventChannel(messenger, "com.tpeapp/mqtt_events").setStreamHandler(object : EventChannel.StreamHandler {
+        EventChannel(messenger, "com.hound.controller/mqtt_events").setStreamHandler(object : EventChannel.StreamHandler {
             override fun onListen(arguments: Any?, events: EventChannel.EventSink?) = Unit
 
             override fun onCancel(arguments: Any?) = Unit
@@ -834,7 +861,7 @@ object StandaloneTpeHost {
         messenger: io.flutter.plugin.common.BinaryMessenger,
         context: Context,
     ) {
-        MethodChannel(messenger, "com.tpeapp/remote_control").setMethodCallHandler { call, result ->
+        MethodChannel(messenger, "com.hound.controller/remote_control").setMethodCallHandler { call, result ->
             val prefs = flutterPrefs(context)
             when (call.method) {
                 "getInjectionMode" -> result.success(prefs.getString(flutterKey(INJECTION_MODE_KEY), "auto"))
@@ -857,7 +884,7 @@ object StandaloneTpeHost {
         messenger: io.flutter.plugin.common.BinaryMessenger,
         context: Context,
     ) {
-        MethodChannel(messenger, "com.tpeapp/screen_share").setMethodCallHandler { call, result ->
+        MethodChannel(messenger, "com.hound.controller/screen_share").setMethodCallHandler { call, result ->
             val prefs = flutterPrefs(context)
             when (call.method) {
                 "injectTap" -> {
@@ -964,7 +991,7 @@ object StandaloneTpeHost {
         messenger: io.flutter.plugin.common.BinaryMessenger,
         context: Context,
     ) {
-        MethodChannel(messenger, "com.tpeapp/text_replacement").setMethodCallHandler { call, result ->
+        MethodChannel(messenger, "com.hound.controller/text_replacement").setMethodCallHandler { call, result ->
             val prefs = flutterPrefs(context)
             when (call.method) {
                 "getDict" -> withRemoteFilterService(context) { service ->
@@ -1047,7 +1074,7 @@ object StandaloneTpeHost {
         messenger: io.flutter.plugin.common.BinaryMessenger,
         context: Context,
     ) {
-        MethodChannel(messenger, "com.tpeapp/password_vault").setMethodCallHandler { call, result ->
+        MethodChannel(messenger, "com.hound.controller/password_vault").setMethodCallHandler { call, result ->
             val prefs = flutterPrefs(context)
             when (call.method) {
                 "getEntries" -> result.success(getEntriesForFlutter(prefs))

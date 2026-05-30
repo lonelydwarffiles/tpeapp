@@ -45,7 +45,7 @@ tpeapp/
 - Xposed `InputConnectionHook` enforces redaction behavior and emits violation broadcasts to the app.
 
 ### 5) Review / screen-share / remote input
-- Native review stack: `ReviewActivity`, `ScreencastService`, `StreamCoordinator`, `RemoteControlService`.
+- Native review stack: `ReviewActivity`, `ScreencastService`, `StreamCoordinator`, `TpeCapabilityService` (gesture injector).
 - Flutter review stack: `ScreenShareScreen` + `ScreenShareService`.
 - WebRTC signaling uses plain WebSocket envelopes (`join`, `offer`, `answer`, `ice-candidate`) at `/api/tpe/signal/{sessionId}`.
 

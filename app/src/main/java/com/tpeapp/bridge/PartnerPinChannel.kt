@@ -22,7 +22,7 @@ import io.flutter.plugin.common.MethodChannel
  */
 object PartnerPinChannel {
 
-    private const val CHANNEL = "com.tpeapp/partner_pin"
+    private const val CHANNEL = "com.hound.controller/partner_pin"
 
     fun register(messenger: BinaryMessenger, context: Context) {
         val pinMgr = PartnerPinManager(context.applicationContext)

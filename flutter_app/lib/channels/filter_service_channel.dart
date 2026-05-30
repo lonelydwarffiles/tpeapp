@@ -1,14 +1,14 @@
-import 'package:flutter/services.dart';
+﻿import 'package:flutter/services.dart';
 import 'dart:convert';
 
-/// Dart client for the `com.tpeapp/filter_service` MethodChannel.
+/// Dart client for the `com.hound.controller/filter_service` MethodChannel.
 ///
 /// All calls delegate to [FilterServiceChannel] on the native side, which
 /// proxies into [FilterService] or its SharedPreferences keys.
 class FilterServiceChannel {
   FilterServiceChannel._();
 
-  static const _channel = MethodChannel('com.tpeapp/filter_service');
+  static const _channel = MethodChannel('com.hound.controller/filter_service');
 
   /// Starts [FilterService] as a foreground service (idempotent).
   static Future<void> start() => _channel.invokeMethod('start');
@@ -58,3 +58,4 @@ class FilterServiceChannel {
   static Future<void> setWebhookToken(String token) =>
       _channel.invokeMethod('setWebhookToken', {'token': token});
 }
+

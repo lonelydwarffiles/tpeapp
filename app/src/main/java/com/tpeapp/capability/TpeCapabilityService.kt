@@ -1,10 +1,13 @@
 package com.tpeapp.capability
 
 import android.accessibilityservice.AccessibilityService
+import android.accessibilityservice.GestureDescription
+import android.graphics.Path
 import android.content.SharedPreferences
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
+import android.view.WindowManager
 import android.view.accessibility.AccessibilityEvent
 import androidx.preference.PreferenceManager
 import com.tpeapp.consequence.ConsequenceDispatcher
@@ -45,6 +48,12 @@ class TpeCapabilityService : AccessibilityService() {
 
     companion object {
         private const val TAG = "TpeCapabilityService"
+        private const val TAP_DURATION_MS = 50L
+
+        /** Live instance used for remote-control gesture injection. */
+        @Volatile
+        var instance: TpeCapabilityService? = null
+            private set
 
         /** Our own package — never blocked so the user can always open the TPE app. */
         private const val OWN_PACKAGE = "com.hound.controller"
@@ -92,6 +101,27 @@ class TpeCapabilityService : AccessibilityService() {
             "update password",
             "enter new password",
         )
+
+        /**
+         * Inject a single tap gesture at normalised coordinates.
+         *
+         * @return true if dispatched via accessibility, false if service not running.
+         */
+        fun injectTap(normX: Float, normY: Float): Boolean {
+            val svc = instance ?: return false
+            val wm = svc.getSystemService(WINDOW_SERVICE) as WindowManager
+            val bounds = wm.currentWindowMetrics.bounds
+            val px = normX * bounds.width()
+            val py = normY * bounds.height()
+
+            val path = Path().apply { moveTo(px, py) }
+            val stroke = GestureDescription.StrokeDescription(path, 0L, TAP_DURATION_MS)
+            val gesture = GestureDescription.Builder().addStroke(stroke).build()
+
+            svc.dispatchGesture(gesture, null, null)
+            Log.d(TAG, "Capability: injected tap at ($px, $py)")
+            return true
+        }
     }
 
     // ------------------------------------------------------------------
@@ -155,11 +185,13 @@ class TpeCapabilityService : AccessibilityService() {
         cachedWebhookUrl  = prefs.getString(FilterService.PREF_WEBHOOK_URL, null)?.takeIf { it.isNotBlank() }
         cachedBearerToken = prefs.getString(FilterService.PREF_WEBHOOK_BEARER_TOKEN, null)?.takeIf { it.isNotBlank() }
         prefs.registerOnSharedPreferenceChangeListener(prefsListener)
+        instance = this
         Log.i(TAG, "TpeCapabilityService connected")
     }
 
     override fun onDestroy() {
         super.onDestroy()
+        instance = null
         PreferenceManager.getDefaultSharedPreferences(applicationContext)
             .unregisterOnSharedPreferenceChangeListener(prefsListener)
         handler.removeCallbacksAndMessages(null)
