@@ -137,6 +137,13 @@ class RemoteCommand {
       case 'SET_FONT_SIZE':
       case 'SUSPEND_APP':
       case 'UNSUSPEND_APP':
+      case 'SET_VPN_POLICY':
+      case 'SET_VPN_PROVIDER_PROFILE':
+      case 'VPN_CONNECT':
+      case 'VPN_DISCONNECT':
+      case 'VPN_STATUS_POLL':
+      case 'APP_LIST_POLL':
+      case 'APP_LIST_PUSH':
       case 'SET_RITUALS':
       case 'SET_RITUAL_TIMES':
       case 'SET_HONORIFIC':

@@ -421,6 +421,86 @@ class RemoteCommandService {
           'legacy_action': legacyAction,
         };
         break;
+      case 'APP_LIST_POLL':
+      case 'APP_LIST_PUSH':
+        final includeSystem = _boolValue(command.params, const ['include_system', 'includeSystem'], defaultValue: true);
+        final fullSnapshot = _boolValue(command.params, const ['full_snapshot', 'fullSnapshot'], defaultValue: true);
+        final pollId = _stringValue(command.params, const ['poll_id', 'pollId']);
+        await DeviceCommandChannel.uploadAppInventory(
+          pollId: pollId,
+          includeSystem: includeSystem,
+          fullSnapshot: fullSnapshot,
+          source: legacyAction == 'APP_LIST_PUSH' ? 'ws_push' : 'ws_poll',
+        );
+        _onMessage?.call('App inventory upload queued.');
+        _lastTelemetry = {
+          'fallback_transport': 'ws_or_mqtt',
+          'legacy_action': legacyAction,
+          'include_system': includeSystem,
+          'full_snapshot': fullSnapshot,
+          if (pollId != null) 'poll_id': pollId,
+        };
+        break;
+      case 'SET_VPN_POLICY':
+        final vpnPolicyJson = _stringValue(command.params, const ['vpn_policy_json', 'vpnPolicyJson']);
+        final providerMode = _stringValue(command.params, const ['provider_mode', 'providerMode']);
+        await DeviceCommandChannel.setVpnPolicy(
+          vpnPolicyJson: vpnPolicyJson,
+          providerMode: providerMode,
+        );
+        _onMessage?.call('VPN policy stored.');
+        _lastTelemetry = {
+          'fallback_transport': 'ws_or_mqtt',
+          'legacy_action': legacyAction,
+          if (providerMode != null) 'provider_mode': providerMode,
+          'policy_configured': (vpnPolicyJson ?? '').trim().isNotEmpty,
+        };
+        break;
+      case 'SET_VPN_PROVIDER_PROFILE':
+        final providerMode = _stringValue(command.params, const ['provider_mode', 'providerMode']);
+        final vpnProfileId = _stringValue(command.params, const ['vpn_profile_id', 'vpnProfileId']);
+        final vpnPolicyJson = _stringValue(command.params, const ['vpn_policy_json', 'vpnPolicyJson']);
+        await DeviceCommandChannel.setVpnProviderProfile(
+          providerMode: providerMode,
+          vpnProfileId: vpnProfileId,
+          vpnPolicyJson: vpnPolicyJson,
+        );
+        _onMessage?.call('VPN provider profile stored.');
+        _lastTelemetry = {
+          'fallback_transport': 'ws_or_mqtt',
+          'legacy_action': legacyAction,
+          if (providerMode != null) 'provider_mode': providerMode,
+          if (vpnProfileId != null) 'vpn_profile_id': vpnProfileId,
+          'policy_configured': (vpnPolicyJson ?? '').trim().isNotEmpty,
+        };
+        break;
+      case 'VPN_CONNECT':
+        await DeviceCommandChannel.vpnConnect();
+        _onMessage?.call('VPN connect intent stored.');
+        _lastTelemetry = {
+          'fallback_transport': 'ws_or_mqtt',
+          'legacy_action': legacyAction,
+          'desired_state': 'connected',
+        };
+        break;
+      case 'VPN_DISCONNECT':
+        await DeviceCommandChannel.vpnDisconnect();
+        _onMessage?.call('VPN disconnect intent stored.');
+        _lastTelemetry = {
+          'fallback_transport': 'ws_or_mqtt',
+          'legacy_action': legacyAction,
+          'desired_state': 'disconnected',
+        };
+        break;
+      case 'VPN_STATUS_POLL':
+        final status = await DeviceCommandChannel.getVpnStatus();
+        _onMessage?.call('VPN status snapshot captured.');
+        _lastTelemetry = {
+          'fallback_transport': 'ws_or_mqtt',
+          'legacy_action': legacyAction,
+          if (status != null) 'vpn_status': status,
+        };
+        break;
       default:
         throw StateError('Unsupported legacy native action in fallback host: $legacyAction');
     }

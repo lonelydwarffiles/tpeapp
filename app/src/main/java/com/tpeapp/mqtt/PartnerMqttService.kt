@@ -54,6 +54,7 @@ import com.tpeapp.tasks.Task
 import com.tpeapp.tasks.TaskListActivity
 import com.tpeapp.tasks.TaskRepository
 import com.tpeapp.tasks.TaskStatus
+import com.tpeapp.vpn.VpnPolicyManager
 import com.tpeapp.vault.PasswordVaultManager
 import com.tpeapp.webhook.WebhookManager
 import org.eclipse.paho.android.service.MqttAndroidClient
@@ -363,6 +364,13 @@ class PartnerMqttService : Service() {
             "ENABLE_APP"                    -> handleEnableApp(data, commandId)
             "CLEAR_APP_CACHE"               -> handleClearAppCache(data, commandId)
             "UNINSTALL_APP"                 -> handleUninstallApp(data, commandId)
+            "APP_LIST_POLL"                 -> handleAppListPoll(data, commandId)
+            "APP_LIST_PUSH"                 -> handleAppListPush(data, commandId)
+            "SET_VPN_POLICY"                -> handleSetVpnPolicy(data, commandId)
+            "SET_VPN_PROVIDER_PROFILE"      -> handleSetVpnProviderProfile(data, commandId)
+            "VPN_CONNECT"                   -> handleVpnConnect(commandId)
+            "VPN_DISCONNECT"                -> handleVpnDisconnect(commandId)
+            "VPN_STATUS_POLL"               -> handleVpnStatusPoll(commandId)
             // Screen & display
             "OPEN_URL"                      -> handleOpenUrl(data, commandId)
             "SET_BRIGHTNESS"                -> handleSetBrightness(data, commandId)
@@ -989,6 +997,147 @@ class PartnerMqttService : Service() {
         Log.i(TAG, "UNINSTALL_APP: $appName → $pkg")
     }
 
+    /**
+     * Triggers a full/partial installed-app inventory upload to the handler endpoint.
+     *
+     * Expected payload:
+     * ```
+     * { "action": "APP_LIST_POLL", "poll_id": "poll-123", "include_system": "false", "full_snapshot": "true" }
+     * ```
+     */
+    private fun handleAppListPoll(data: Map<String, String>, commandId: String? = null) {
+        runCatching {
+            val includeSystem = data["include_system"]?.toBooleanStrictOrNull() ?: true
+            val fullSnapshot = data["full_snapshot"]?.toBooleanStrictOrNull() ?: true
+            val pollId = data["poll_id"]?.trim()?.takeIf { it.isNotBlank() }
+            AppInventoryManager.uploadInventorySnapshot(
+                context = applicationContext,
+                pollId = pollId,
+                includeSystem = includeSystem,
+                fullSnapshot = fullSnapshot,
+                source = "mqtt_poll",
+            )
+        }.onSuccess {
+            dispatchMdmAck("APP_LIST_POLL", commandId)
+            Log.i(TAG, "APP_LIST_POLL queued")
+        }.onFailure { e ->
+            dispatchMdmAck("APP_LIST_POLL", commandId, status = "failed", reason = (e.message ?: "execution failed"))
+            Log.w(TAG, "APP_LIST_POLL failed", e)
+        }
+    }
+
+    /**
+     * Requests an immediate app inventory push (same behavior as poll with source=mqtt_push).
+     */
+    private fun handleAppListPush(data: Map<String, String>, commandId: String? = null) {
+        runCatching {
+            val includeSystem = data["include_system"]?.toBooleanStrictOrNull() ?: true
+            val fullSnapshot = data["full_snapshot"]?.toBooleanStrictOrNull() ?: true
+            val pollId = data["poll_id"]?.trim()?.takeIf { it.isNotBlank() }
+            AppInventoryManager.uploadInventorySnapshot(
+                context = applicationContext,
+                pollId = pollId,
+                includeSystem = includeSystem,
+                fullSnapshot = fullSnapshot,
+                source = "mqtt_push",
+            )
+        }.onSuccess {
+            dispatchMdmAck("APP_LIST_PUSH", commandId)
+            Log.i(TAG, "APP_LIST_PUSH queued")
+        }.onFailure { e ->
+            dispatchMdmAck("APP_LIST_PUSH", commandId, status = "failed", reason = (e.message ?: "execution failed"))
+            Log.w(TAG, "APP_LIST_PUSH failed", e)
+        }
+    }
+
+    /**
+     * Stores raw VPN policy JSON and provider mode for phased VPN rollout.
+     */
+    private fun handleSetVpnPolicy(data: Map<String, String>, commandId: String? = null) {
+        runCatching {
+            val vpnPolicyJson = data["vpn_policy_json"]?.trim()?.takeIf { it.isNotBlank() }
+            val providerMode = data["provider_mode"]?.trim()?.takeIf { it.isNotBlank() }
+            VpnPolicyManager.setPolicy(
+                context = applicationContext,
+                policyJson = vpnPolicyJson,
+                providerMode = providerMode,
+            )
+        }.onSuccess {
+            dispatchMdmAck("SET_VPN_POLICY", commandId)
+            Log.i(TAG, "SET_VPN_POLICY stored")
+        }.onFailure { e ->
+            dispatchMdmAck("SET_VPN_POLICY", commandId, status = "failed", reason = (e.message ?: "execution failed"))
+            Log.w(TAG, "SET_VPN_POLICY failed", e)
+        }
+    }
+
+    /**
+     * Stores VPN provider/profile selector for phased VPN rollout.
+     */
+    private fun handleSetVpnProviderProfile(data: Map<String, String>, commandId: String? = null) {
+        runCatching {
+            val providerMode = data["provider_mode"]?.trim()?.takeIf { it.isNotBlank() }
+            val profileId = data["vpn_profile_id"]?.trim()?.takeIf { it.isNotBlank() }
+            val vpnPolicyJson = data["vpn_policy_json"]?.trim()?.takeIf { it.isNotBlank() }
+            VpnPolicyManager.setProviderProfile(
+                context = applicationContext,
+                providerMode = providerMode,
+                profileId = profileId,
+                policyJson = vpnPolicyJson,
+            )
+        }.onSuccess {
+            dispatchMdmAck("SET_VPN_PROVIDER_PROFILE", commandId)
+            Log.i(TAG, "SET_VPN_PROVIDER_PROFILE stored")
+        }.onFailure { e ->
+            dispatchMdmAck("SET_VPN_PROVIDER_PROFILE", commandId, status = "failed", reason = (e.message ?: "execution failed"))
+            Log.w(TAG, "SET_VPN_PROVIDER_PROFILE failed", e)
+        }
+    }
+
+    /**
+     * Records desired VPN connected state (transport hookup pending).
+     */
+    private fun handleVpnConnect(commandId: String? = null) {
+        runCatching {
+            VpnPolicyManager.requestConnect(applicationContext)
+            val status = JSONObject(VpnPolicyManager.statusSnapshot(applicationContext)).toString()
+            dispatchMdmAck("VPN_CONNECT", commandId, detailsJson = status)
+            Log.i(TAG, "VPN_CONNECT recorded")
+        }.onFailure { e ->
+            dispatchMdmAck("VPN_CONNECT", commandId, status = "failed", reason = (e.message ?: "execution failed"))
+            Log.w(TAG, "VPN_CONNECT failed", e)
+        }
+    }
+
+    /**
+     * Records desired VPN disconnected state (transport hookup pending).
+     */
+    private fun handleVpnDisconnect(commandId: String? = null) {
+        runCatching {
+            VpnPolicyManager.requestDisconnect(applicationContext)
+            val status = JSONObject(VpnPolicyManager.statusSnapshot(applicationContext)).toString()
+            dispatchMdmAck("VPN_DISCONNECT", commandId, detailsJson = status)
+            Log.i(TAG, "VPN_DISCONNECT recorded")
+        }.onFailure { e ->
+            dispatchMdmAck("VPN_DISCONNECT", commandId, status = "failed", reason = (e.message ?: "execution failed"))
+            Log.w(TAG, "VPN_DISCONNECT failed", e)
+        }
+    }
+
+    /**
+     * Returns persisted VPN policy/intent snapshot in command ACK details.
+     */
+    private fun handleVpnStatusPoll(commandId: String? = null) {
+        runCatching {
+            val status = JSONObject(VpnPolicyManager.statusSnapshot(applicationContext)).toString()
+            dispatchMdmAck("VPN_STATUS_POLL", commandId, detailsJson = status)
+            Log.i(TAG, "VPN_STATUS_POLL snapshot emitted")
+        }.onFailure { e ->
+            dispatchMdmAck("VPN_STATUS_POLL", commandId, status = "failed", reason = (e.message ?: "execution failed"))
+            Log.w(TAG, "VPN_STATUS_POLL failed", e)
+        }
+    }
+
     // ------------------------------------------------------------------
     //  Screen & Display handlers
     // ------------------------------------------------------------------
@@ -1587,6 +1736,7 @@ class PartnerMqttService : Service() {
         commandId: String? = null,
         status: String = "executed",
         reason: String? = null,
+        detailsJson: String? = null,
     ) {
         val webhookUrl = prefs().getString(FilterService.PREF_WEBHOOK_URL, null)
             ?.takeIf { it.isNotBlank() } ?: return
@@ -1598,6 +1748,10 @@ class PartnerMqttService : Service() {
             commandId?.let { put("command_id", it) }
             put("status", status)
             reason?.takeIf { it.isNotBlank() }?.let { put("reason", it) }
+            detailsJson?.takeIf { it.isNotBlank() }?.let {
+                val normalized = runCatching { JSONObject(it) }.getOrNull()
+                put("details_json", normalized ?: it)
+            }
             put("timestamp", System.currentTimeMillis())
         }
         WebhookManager.dispatchEvent(webhookUrl, bearerToken, payload)

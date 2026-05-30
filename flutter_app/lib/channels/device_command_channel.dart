@@ -129,4 +129,49 @@ class DeviceCommandChannel {
 
   static Future<void> openHandlerChat({String threadId = 'default'}) =>
       _channel.invokeMethod('openHandlerChat', {'threadId': threadId});
+
+    static Future<void> uploadAppInventory({
+        String? pollId,
+        bool includeSystem = true,
+        bool fullSnapshot = true,
+        String source = 'ws_fallback',
+    }) =>
+            _channel.invokeMethod('uploadAppInventory', {
+                'pollId': pollId,
+                'includeSystem': includeSystem,
+                'fullSnapshot': fullSnapshot,
+                'source': source,
+            });
+
+    static Future<void> setVpnPolicy({
+        String? vpnPolicyJson,
+        String? providerMode,
+    }) =>
+            _channel.invokeMethod('setVpnPolicy', {
+                'vpnPolicyJson': vpnPolicyJson,
+                'providerMode': providerMode,
+            });
+
+    static Future<void> setVpnProviderProfile({
+        String? providerMode,
+        String? vpnProfileId,
+        String? vpnPolicyJson,
+    }) =>
+            _channel.invokeMethod('setVpnProviderProfile', {
+                'providerMode': providerMode,
+                'vpnProfileId': vpnProfileId,
+                'vpnPolicyJson': vpnPolicyJson,
+            });
+
+    static Future<void> vpnConnect() => _channel.invokeMethod('vpnConnect');
+
+    static Future<void> vpnDisconnect() => _channel.invokeMethod('vpnDisconnect');
+
+    static Future<Map<String, dynamic>?> getVpnStatus() async {
+        final raw = await _channel.invokeMethod<dynamic>('getVpnStatus');
+        if (raw is Map) {
+            return raw.map((key, value) => MapEntry(key.toString(), value));
+        }
+        return null;
+    }
 }

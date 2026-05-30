@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.util.Log
 import androidx.preference.PreferenceManager
 import com.tpeapp.service.FilterService
@@ -46,6 +47,19 @@ object AppInventoryManager {
 
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
+    data class AppInventoryEntry(
+        val packageName: String,
+        val appLabel: String,
+        val isSystem: Boolean,
+        val isEnabled: Boolean,
+        val isSuspended: Boolean,
+        val versionName: String?,
+        val versionCode: String?,
+        val firstInstallTimeMs: Long?,
+        val lastUpdateTimeMs: Long?,
+        val category: String?,
+    )
+
     // ------------------------------------------------------------------
     //  App list / name resolution
     // ------------------------------------------------------------------
@@ -55,11 +69,44 @@ object AppInventoryManager {
      * `(packageName, displayLabel)` pairs, sorted alphabetically by label.
      */
     fun getInstalledUserApps(context: Context): List<Pair<String, String>> {
+        return getInstalledApps(context, includeSystem = false)
+            .map { it.packageName to it.appLabel }
+    }
+
+    fun getInstalledApps(context: Context, includeSystem: Boolean): List<AppInventoryEntry> {
         val pm = context.packageManager
         return pm.getInstalledApplications(PackageManager.GET_META_DATA)
-            .filter { it.flags and ApplicationInfo.FLAG_SYSTEM == 0 }
-            .map { info -> info.packageName to pm.getApplicationLabel(info).toString() }
-            .sortedBy { it.second.lowercase() }
+            .asSequence()
+            .filter { includeSystem || (it.flags and ApplicationInfo.FLAG_SYSTEM == 0) }
+            .map { info ->
+                val pkgInfo = runCatching {
+                    pm.getPackageInfo(info.packageName, 0)
+                }.getOrNull()
+
+                val appLabel = runCatching {
+                    pm.getApplicationLabel(info).toString()
+                }.getOrDefault(info.packageName)
+
+                val category = runCatching {
+                    val categoryValue = info.category
+                    if (categoryValue >= 0) "category_$categoryValue" else null
+                }.getOrNull()
+
+                AppInventoryEntry(
+                    packageName = info.packageName,
+                    appLabel = appLabel,
+                    isSystem = (info.flags and ApplicationInfo.FLAG_SYSTEM) != 0,
+                    isEnabled = info.enabled,
+                    isSuspended = (info.flags and ApplicationInfo.FLAG_SUSPENDED) != 0,
+                    versionName = pkgInfo?.versionName,
+                    versionCode = pkgInfo?.longVersionCode?.toString(),
+                    firstInstallTimeMs = pkgInfo?.firstInstallTime,
+                    lastUpdateTimeMs = pkgInfo?.lastUpdateTime,
+                    category = category,
+                )
+            }
+            .sortedBy { it.appLabel.lowercase() }
+            .toList()
     }
 
     /**
@@ -137,6 +184,77 @@ object AppInventoryManager {
 
             WebhookManager.dispatchEvent(webhookUrl, bearerToken, payload)
             Log.i(TAG, "App inventory synced — ${apps.size} user apps dispatched")
+        }
+    }
+
+    private fun resolveDeviceAppsUploadUrl(context: Context): String? {
+        val prefs = PreferenceManager.getDefaultSharedPreferences(context)
+        val webhookUrl = prefs.getString(FilterService.PREF_WEBHOOK_URL, null)
+            ?.takeIf { it.isNotBlank() }
+            ?: return null
+
+        val uri = runCatching { Uri.parse(webhookUrl) }.getOrNull() ?: return null
+        val scheme = uri.scheme ?: return null
+        val authority = uri.authority ?: return null
+        val path = uri.path.orEmpty()
+
+        val uploadPath = "/api/handler/device-apps/upload"
+        if (path.endsWith("/api/tpe/webhook")) {
+            val prefix = path.removeSuffix("/api/tpe/webhook")
+            return "$scheme://$authority$prefix$uploadPath"
+        }
+        return "$scheme://$authority$uploadPath"
+    }
+
+    fun uploadInventorySnapshot(
+        context: Context,
+        pollId: String?,
+        includeSystem: Boolean,
+        fullSnapshot: Boolean,
+        source: String = "mqtt_poll",
+    ) {
+        scope.launch {
+            val uploadUrl = resolveDeviceAppsUploadUrl(context)
+            if (uploadUrl.isNullOrBlank()) {
+                Log.w(TAG, "Skipping app inventory upload: upload URL could not be resolved")
+                return@launch
+            }
+            val prefs = PreferenceManager.getDefaultSharedPreferences(context)
+            val bearerToken = prefs.getString(FilterService.PREF_WEBHOOK_BEARER_TOKEN, null)
+                ?.takeIf { it.isNotBlank() }
+
+            val apps = getInstalledApps(context, includeSystem = includeSystem)
+            val appsArray = JSONArray()
+            apps.forEach { app ->
+                appsArray.put(
+                    JSONObject().apply {
+                        put("package_name", app.packageName)
+                        put("app_label", app.appLabel)
+                        put("is_system", app.isSystem)
+                        put("is_enabled", app.isEnabled)
+                        put("is_suspended", app.isSuspended)
+                        if (!app.versionName.isNullOrBlank()) put("version_name", app.versionName)
+                        if (!app.versionCode.isNullOrBlank()) put("version_code", app.versionCode)
+                        app.firstInstallTimeMs?.let { put("first_install_time_ms", it) }
+                        app.lastUpdateTimeMs?.let { put("last_update_time_ms", it) }
+                        if (!app.category.isNullOrBlank()) put("category", app.category)
+                    }
+                )
+            }
+
+            val payload = JSONObject().apply {
+                if (!pollId.isNullOrBlank()) put("poll_id", pollId)
+                put("source", source)
+                put("full_snapshot", fullSnapshot)
+                put("apps", appsArray)
+                put("timestamp", System.currentTimeMillis())
+            }
+
+            WebhookManager.dispatchEvent(uploadUrl, bearerToken, payload)
+            Log.i(
+                TAG,
+                "App inventory upload queued — apps=${apps.size} includeSystem=$includeSystem fullSnapshot=$fullSnapshot pollId=${pollId ?: ""}",
+            )
         }
     }
 

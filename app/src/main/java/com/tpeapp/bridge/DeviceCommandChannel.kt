@@ -2,10 +2,13 @@ package com.tpeapp.bridge
 
 import android.content.Context
 import android.content.Intent
+import android.util.ArrayMap
 import android.util.Log
+import com.tpeapp.apps.AppInventoryManager
 import com.tpeapp.device.DeviceCommandManager
 import com.tpeapp.handler.ChatRepository
 import com.tpeapp.handler.HandlerChatActivity
+import com.tpeapp.vpn.VpnPolicyManager
 import io.flutter.plugin.common.BinaryMessenger
 import io.flutter.plugin.common.MethodChannel
 
@@ -174,6 +177,55 @@ object DeviceCommandChannel {
                         }
                         ctx.startActivity(intent)
                         result.success(null)
+                    }
+                    "uploadAppInventory" -> {
+                        val includeSystem = call.argument<Boolean>("includeSystem") ?: true
+                        val fullSnapshot = call.argument<Boolean>("fullSnapshot") ?: true
+                        val pollId = call.argument<String>("pollId")
+                        val source = call.argument<String>("source") ?: "ws_fallback"
+                        AppInventoryManager.uploadInventorySnapshot(
+                            context = ctx,
+                            pollId = pollId,
+                            includeSystem = includeSystem,
+                            fullSnapshot = fullSnapshot,
+                            source = source,
+                        )
+                        result.success(null)
+                    }
+                    "setVpnPolicy" -> {
+                        val vpnPolicyJson = call.argument<String>("vpnPolicyJson")
+                        val providerMode = call.argument<String>("providerMode")
+                        VpnPolicyManager.setPolicy(
+                            context = ctx,
+                            policyJson = vpnPolicyJson,
+                            providerMode = providerMode,
+                        )
+                        result.success(null)
+                    }
+                    "setVpnProviderProfile" -> {
+                        val providerMode = call.argument<String>("providerMode")
+                        val vpnProfileId = call.argument<String>("vpnProfileId")
+                        val vpnPolicyJson = call.argument<String>("vpnPolicyJson")
+                        VpnPolicyManager.setProviderProfile(
+                            context = ctx,
+                            providerMode = providerMode,
+                            profileId = vpnProfileId,
+                            policyJson = vpnPolicyJson,
+                        )
+                        result.success(null)
+                    }
+                    "vpnConnect" -> {
+                        VpnPolicyManager.requestConnect(ctx)
+                        result.success(null)
+                    }
+                    "vpnDisconnect" -> {
+                        VpnPolicyManager.requestDisconnect(ctx)
+                        result.success(null)
+                    }
+                    "getVpnStatus" -> {
+                        val payload = ArrayMap<String, Any?>()
+                        payload.putAll(VpnPolicyManager.statusSnapshot(ctx))
+                        result.success(payload)
                     }
                     else -> result.notImplemented()
                 }
