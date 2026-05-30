@@ -58,6 +58,7 @@ class TpeFlutterActivity : FlutterFragmentActivity() {
         RemoteControlChannel.register(messenger, applicationContext)
         TextReplacementChannel.register(messenger, applicationContext)
         PasswordVaultChannel.register(messenger, applicationContext)
+        HealthConnectChannel.register(messenger, this)
     }
 
     override fun onRequestPermissionsResult(

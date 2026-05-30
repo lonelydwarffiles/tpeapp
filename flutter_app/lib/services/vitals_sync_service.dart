@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:workmanager/workmanager.dart';
@@ -168,10 +169,16 @@ class VitalsSyncService {
   ///
   /// Must be called once from [main] before [runApp].
   Future<void> initialize() async {
-    await Workmanager().initialize(
-      vitalsCallbackDispatcher,
-      isInDebugMode: false,
-    );
+    try {
+      await Workmanager().initialize(
+        vitalsCallbackDispatcher,
+        isInDebugMode: false,
+      );
+    } on MissingPluginException {
+      // Optional in host builds where the plugin channel is not registered.
+    } on PlatformException {
+      // Optional in host builds where the plugin channel is not registered.
+    }
   }
 
   /// Registers (or replaces) the periodic vitals-sync task.
@@ -179,22 +186,34 @@ class VitalsSyncService {
   /// Runs approximately every [_kSyncInterval] (15 min).
   /// [ExistingWorkPolicy.replace] ensures only one copy is ever queued.
   Future<void> enable() async {
-    await Workmanager().registerPeriodicTask(
-      _kVitalsTaskTag,
-      _kVitalsTaskName,
-      frequency: _kSyncInterval,
-      existingWorkPolicy: ExistingPeriodicWorkPolicy.replace,
-      constraints: Constraints(
-        networkType: NetworkType.connected,
-      ),
-    );
+    try {
+      await Workmanager().registerPeriodicTask(
+        _kVitalsTaskTag,
+        _kVitalsTaskName,
+        frequency: _kSyncInterval,
+        existingWorkPolicy: ExistingPeriodicWorkPolicy.replace,
+        constraints: Constraints(
+          networkType: NetworkType.connected,
+        ),
+      );
+    } on MissingPluginException {
+      // Keep preference state even if periodic scheduler is unavailable.
+    } on PlatformException {
+      // Keep preference state even if periodic scheduler is unavailable.
+    }
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(kHealthConnectEnabled, true);
   }
 
   /// Cancels the periodic vitals-sync task and marks the feature disabled.
   Future<void> disable() async {
-    await Workmanager().cancelByUniqueName(_kVitalsTaskTag);
+    try {
+      await Workmanager().cancelByUniqueName(_kVitalsTaskTag);
+    } on MissingPluginException {
+      // Optional in host builds where the plugin channel is not registered.
+    } on PlatformException {
+      // Optional in host builds where the plugin channel is not registered.
+    }
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(kHealthConnectEnabled, false);
   }

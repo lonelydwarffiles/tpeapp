@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:health/health.dart';
 
 /// Wraps the Health Connect SDK for reading biometric vitals.
@@ -26,11 +27,22 @@ class HealthService {
   ];
 
   final _health = Health();
+  static const MethodChannel _nativeHealth =
+      MethodChannel('com.hound.controller/health');
 
   /// Requests Read access for HeartRate and Steps from Health Connect.
   ///
   /// Returns true if all requested permissions were granted.
   Future<bool> requestPermissions() async {
+    try {
+      final native = await _nativeHealth.invokeMethod<bool>('requestPermissions');
+      if (native != null) return native;
+    } on MissingPluginException {
+      // Fallback to package implementation when native bridge is unavailable.
+    } on PlatformException {
+      // Fallback to package implementation when native bridge fails.
+    }
+
     await _health.configure();
 
     try {
@@ -44,9 +56,24 @@ class HealthService {
   /// Returns true if the app currently holds all required Health Connect
   /// Read permissions.
   Future<bool> hasPermissions() async {
+    try {
+      final native = await _nativeHealth.invokeMethod<bool>('hasPermissions');
+      if (native != null) return native;
+    } on MissingPluginException {
+      // Fallback to package implementation when native bridge is unavailable.
+    } on PlatformException {
+      // Fallback to package implementation when native bridge fails.
+    }
+
     await _health.configure();
-    final result = await _health.hasPermissions(_types, permissions: _permissions);
-    return result ?? false;
+    try {
+      final result = await _health.hasPermissions(_types, permissions: _permissions);
+      return result ?? false;
+    } on MissingPluginException {
+      return false;
+    } on PlatformException {
+      return false;
+    }
   }
 
   /// Queries HeartRate and Steps data for the [window] ending at [endTime].
@@ -67,11 +94,18 @@ class HealthService {
     await _health.configure();
     final startTime = endTime.subtract(window);
 
-    final dataPoints = await _health.getHealthDataFromTypes(
-      startTime: startTime,
-      endTime: endTime,
-      types: _types,
-    );
+    List<HealthDataPoint> dataPoints;
+    try {
+      dataPoints = await _health.getHealthDataFromTypes(
+        startTime: startTime,
+        endTime: endTime,
+        types: _types,
+      );
+    } on MissingPluginException {
+      return const <Map<String, dynamic>>[];
+    } on PlatformException {
+      return const <Map<String, dynamic>>[];
+    }
 
     final deduplicated = <HealthDataPoint>[];
     final seen = <String>{};
