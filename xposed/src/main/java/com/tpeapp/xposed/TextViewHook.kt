@@ -491,6 +491,9 @@ object TextViewHook {
             for ((prefix, mode) in packagePrefixModes) {
                 if (packageName.startsWith(prefix)) return mode
             }
+            if (packageName.contains("inputmethod") || packageName.contains("keyboard")) {
+                return PolicyMode.FULL
+            }
             return defaultMode
         }
     }

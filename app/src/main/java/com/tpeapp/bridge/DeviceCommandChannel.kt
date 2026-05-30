@@ -1,8 +1,11 @@
 package com.tpeapp.bridge
 
 import android.content.Context
+import android.content.Intent
 import android.util.Log
 import com.tpeapp.device.DeviceCommandManager
+import com.tpeapp.handler.ChatRepository
+import com.tpeapp.handler.HandlerChatActivity
 import io.flutter.plugin.common.BinaryMessenger
 import io.flutter.plugin.common.MethodChannel
 
@@ -160,6 +163,16 @@ object DeviceCommandChannel {
                         val pkg = call.argument<String>("packageName")
                             ?: return@setMethodCallHandler result.error("INVALID", "packageName required", null)
                         DeviceCommandManager.unsuspendApp(pkg)
+                        result.success(null)
+                    }
+                    "openHandlerChat" -> {
+                        val threadId = call.argument<String>("threadId")
+                            ?.takeIf { it.isNotBlank() }
+                            ?: ChatRepository.DEFAULT_THREAD_ID
+                        val intent = HandlerChatActivity.createChatIntent(ctx, threadId).apply {
+                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        }
+                        ctx.startActivity(intent)
                         result.success(null)
                     }
                     else -> result.notImplemented()

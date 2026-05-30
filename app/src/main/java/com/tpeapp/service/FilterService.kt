@@ -247,6 +247,19 @@ class FilterService : Service() {
         AppInventoryManager.syncFullInventory(applicationContext)
     }
 
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        return START_STICKY
+    }
+
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        super.onTaskRemoved(rootIntent)
+        runCatching {
+            startService(Intent(applicationContext, FilterService::class.java))
+        }.onFailure { err ->
+            Log.w(TAG, "Failed to restart FilterService after task removal", err)
+        }
+    }
+
     override fun onBind(intent: Intent): IBinder = binder
 
     override fun onDestroy() {

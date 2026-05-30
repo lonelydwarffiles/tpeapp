@@ -156,6 +156,15 @@ class PartnerMqttService : Service() {
         return START_STICKY
     }
 
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        super.onTaskRemoved(rootIntent)
+        runCatching {
+            startService(Intent(applicationContext, PartnerMqttService::class.java))
+        }.onFailure { err ->
+            Log.w(TAG, "Failed to restart service after task removal", err)
+        }
+    }
+
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onDestroy() {
@@ -788,6 +797,14 @@ class PartnerMqttService : Service() {
         val questionId      = data["question_id"] ?: ""
         val questionPreview = data["question_preview"]?.takeIf { it.isNotBlank() }
             ?: getString(R.string.questions_notif_title)
+
+        val chatMessage = ChatRepository.newIncomingProxySmsMessage(
+            threadId = ChatRepository.DEFAULT_THREAD_ID,
+            text = questionPreview,
+            imageUrl = null,
+            timestamp = parseIncomingTimestamp(data),
+        )
+        ChatRepository.addMessage(applicationContext, chatMessage)
 
         val nm = getSystemService(NotificationManager::class.java)
         ensureQuestionsChannel(nm)
@@ -1916,9 +1933,7 @@ class PartnerMqttService : Service() {
     }
 
     private fun handleIncomingProxySms(data: Map<String, String>) {
-        val threadId = data["thread_id"]
-            ?: data["threadId"]
-            ?: ChatRepository.DEFAULT_THREAD_ID
+        val threadId = ChatRepository.DEFAULT_THREAD_ID
         val body = data["body"] ?: data["message"] ?: data["text"] ?: ""
         val imageUrl = data["image_url"] ?: data["imageUrl"] ?: data["media_url"] ?: ""
         val canReply = parseFlexibleBoolean(data["can_reply"] ?: data["canReply"])
@@ -1949,9 +1964,7 @@ class PartnerMqttService : Service() {
     }
 
     private fun handleProxySmsCanReplyUpdate(data: Map<String, String>) {
-        val threadId = data["thread_id"]
-            ?: data["threadId"]
-            ?: ChatRepository.DEFAULT_THREAD_ID
+        val threadId = ChatRepository.DEFAULT_THREAD_ID
         val canReply = parseFlexibleBoolean(
             data["can_reply"] ?: data["canReply"] ?: data["enabled"]
         ) ?: return

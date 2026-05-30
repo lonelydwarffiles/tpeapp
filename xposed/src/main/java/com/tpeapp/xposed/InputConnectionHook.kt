@@ -187,7 +187,7 @@ object InputConnectionHook {
         val text    = param.args[0] as? CharSequence ?: return
         val textStr = text.toString()
 
-        val vocabRegexes = currentVocabRegexes() ?: return
+        val vocabRegexes = currentVocabRegexes() ?: emptyList()
         val toneMode  = currentToneMode()
         val textLower = textStr.lowercase()
 

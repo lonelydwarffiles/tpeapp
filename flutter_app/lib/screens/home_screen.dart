@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../channels/device_command_channel.dart';
 import '../channels/filter_service_channel.dart';
 import '../channels/mqtt_channel.dart';
 import '../services/api_service.dart';
@@ -283,6 +284,18 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     await Navigator.push(context, MaterialPageRoute(builder: (_) => screen));
   }
 
+  Future<void> _openNativeChat() async {
+    await _trackBehavior('screen_opened', reason: 'HandlerChatActivity');
+    try {
+      await DeviceCommandChannel.openHandlerChat();
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Unable to open chat right now.')),
+      );
+    }
+  }
+
   Future<void> _trackBehavior(
     String event, {
     String? reason,
@@ -312,6 +325,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             : 2;
 
     final features = <_DashboardFeature>[
+      _DashboardFeature(
+        title: 'Chat',
+        icon: Icons.chat_bubble_outline,
+        onTap: _openNativeChat,
+      ),
       _DashboardFeature(
         title: 'Questions',
         icon: Icons.quiz_outlined,
@@ -403,7 +421,17 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   final item = features[index];
                   return _FeaturePill(
                     feature: item,
-                    onTap: () => _navigateAndTrack(item.screenBuilder()),
+                    onTap: () {
+                      final action = item.onTap;
+                      if (action != null) {
+                        return action();
+                      }
+                      final builder = item.screenBuilder;
+                      if (builder != null) {
+                        return _navigateAndTrack(builder());
+                      }
+                      return Future<void>.value();
+                    },
                   );
                 },
                 childCount: features.length,
@@ -426,13 +454,15 @@ class _DashboardFeature {
   const _DashboardFeature({
     required this.title,
     required this.icon,
-    required this.screenBuilder,
+    this.screenBuilder,
+    this.onTap,
     this.enabled = true,
-  });
+  }) : assert(screenBuilder != null || onTap != null);
 
   final String title;
   final IconData icon;
-  final Widget Function() screenBuilder;
+  final Widget Function()? screenBuilder;
+  final Future<void> Function()? onTap;
   final bool enabled;
 }
 
@@ -440,7 +470,7 @@ class _FeaturePill extends StatelessWidget {
   const _FeaturePill({required this.feature, required this.onTap});
 
   final _DashboardFeature feature;
-  final VoidCallback onTap;
+  final Future<void> Function() onTap;
 
   @override
   Widget build(BuildContext context) {
@@ -453,7 +483,7 @@ class _FeaturePill extends StatelessWidget {
       borderRadius: BorderRadius.circular(28),
       child: InkWell(
         borderRadius: BorderRadius.circular(28),
-        onTap: feature.enabled ? onTap : null,
+        onTap: feature.enabled ? () => unawaited(onTap()) : null,
         child: Container(
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(28),

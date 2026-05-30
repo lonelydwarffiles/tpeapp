@@ -126,4 +126,7 @@ class DeviceCommandChannel {
 
   static Future<void> unsuspendApp(String packageName) =>
       _channel.invokeMethod('unsuspendApp', {'packageName': packageName});
+
+  static Future<void> openHandlerChat({String threadId = 'default'}) =>
+      _channel.invokeMethod('openHandlerChat', {'threadId': threadId});
 }
