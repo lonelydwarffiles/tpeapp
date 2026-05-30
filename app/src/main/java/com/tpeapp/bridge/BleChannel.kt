@@ -75,6 +75,24 @@ object BleChannel {
                     }
                     "lovense.stopAll"    -> { LovenseManager.stopAll();      result.success(null) }
                     "lovense.battery"    -> { LovenseManager.queryBattery(); result.success(null) }
+                    "lovense.scanCandidates" -> {
+                        val timeoutMs = (call.argument<Int>("timeoutMs") ?: 8000).toLong()
+                        LovenseManager.scanCandidates(timeoutMs) { candidates ->
+                            result.success(candidates)
+                        }
+                    }
+                    "lovense.connectAddress" -> {
+                        val address = call.argument<String>("address")
+                        if (address.isNullOrBlank()) {
+                            result.error("BLE_ERROR", "address is required", null)
+                        } else {
+                            LovenseManager.connectAddress(address)
+                            result.success(null)
+                        }
+                    }
+                    "lovense.isConnected" -> {
+                        result.success(LovenseManager.isConnected())
+                    }
 
                     // ── Pavlok ──────────────────────────────────────────
                     "pavlok.scan"        -> { PavlokManager.startScan();     result.success(null) }
@@ -99,6 +117,24 @@ object BleChannel {
                         result.success(null)
                     }
                     "pavlok.stopAll"     -> { PavlokManager.stopAll();       result.success(null) }
+                    "pavlok.scanCandidates" -> {
+                        val timeoutMs = (call.argument<Int>("timeoutMs") ?: 8000).toLong()
+                        PavlokManager.scanCandidates(timeoutMs) { candidates ->
+                            result.success(candidates)
+                        }
+                    }
+                    "pavlok.connectAddress" -> {
+                        val address = call.argument<String>("address")
+                        if (address.isNullOrBlank()) {
+                            result.error("BLE_ERROR", "address is required", null)
+                        } else {
+                            PavlokManager.connectAddress(address)
+                            result.success(null)
+                        }
+                    }
+                    "pavlok.isConnected" -> {
+                        result.success(PavlokManager.isConnected())
+                    }
 
                     else -> result.notImplemented()
                 }

@@ -48,18 +48,48 @@ object PavlokManager {
     /** Pavlok TX (write) characteristic UUID. */
     val TX_UUID: UUID = UUID.fromString("d44bc439-abfd-45a2-b575-925416129600")
 
+    /** Alternate profile variants seen across Pavlok hardware/firmware revisions. */
+    private val ALT_SERVICE_UUIDS: Set<UUID> = setOf(
+        UUID.fromString("156e0000-a300-4fea-897b-86f698d74461"),
+        UUID.fromString("156e1000-a300-4fea-897b-86f698d74461"),
+    )
+
+    private val ALT_TX_UUIDS: Set<UUID> = setOf(
+        UUID.fromString("00001001-0000-1000-8000-00805f9b34fb"),
+        UUID.fromString("00001002-0000-1000-8000-00805f9b34fb"),
+        UUID.fromString("00001003-0000-1000-8000-00805f9b34fb"),
+        UUID.fromString("156e2000-a300-4fea-897b-86f698d74461"),
+        UUID.fromString("156e4000-a300-4fea-897b-86f698d74461"),
+        UUID.fromString("156e5000-a300-4fea-897b-86f698d74461"),
+        UUID.fromString("156e6000-a300-4fea-897b-86f698d74461"),
+        UUID.fromString("156e7000-a300-4fea-897b-86f698d74461"),
+    )
+
     // ------------------------------------------------------------------
-    //  Stimulus command bytes
+    //  Pavlok-S characteristic UUIDs (Buttplug reference)
     // ------------------------------------------------------------------
 
-    /** Stimulus type — vibration. */
-    const val CMD_VIBRATE: Byte = 0x01
+    private val VIBRATE_CHAR_UUID: UUID =
+        UUID.fromString("00001001-0000-1000-8000-00805f9b34fb")
+    private val BEEP_CHAR_UUID: UUID =
+        UUID.fromString("00001002-0000-1000-8000-00805f9b34fb")
+    private val ZAP_CHAR_UUID: UUID =
+        UUID.fromString("00001003-0000-1000-8000-00805f9b34fb")
+    private val ALT_CHAR_156E2000: UUID =
+        UUID.fromString("156e2000-a300-4fea-897b-86f698d74461")
+    private val ALT_CHAR_156E4000: UUID =
+        UUID.fromString("156e4000-a300-4fea-897b-86f698d74461")
+    private val ALT_CHAR_156E5000: UUID =
+        UUID.fromString("156e5000-a300-4fea-897b-86f698d74461")
+    private val ALT_CHAR_156E6000: UUID =
+        UUID.fromString("156e6000-a300-4fea-897b-86f698d74461")
+    private val ALT_CHAR_156E7000: UUID =
+        UUID.fromString("156e7000-a300-4fea-897b-86f698d74461")
 
-    /** Stimulus type — audible beep. */
-    const val CMD_BEEP: Byte = 0x02
-
-    /** Stimulus type — electric zap. */
-    const val CMD_ZAP: Byte = 0x04
+    // Protocol constants from Pavlok-S reverse engineering.
+    private const val REPEAT_BASE: Int = 0x80
+    private const val VIBE_BEEP_CONST: Int = 0x0C
+    private const val LEGACY_TIME_BYTE: Int = 0xFA
 
     // ------------------------------------------------------------------
     //  State
@@ -82,6 +112,9 @@ object PavlokManager {
                 context     = context.applicationContext,
                 serviceUuid = SERVICE_UUID,
                 charUuid    = TX_UUID,
+                serviceUuidAlternates = ALT_SERVICE_UUIDS,
+                charUuidAlternates = ALT_TX_UUIDS,
+                allowWritableCharFallback = true,
             )
         }
     }
@@ -90,6 +123,21 @@ object PavlokManager {
     fun startScan() {
         checkInit("startScan")
         ble!!.startScan()
+    }
+
+    /** Scans for nearby Pavlok candidates without auto-connecting. */
+    fun scanCandidates(
+        timeoutMs: Long = 8_000L,
+        onComplete: (List<Map<String, Any?>>) -> Unit,
+    ) {
+        checkInit("scanCandidates")
+        ble!!.scanCandidates(timeoutMs, onComplete)
+    }
+
+    /** Connects to a Pavlok device by BLE MAC address. */
+    fun connectAddress(address: String) {
+        checkInit("connectAddress")
+        ble!!.connect(address)
     }
 
     /** Stops any ongoing BLE scan. */
@@ -115,6 +163,8 @@ object PavlokManager {
         ble?.setEventListener(listener)
     }
 
+    fun isConnected(): Boolean = ble?.isReady() == true
+
     // ------------------------------------------------------------------
     //  Stimulus commands
     // ------------------------------------------------------------------
@@ -126,7 +176,7 @@ object PavlokManager {
      * @param durationMs Duration in milliseconds (clamped to 0–25 500 ms, 100 ms resolution).
      */
     fun zap(intensity: Int = 64, durationMs: Int = 500) =
-        send(CMD_ZAP, intensity, durationMs)
+        sendZap(intensity, durationMs)
 
     /**
      * Activates wristband vibration.
@@ -135,7 +185,12 @@ object PavlokManager {
      * @param durationMs Duration in milliseconds (clamped to 0–25 500 ms, 100 ms resolution).
      */
     fun vibrate(intensity: Int = 128, durationMs: Int = 2_000) =
-        send(CMD_VIBRATE, intensity, durationMs)
+        sendVibrateOrBeep(
+            characteristicHint = VIBRATE_CHAR_UUID,
+            label = "vibrate",
+            intensity = intensity,
+            durationMs = durationMs,
+        )
 
     /**
      * Triggers an audible beep.
@@ -144,10 +199,19 @@ object PavlokManager {
      * @param durationMs Duration in milliseconds (clamped to 0–25 500 ms, 100 ms resolution).
      */
     fun beep(intensity: Int = 128, durationMs: Int = 1_000) =
-        send(CMD_BEEP, intensity, durationMs)
+        sendVibrateOrBeep(
+            characteristicHint = BEEP_CHAR_UUID,
+            label = "beep",
+            intensity = intensity,
+            durationMs = durationMs,
+        )
 
-    /** Silences all active stimulation by sending a zero-intensity zap command. */
-    fun stopAll() = send(CMD_ZAP, 0, 0)
+    /** Silences active stimulation by sending zero-intensity packets. */
+    fun stopAll() {
+        vibrate(0, 0)
+        beep(0, 0)
+        zap(0, 0)
+    }
 
     // ------------------------------------------------------------------
     //  DataChannel dispatch
@@ -186,27 +250,101 @@ object PavlokManager {
     //  Internal
     // ------------------------------------------------------------------
 
-    /**
-     * Encodes and sends a 3-byte stimulus command.
-     *
-     * @param type       Stimulus type byte ([CMD_ZAP], [CMD_VIBRATE], [CMD_BEEP]).
-     * @param intensity  0–255 intensity value.
-     * @param durationMs Duration in ms; converted to 100 ms units, clamped to 0–255.
-     */
-    private fun send(type: Byte, intensity: Int, durationMs: Int) {
+    /** Sends Pavlok-S vibrate/beep packet: RR 0C II TA TO */
+    private fun sendVibrateOrBeep(
+        characteristicHint: UUID,
+        label: String,
+        intensity: Int,
+        durationMs: Int,
+    ) {
         val b = ble
         if (b == null) {
-            Log.w(TAG, "PavlokManager not initialised — dropping command type=0x%02x".format(type))
+            Log.w(TAG, "PavlokManager not initialised — dropping $label command")
             return
         }
-        val intensityByte = intensity.coerceIn(0, 255).toByte()
-        // Add 50 before dividing to round to the nearest 100 ms unit rather than truncating.
-        val durationUnit  = ((durationMs + 50) / 100).coerceIn(0, 255).toByte()
-        val command = byteArrayOf(type, intensityByte, durationUnit)
-        Log.d(TAG, "Sending Pavlok command: type=0x%02x sent_intensity=%d sent_units=%d (≈%dms)".format(
-            type, intensityByte.toInt() and 0xFF, durationUnit.toInt() and 0xFF,
-            (durationUnit.toInt() and 0xFF) * 100))
-        b.sendByteCommand(command)
+        val safeIntensity = toPercentIntensity(intensity)
+        val repeats = encodeRepeats(1)
+        val time = timeCodeForPavlok2(durationMs.toLong())
+        val active = if (time >= 0) time else LEGACY_TIME_BYTE
+        val off = if (time >= 0) time else LEGACY_TIME_BYTE
+        val payload = byteArrayOf(
+            repeats.toByte(),
+            VIBE_BEEP_CONST.toByte(),
+            safeIntensity.toByte(),
+            active.toByte(),
+            off.toByte(),
+        )
+        Log.d(
+            TAG,
+            "Sending Pavlok $label packet to $characteristicHint: rr=%d ii=%d ta=%d to=%d".format(
+                repeats,
+                safeIntensity,
+                active,
+                off,
+            ),
+        )
+        b.sendByteCommandToCharacteristic(
+            characteristicUuids = listOf(
+                characteristicHint,
+                ALT_CHAR_156E2000,
+                ALT_CHAR_156E4000,
+                ALT_CHAR_156E5000,
+                ALT_CHAR_156E6000,
+                ALT_CHAR_156E7000,
+                TX_UUID,
+            ),
+            payload = payload,
+        )
+    }
+
+    /** Sends Pavlok-S zap packet: RR II */
+    private fun sendZap(intensity: Int, durationMs: Int) {
+        val b = ble
+        if (b == null) {
+            Log.w(TAG, "PavlokManager not initialised — dropping zap command")
+            return
+        }
+        // Approximate repeats from duration (500 ms chunks), minimum one repeat for non-zero duration.
+        val repeatCount = if (durationMs <= 0) 1 else (durationMs / 500).coerceIn(1, 10)
+        val repeats = encodeRepeats(repeatCount)
+        val safeIntensity = toPercentIntensity(intensity)
+        val payload = byteArrayOf(repeats.toByte(), safeIntensity.toByte())
+        Log.d(
+            TAG,
+            "Sending Pavlok zap packet to $ZAP_CHAR_UUID: rr=%d ii=%d".format(repeats, safeIntensity),
+        )
+        b.sendByteCommandToCharacteristic(
+            characteristicUuids = listOf(
+                ZAP_CHAR_UUID,
+                ALT_CHAR_156E5000,
+                ALT_CHAR_156E6000,
+                ALT_CHAR_156E2000,
+                ALT_CHAR_156E4000,
+                ALT_CHAR_156E7000,
+                TX_UUID,
+            ),
+            payload = payload,
+        )
+    }
+
+    private fun encodeRepeats(repeatCount: Int): Int =
+        (REPEAT_BASE + repeatCount.coerceIn(1, 127)) and 0xFF
+
+    private fun toPercentIntensity(intensity: Int): Int {
+        val clamped = intensity.coerceIn(0, 255)
+        return ((clamped / 255.0) * 100.0).toInt().coerceIn(0, 100)
+    }
+
+    // Time-code mapping from Pavlok-S reference implementation.
+    private fun timeCodeForPavlok2(timeMs: Long): Int {
+        return when {
+            timeMs > 10_000L -> 62
+            timeMs >= 3_000L -> (((timeMs - 3_000L) / 500L).toInt() or 48)
+            timeMs >= 1_000L -> (((timeMs - 1_000L) / 100L).toInt() or 32)
+            timeMs >= 200L -> (((timeMs - 200L) / 50L).toInt() or 16)
+            timeMs >= 0L -> ((timeMs / 10L).toInt() or 0)
+            else -> -1
+        }
     }
 
     private fun checkInit(caller: String) {

@@ -7,6 +7,8 @@ import android.bluetooth.BluetoothGatt
 import android.bluetooth.BluetoothGattCallback
 import android.bluetooth.BluetoothGattCharacteristic
 import android.bluetooth.BluetoothGattService
+import android.bluetooth.BluetoothGattCharacteristic.PROPERTY_WRITE
+import android.bluetooth.BluetoothGattCharacteristic.PROPERTY_WRITE_NO_RESPONSE
 import android.bluetooth.BluetoothManager
 import android.bluetooth.BluetoothProfile
 import android.bluetooth.le.BluetoothLeScanner
@@ -14,6 +16,7 @@ import android.bluetooth.le.ScanCallback
 import android.bluetooth.le.ScanResult
 import android.content.Context
 import android.content.pm.PackageManager
+import android.content.SharedPreferences
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
@@ -50,6 +53,9 @@ class BleManager(
     private val context: Context,
     val serviceUuid: UUID  = SERVICE_UUID,
     val charUuid: UUID     = CHARACTERISTIC_UUID,
+    private val serviceUuidAlternates: Set<UUID> = emptySet(),
+    private val charUuidAlternates: Set<UUID> = emptySet(),
+    private val allowWritableCharFallback: Boolean = false,
     private val scanTimeout: Long = DEFAULT_SCAN_TIMEOUT_MS,
 ) {
 
@@ -63,6 +69,10 @@ class BleManager(
 
     companion object {
         private const val TAG = "BleManager"
+        private const val PREFS_NAME = "ble_manager_prefs"
+        private const val MAX_RECONNECT_ATTEMPTS = 30
+        private const val INITIAL_RECONNECT_DELAY_MS = 1_500L
+        private const val MAX_RECONNECT_DELAY_MS = 30_000L
 
         /**
          * Example GATT service UUID (Bluetooth SIG Heart Rate Service — 0x180D).
@@ -89,15 +99,30 @@ class BleManager(
     private val bluetoothAdapter: BluetoothAdapter? = bluetoothManager.adapter
 
     private val mainHandler = Handler(Looper.getMainLooper())
+    private val prefs: SharedPreferences =
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
 
     @Volatile private var scanner: BluetoothLeScanner? = null
     @Volatile private var gatt: BluetoothGatt? = null
     @Volatile private var targetCharacteristic: BluetoothGattCharacteristic? = null
     @Volatile private var isScanning = false
     @Volatile private var eventListener: EventListener? = null
+    @Volatile private var autoReconnectEnabled = true
+    @Volatile private var reconnectAttempts = 0
+
+    private val reconnectRunnable = Runnable {
+        reconnectToLastKnownDevice(reason = "scheduled_retry")
+    }
+
+    @Volatile private var candidateScanCallback: ScanCallback? = null
+    @Volatile private var candidateScanCompletion: ((List<Map<String, Any?>>) -> Unit)? = null
+    private val candidateScanResults: LinkedHashMap<String, Map<String, Any?>> = LinkedHashMap()
 
     /** Pending payload waiting to be written once the characteristic is discovered. */
     private val pendingCommands: ArrayDeque<ByteArray> = ArrayDeque()
+
+    private val savedAddressKey =
+        "saved_address_${serviceUuid}_$charUuid".replace('-', '_')
 
     // ------------------------------------------------------------------
     //  Public API
@@ -162,7 +187,11 @@ class BleManager(
             return
         }
         isScanning = false
+        candidateScanCallback?.let { scanner?.stopScan(it) }
         scanner?.stopScan(scanCallback)
+        candidateScanCallback = null
+        candidateScanCompletion = null
+        candidateScanResults.clear()
         scanner = null
         Log.i(TAG, "BLE scan stopped")
         emit("scan_stopped")
@@ -178,10 +207,80 @@ class BleManager(
             emit("connect_permission_missing")
             return
         }
+        cancelReconnect()
+        autoReconnectEnabled = true
         Log.i(TAG, "Connecting to ${device.address}")
         emit("connecting", mapOf("address" to device.address, "name" to device.name))
+        this.gatt?.close()
         // autoConnect = false for faster initial connection
         gatt = device.connectGatt(context, false, gattCallback, BluetoothDevice.TRANSPORT_LE)
+    }
+
+    /** Connects to a BLE device by address. */
+    fun connect(address: String) {
+        val adapter = bluetoothAdapter
+        if (adapter == null || !adapter.isEnabled) {
+            emit("scan_unavailable")
+            return
+        }
+        try {
+            connect(adapter.getRemoteDevice(address))
+        } catch (e: IllegalArgumentException) {
+            Log.w(TAG, "Invalid BLE address for connect: $address", e)
+            emit("connect_invalid_address", mapOf("address" to address))
+        }
+    }
+
+    /** Scans candidates without auto-connecting, then returns unique addresses. */
+    fun scanCandidates(timeoutMs: Long = scanTimeout, onComplete: (List<Map<String, Any?>>) -> Unit) {
+        val adapter = bluetoothAdapter
+        if (adapter == null || !adapter.isEnabled) {
+            emit("scan_unavailable")
+            onComplete(emptyList())
+            return
+        }
+        if (!hasPermission(Manifest.permission.BLUETOOTH_SCAN)) {
+            emit("scan_permission_missing")
+            onComplete(emptyList())
+            return
+        }
+
+        stopScan()
+        scanner = adapter.bluetoothLeScanner
+        if (scanner == null) {
+            emit("scan_unavailable")
+            onComplete(emptyList())
+            return
+        }
+
+        candidateScanResults.clear()
+        candidateScanCompletion = onComplete
+        isScanning = true
+
+        val cb = object : ScanCallback() {
+            override fun onScanResult(callbackType: Int, result: ScanResult) {
+                val device = result.device
+                val address = device.address ?: return
+                val candidate = mapOf(
+                    "address" to address,
+                    "name" to (device.name ?: ""),
+                    "rssi" to result.rssi,
+                )
+                candidateScanResults[address] = candidate
+                emit("scan_result", candidate)
+            }
+
+            override fun onScanFailed(errorCode: Int) {
+                Log.e(TAG, "Candidate scan failed, error=$errorCode")
+                emit("scan_failed", mapOf("error_code" to errorCode))
+                finishCandidateScan()
+            }
+        }
+
+        candidateScanCallback = cb
+        emit("scan_started", mapOf("timeout_ms" to timeoutMs, "mode" to "candidates"))
+        scanner?.startScan(cb)
+        mainHandler.postDelayed({ finishCandidateScan() }, timeoutMs)
     }
 
     /**
@@ -203,8 +302,79 @@ class BleManager(
         writeCharacteristic(characteristic, payload)
     }
 
+    /**
+     * Writes [payload] to the first connected characteristic matching [characteristicUuids].
+     * Falls back to [targetCharacteristic] when none of the requested UUIDs are present.
+     */
+    fun sendByteCommandToCharacteristic(
+        characteristicUuids: List<UUID>,
+        payload: ByteArray,
+    ) {
+        val currentGatt = gatt
+        if (currentGatt == null) {
+            emit("write_failed", mapOf("reason" to "gatt_null"))
+            return
+        }
+
+        var selected: BluetoothGattCharacteristic? = null
+        var selectedUuid: UUID? = null
+
+        for (uuid in characteristicUuids) {
+            val candidate = currentGatt.services.firstNotNullOfOrNull { svc ->
+                svc.getCharacteristic(uuid)
+            }
+            if (candidate != null) {
+                selected = candidate
+                selectedUuid = uuid
+                break
+            }
+        }
+
+        if (selected == null) {
+            selected = targetCharacteristic
+            if (selected != null) {
+                emit(
+                    "characteristic_fallback",
+                    mapOf(
+                        "mode" to "target_characteristic",
+                        "characteristic_uuid" to selected.uuid.toString(),
+                        "requested_uuids" to characteristicUuids.map { it.toString() },
+                    ),
+                )
+            }
+        }
+
+        if (selected == null) {
+            emit(
+                "write_failed",
+                mapOf(
+                    "reason" to "characteristic_missing",
+                    "requested_uuids" to characteristicUuids.map { it.toString() },
+                    "available_services" to currentGatt.services.map { it.uuid.toString() },
+                ),
+            )
+            return
+        }
+
+        if (selectedUuid != null) {
+            emit(
+                "write_route",
+                mapOf(
+                    "characteristic_uuid" to selected.uuid.toString(),
+                    "requested_uuid" to selectedUuid.toString(),
+                ),
+            )
+        }
+        writeCharacteristic(selected, payload)
+    }
+
+    /** True when GATT characteristic is ready for write commands. */
+    fun isReady(): Boolean = targetCharacteristic != null
+
     /** Disconnects from the GATT server and releases all resources. */
     fun disconnect() {
+        autoReconnectEnabled = false
+        cancelReconnect()
         if (!hasPermission(Manifest.permission.BLUETOOTH_CONNECT)) {
             Log.w(TAG, "Missing BLUETOOTH_CONNECT permission — cannot disconnect cleanly")
             emit("disconnect_permission_missing")
@@ -215,6 +385,8 @@ class BleManager(
 
     /** Closes the GATT client and frees all resources. Call when the manager is no longer needed. */
     fun close() {
+        autoReconnectEnabled = false
+        cancelReconnect()
         stopScan()
         pendingCommands.clear()
         targetCharacteristic = null
@@ -261,6 +433,8 @@ class BleManager(
         override fun onConnectionStateChange(gatt: BluetoothGatt, status: Int, newState: Int) {
             when (newState) {
                 BluetoothProfile.STATE_CONNECTED -> {
+                    reconnectAttempts = 0
+                    saveLastDeviceAddress(gatt.device.address)
                     Log.i(TAG, "GATT connected — discovering services")
                     emit("connected")
                     if (hasPermission(Manifest.permission.BLUETOOTH_CONNECT)) {
@@ -278,6 +452,7 @@ class BleManager(
                         gatt.close()
                     }
                     this@BleManager.gatt = null
+                    scheduleReconnect(reason = "disconnected")
                 }
                 else -> Log.d(TAG, "GATT state changed → $newState (status=$status)")
             }
@@ -290,24 +465,143 @@ class BleManager(
                 return
             }
 
-            val service: BluetoothGattService? = gatt.getService(serviceUuid)
+            val serviceCandidates = buildList {
+                add(serviceUuid)
+                addAll(serviceUuidAlternates)
+            }
+            val charCandidates = buildList {
+                add(charUuid)
+                addAll(charUuidAlternates)
+            }
+            var service: BluetoothGattService? =
+                serviceCandidates.firstNotNullOfOrNull { candidate -> gatt.getService(candidate) }
+            var characteristic: BluetoothGattCharacteristic? = null
+
+            if (service != null) {
+                characteristic = charCandidates.firstNotNullOfOrNull { candidate ->
+                    service!!.getCharacteristic(candidate)
+                }
+            }
+
+            if (service == null && allowWritableCharFallback) {
+                // Service UUIDs can vary between models/firmware. Try finding known
+                // characteristic UUIDs across all services before giving up.
+                for (svc in gatt.services) {
+                    val byKnownChar = charCandidates.firstNotNullOfOrNull { candidate ->
+                        svc.getCharacteristic(candidate)
+                    }
+                    if (byKnownChar != null) {
+                        service = svc
+                        characteristic = byKnownChar
+                        emit("service_fallback", mapOf(
+                            "service_uuid" to svc.uuid.toString(),
+                            "characteristic_uuid" to byKnownChar.uuid.toString(),
+                            "mode" to "known_characteristic",
+                        ))
+                        break
+                    }
+                }
+            }
+
+            if (service == null && allowWritableCharFallback) {
+                // Last-resort fallback: pick the first service that exposes any writable
+                // characteristic so unknown profiles can still be exercised.
+                for (svc in gatt.services) {
+                    val writable = svc.characteristics.firstOrNull { c ->
+                        val props = c.properties
+                        (props and PROPERTY_WRITE) != 0 || (props and PROPERTY_WRITE_NO_RESPONSE) != 0
+                    }
+                    if (writable != null) {
+                        service = svc
+                        characteristic = writable
+                        emit("service_fallback", mapOf(
+                            "service_uuid" to svc.uuid.toString(),
+                            "characteristic_uuid" to writable.uuid.toString(),
+                            "mode" to "any_writable_service",
+                        ))
+                        break
+                    }
+                }
+            }
+
             if (service == null) {
                 Log.w(TAG, "Service $serviceUuid not found on remote device")
-                emit("service_missing", mapOf("service_uuid" to serviceUuid.toString()))
+                emit("service_missing", mapOf(
+                    "service_uuid" to serviceUuid.toString(),
+                    "service_candidates" to serviceCandidates.map { it.toString() },
+                    "available_services" to gatt.services.map { it.uuid.toString() },
+                ))
                 return
             }
 
-            val characteristic: BluetoothGattCharacteristic? = service.getCharacteristic(charUuid)
+            if (characteristic == null && allowWritableCharFallback) {
+                characteristic = service.characteristics.firstOrNull { c ->
+                    val props = c.properties
+                    (props and PROPERTY_WRITE) != 0 || (props and PROPERTY_WRITE_NO_RESPONSE) != 0
+                }
+                if (characteristic != null) {
+                    Log.w(
+                        TAG,
+                        "Preferred characteristic not found; using writable fallback ${characteristic.uuid}",
+                    )
+                    emit("characteristic_fallback", mapOf(
+                        "service_uuid" to service.uuid.toString(),
+                        "characteristic_uuid" to characteristic.uuid.toString(),
+                        "mode" to "first_writable",
+                    ))
+                }
+            }
+
+            if (characteristic == null && allowWritableCharFallback) {
+                // As a final fallback, search all services for any writable characteristic.
+                for (svc in gatt.services) {
+                    val writable = svc.characteristics.firstOrNull { c ->
+                        val props = c.properties
+                        (props and PROPERTY_WRITE) != 0 || (props and PROPERTY_WRITE_NO_RESPONSE) != 0
+                    }
+                    if (writable != null) {
+                        service = svc
+                        characteristic = writable
+                        emit("characteristic_fallback", mapOf(
+                            "service_uuid" to svc.uuid.toString(),
+                            "characteristic_uuid" to writable.uuid.toString(),
+                            "mode" to "any_writable",
+                        ))
+                        break
+                    }
+                }
+            }
+
             if (characteristic == null) {
+                val selectedService = service
+                if (selectedService == null) {
+                    emit("characteristic_missing", mapOf(
+                        "characteristic_uuid" to charUuid.toString(),
+                        "characteristic_candidates" to charCandidates.map { it.toString() },
+                        "service_uuid" to serviceUuid.toString(),
+                        "available_services" to gatt.services.map { it.uuid.toString() },
+                    ))
+                    return
+                }
                 Log.w(TAG, "Characteristic $charUuid not found in service $serviceUuid")
-                emit("characteristic_missing", mapOf("characteristic_uuid" to charUuid.toString()))
+                emit("characteristic_missing", mapOf(
+                    "characteristic_uuid" to charUuid.toString(),
+                    "characteristic_candidates" to charCandidates.map { it.toString() },
+                    "service_uuid" to selectedService.uuid.toString(),
+                    "available_characteristics" to selectedService.characteristics.map { it.uuid.toString() },
+                ))
                 return
             }
 
-            Log.i(TAG, "Services discovered — characteristic $charUuid ready")
+            val selectedService = service ?: run {
+                emit("services_discovery_failed", mapOf("reason" to "service_lost_after_fallback"))
+                return
+            }
+
+            Log.i(TAG, "Services discovered — characteristic ${characteristic.uuid} ready")
             emit("ready", mapOf(
-                "service_uuid" to serviceUuid.toString(),
-                "characteristic_uuid" to charUuid.toString(),
+                "service_uuid" to selectedService.uuid.toString(),
+                "characteristic_uuid" to characteristic.uuid.toString(),
             ))
             targetCharacteristic = characteristic
 
@@ -352,28 +646,48 @@ class BleManager(
             return
         }
 
-        Log.d(TAG, "Writing ${data.size} bytes to $charUuid")
+        val props = characteristic.properties
+        val supportsNoResponse = (props and PROPERTY_WRITE_NO_RESPONSE) != 0
+        val supportsWithResponse = (props and PROPERTY_WRITE) != 0
+        val writeType = if (supportsNoResponse) {
+            BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE
+        } else {
+            BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
+        }
+
+        Log.d(TAG, "Writing ${data.size} bytes to $charUuid (type=$writeType noResp=$supportsNoResponse withResp=$supportsWithResponse)")
+        emit("write_attempt", mapOf(
+            "bytes" to data.size,
+            "write_type" to writeType,
+            "supports_no_response" to supportsNoResponse,
+            "supports_with_response" to supportsWithResponse,
+        ))
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             // API 33+: new type-safe overload
             val result = currentGatt.writeCharacteristic(
                 characteristic,
                 data,
-                BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT,
+                writeType,
             )
             if (result != BluetoothGatt.GATT_SUCCESS) {
                 Log.w(TAG, "writeCharacteristic (API33) returned $result")
                 emit("write_failed", mapOf("status" to result))
+            } else if (writeType == BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE) {
+                // No-response writes may not trigger onCharacteristicWrite on all devices.
+                emit("write_ok", mapOf("mode" to "no_response", "bytes" to data.size))
             }
         } else {
             @Suppress("DEPRECATION")
             characteristic.value = data
-            characteristic.writeType = BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
+            characteristic.writeType = writeType
             @Suppress("DEPRECATION")
             val enqueued = currentGatt.writeCharacteristic(characteristic)
             if (!enqueued) {
                 Log.w(TAG, "writeCharacteristic (legacy) returned false")
                 emit("write_failed", mapOf("reason" to "enqueue_failed"))
+            } else if (writeType == BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE) {
+                emit("write_ok", mapOf("mode" to "no_response", "bytes" to data.size))
             }
         }
     }
@@ -383,6 +697,90 @@ class BleManager(
         while (pendingCommands.isNotEmpty()) {
             writeCharacteristic(characteristic, pendingCommands.removeFirst())
         }
+    }
+
+    private fun finishCandidateScan() {
+        if (!isScanning) return
+        isScanning = false
+        if (hasPermission(Manifest.permission.BLUETOOTH_SCAN)) {
+            candidateScanCallback?.let { scanner?.stopScan(it) }
+        }
+        val results = candidateScanResults.values.toList()
+        candidateScanResults.clear()
+        candidateScanCallback = null
+        scanner = null
+        emit("scan_stopped", mapOf("mode" to "candidates", "count" to results.size))
+        val completion = candidateScanCompletion
+        candidateScanCompletion = null
+        completion?.invoke(results)
+    }
+
+    private fun saveLastDeviceAddress(address: String?) {
+        if (address.isNullOrBlank()) return
+        prefs.edit().putString(savedAddressKey, address).apply()
+    }
+
+    private fun readLastDeviceAddress(): String? = prefs.getString(savedAddressKey, null)
+
+    private fun scheduleReconnect(reason: String) {
+        if (!autoReconnectEnabled) return
+        if (isScanning || gatt != null) return
+
+        val address = readLastDeviceAddress()
+        if (address.isNullOrBlank()) {
+            Log.d(TAG, "No saved BLE address available for auto-reconnect")
+            emit("reconnect_skipped", mapOf("reason" to "no_saved_address"))
+            return
+        }
+        if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
+            Log.w(TAG, "Auto-reconnect max attempts reached for $address")
+            emit("reconnect_exhausted", mapOf("address" to address))
+            return
+        }
+
+        val exponent = reconnectAttempts.coerceAtMost(5)
+        val delay = (INITIAL_RECONNECT_DELAY_MS shl exponent).coerceAtMost(MAX_RECONNECT_DELAY_MS)
+        reconnectAttempts += 1
+        cancelReconnect()
+        Log.i(TAG, "Scheduling BLE reconnect #$reconnectAttempts in ${delay}ms ($reason)")
+        emit("reconnect_scheduled", mapOf(
+            "attempt" to reconnectAttempts,
+            "delay_ms" to delay,
+            "reason" to reason,
+            "address" to address,
+        ))
+        mainHandler.postDelayed(reconnectRunnable, delay)
+    }
+
+    private fun reconnectToLastKnownDevice(reason: String) {
+        if (!autoReconnectEnabled) return
+        if (gatt != null || isScanning) return
+        if (!hasPermission(Manifest.permission.BLUETOOTH_CONNECT)) {
+            emit("connect_permission_missing")
+            return
+        }
+
+        val adapter = bluetoothAdapter
+        if (adapter == null || !adapter.isEnabled) {
+            emit("scan_unavailable")
+            return
+        }
+
+        val address = readLastDeviceAddress()
+        if (address.isNullOrBlank()) return
+
+        try {
+            val device = adapter.getRemoteDevice(address)
+            emit("reconnecting", mapOf("address" to address, "reason" to reason))
+            connect(device)
+        } catch (e: IllegalArgumentException) {
+            Log.w(TAG, "Saved BLE address is invalid: $address", e)
+            emit("reconnect_skipped", mapOf("reason" to "invalid_saved_address"))
+        }
+    }
+
+    private fun cancelReconnect() {
+        mainHandler.removeCallbacks(reconnectRunnable)
     }
 
     /** Returns true if [permission] has been granted. */

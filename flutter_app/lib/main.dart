@@ -20,7 +20,19 @@ import 'channels/text_replacement_channel.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  final prefs = await SharedPreferences.getInstance();
+  SharedPreferences prefs;
+  try {
+    prefs = await SharedPreferences.getInstance();
+  } on MissingPluginException {
+    // In hybrid host builds, plugin registration can be temporarily unavailable.
+    // Fall back to in-memory preferences so the UI can still boot.
+    SharedPreferences.setMockInitialValues(<String, Object>{});
+    prefs = await SharedPreferences.getInstance();
+  } on PlatformException {
+    // Some plugin failures surface as channel errors instead of MissingPluginException.
+    SharedPreferences.setMockInitialValues(<String, Object>{});
+    prefs = await SharedPreferences.getInstance();
+  }
   await BleService().configurePersistence(prefs);
   try {
     await NotificationBuzzService.instance.start();

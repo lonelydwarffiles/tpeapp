@@ -3,7 +3,6 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:google_fonts/google_fonts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:provider/provider.dart';
 import 'package:permission_handler/permission_handler.dart';
@@ -11,6 +10,7 @@ import 'package:uuid/uuid.dart';
 
 import 'channels/accessibility_setup_channel.dart';
 import 'channels/device_admin_channel.dart';
+import 'channels/ble_channel.dart';
 import 'channels/filter_service_channel.dart';
 import 'channels/remote_control_channel.dart';
 import 'channels/device_command_channel.dart';
@@ -68,32 +68,32 @@ class TpeApp extends StatelessWidget {
       outlineVariant: const Color(0xFF5D4A60),
     );
 
-    final baseTextTheme = GoogleFonts.dmSansTextTheme(
-      ThemeData(brightness: Brightness.dark).textTheme,
-    ).apply(
+    final baseTextTheme = ThemeData(brightness: Brightness.dark)
+        .textTheme
+        .apply(
       bodyColor: cs.onSurface,
       displayColor: cs.onSurface,
     );
 
     final textTheme = baseTextTheme.copyWith(
-      headlineLarge: GoogleFonts.cormorantGaramond(
+      headlineLarge: baseTextTheme.headlineLarge?.copyWith(
         fontSize: 44,
         fontWeight: FontWeight.w700,
         letterSpacing: 0.2,
         color: cs.onSurface,
       ),
-      headlineMedium: GoogleFonts.cormorantGaramond(
+      headlineMedium: baseTextTheme.headlineMedium?.copyWith(
         fontSize: 34,
         fontWeight: FontWeight.w700,
         letterSpacing: 0.2,
         color: cs.onSurface,
       ),
-      titleLarge: GoogleFonts.cormorantGaramond(
+      titleLarge: baseTextTheme.titleLarge?.copyWith(
         fontSize: 28,
         fontWeight: FontWeight.w700,
         color: cs.onSurface,
       ),
-      labelLarge: GoogleFonts.dmSans(
+      labelLarge: baseTextTheme.labelLarge?.copyWith(
         fontWeight: FontWeight.w700,
         letterSpacing: 0.3,
       ),
@@ -344,7 +344,24 @@ class _StartupGateState extends State<_StartupGate>
       lon ??= prefs.getDouble(_lastLonKey);
       batteryPct ??= prefs.getInt(_lastBatteryPctKey);
 
-      final toyInfo = context.read<BleService>().toyInfoForBackend;
+        final toyInfo = context.read<BleService>().toyInfoForBackend;
+        final nativeLovenseConnected = await BleChannel.lovenseIsConnectedNative();
+        final nativePavlokConnected = await BleChannel.pavlokIsConnectedNative();
+
+        final mergedToyInfo = <String, dynamic>{...toyInfo};
+        final currentLovense = (toyInfo['lovense'] is Map)
+          ? Map<String, dynamic>.from(toyInfo['lovense'] as Map)
+          : <String, dynamic>{};
+        final currentPavlok = (toyInfo['pavlok'] is Map)
+          ? Map<String, dynamic>.from(toyInfo['pavlok'] as Map)
+          : <String, dynamic>{};
+
+        currentLovense['connected'] =
+          (currentLovense['connected'] == true) || nativeLovenseConnected;
+        currentPavlok['connected'] =
+          (currentPavlok['connected'] == true) || nativePavlokConnected;
+        mergedToyInfo['lovense'] = currentLovense;
+        mergedToyInfo['pavlok'] = currentPavlok;
 
       var deviceAdminActive = false;
       var rootAvailable = _rootAvailable;
@@ -371,8 +388,8 @@ class _StartupGateState extends State<_StartupGate>
         // Optional metadata only.
       }
 
-      final lovense = toyInfo['lovense'];
-      final pavlok = toyInfo['pavlok'];
+      final lovense = mergedToyInfo['lovense'];
+      final pavlok = mergedToyInfo['pavlok'];
       final capabilities = <String, dynamic>{
         'device_admin_active': deviceAdminActive,
         'root_available': rootAvailable,
@@ -387,7 +404,7 @@ class _StartupGateState extends State<_StartupGate>
         batteryPct: batteryPct,
         lat: lat,
         lon: lon,
-        toyInfo: toyInfo,
+        toyInfo: mergedToyInfo,
         capabilities: capabilities,
       );
     } catch (_) {

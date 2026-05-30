@@ -199,6 +199,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
       await Future.delayed(const Duration(seconds: 1));
       final active = await DeviceAdminChannel.isAdminActive();
       setState(() => _adminActive = active);
+      if (!active) {
+        await DeviceAdminChannel.openAdminSettings();
+      }
       await _emitBehavior(
         event: active ? 'device_admin_activated' : 'device_admin_activation_pending',
         reason: 'settings',

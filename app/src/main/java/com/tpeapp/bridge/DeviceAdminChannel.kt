@@ -46,7 +46,7 @@ object DeviceAdminChannel {
 
                 "requestActivation" -> {
                     val intent = if (dpm.isAdminActive(admin)) {
-                        Intent(Settings.ACTION_DEVICE_ADMIN_SETTINGS)
+                        Intent(Settings.ACTION_SECURITY_SETTINGS)
                     } else {
                         Intent(DevicePolicyManager.ACTION_ADD_DEVICE_ADMIN).apply {
                             putExtra(DevicePolicyManager.EXTRA_DEVICE_ADMIN, admin)
@@ -62,8 +62,6 @@ object DeviceAdminChannel {
 
                 "openAdminSettings" -> {
                     runCatching {
-                        activity.startActivity(Intent(Settings.ACTION_DEVICE_ADMIN_SETTINGS))
-                    }.recoverCatching {
                         activity.startActivity(Intent(Settings.ACTION_SECURITY_SETTINGS))
                     }.onSuccess {
                         result.success(null)

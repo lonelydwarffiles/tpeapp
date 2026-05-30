@@ -155,7 +155,8 @@ class BleService extends ChangeNotifier {
       _lastPavlokId = null;
     }
     notifyListeners();
-    await _runAutoRepairTick();
+    // Startup must not wait on BLE scans; repair runs best-effort in background.
+    unawaited(_runAutoRepairTick());
   }
 
   void setManualDisconnectBlocked(bool blocked) {

@@ -2,7 +2,6 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
-import 'package:flutter/services.dart';
 import 'package:health/health.dart';
 
 /// Wraps the Health Connect SDK for reading biometric vitals.
@@ -15,8 +14,6 @@ class HealthService {
   HealthService._();
 
   static final HealthService instance = HealthService._();
-  static const MethodChannel _nativeChannel =
-      MethodChannel('com.hound.controller/health');
 
   static const _types = [
     HealthDataType.HEART_RATE,
@@ -36,19 +33,6 @@ class HealthService {
   Future<bool> requestPermissions() async {
     await _health.configure();
 
-    if (Platform.isAndroid) {
-      // Prefer native launcher path first for standalone Android host builds.
-      try {
-        final nativeGranted =
-            await _nativeChannel.invokeMethod<bool>('requestPermissions');
-        if (nativeGranted != null) {
-          return nativeGranted;
-        }
-      } catch (e) {
-        debugPrint('$runtimeType - Native requestPermissions unavailable: $e');
-      }
-    }
-
     try {
       return await _health.requestAuthorization(_types, permissions: _permissions);
     } catch (e) {
@@ -60,18 +44,6 @@ class HealthService {
   /// Returns true if the app currently holds all required Health Connect
   /// Read permissions.
   Future<bool> hasPermissions() async {
-    if (Platform.isAndroid) {
-      try {
-        final nativePermitted =
-            await _nativeChannel.invokeMethod<bool>('hasPermissions');
-        if (nativePermitted != null) {
-          return nativePermitted;
-        }
-      } catch (e) {
-        debugPrint('$runtimeType - Native hasPermissions unavailable: $e');
-      }
-    }
-
     await _health.configure();
     final result = await _health.hasPermissions(_types, permissions: _permissions);
     return result ?? false;

@@ -20,15 +20,24 @@ class BleChannel {
   static Timer? _lovenseTimedStopTimer;
 
   // A/B switch for Lovense path: native bridge (SDK-ready) vs Dart BLE.
-  static bool _useNativeLovense = false;
+  static bool _useNativeLovense = true;
+  static bool _useNativePavlok = true;
 
   static bool get useNativeLovense => _useNativeLovense;
+  static bool get useNativePavlok => _useNativePavlok;
 
   static String get lovensePathLabel =>
       _useNativeLovense ? 'native bridge' : 'direct BLE';
 
+  static String get pavlokPathLabel =>
+      _useNativePavlok ? 'native bridge' : 'direct BLE';
+
   static void setLovensePath({required bool useNative}) {
     _useNativeLovense = useNative;
+  }
+
+  static void setPavlokPath({required bool useNative}) {
+    _useNativePavlok = useNative;
   }
 
   // â”€â”€ Lovense â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -40,6 +49,22 @@ class BleChannel {
       return;
     }
     await _service.lovenseScan();
+  }
+
+  /// Scans Lovense candidates via native BLE without auto-connect.
+  static Future<List<Map<String, dynamic>>> lovenseScanCandidatesNative({
+    int timeoutMs = 8000,
+  }) async {
+    final raw = await _native.invokeMethod<List<dynamic>>(
+      'lovense.scanCandidates',
+      {'timeoutMs': timeoutMs},
+    );
+    return _asNativeCandidateList(raw);
+  }
+
+  /// Connects Lovense to a selected native BLE address.
+  static Future<void> lovenseConnectAddressNative(String address) async {
+    await _native.invokeMethod<void>('lovense.connectAddress', {'address': address});
   }
 
   /// Stops the Lovense BLE scan.
@@ -58,6 +83,11 @@ class BleChannel {
       return;
     }
     await _service.lovenseDisconnect();
+  }
+
+  static Future<bool> lovenseIsConnectedNative() async {
+    final connected = await _native.invokeMethod<bool>('lovense.isConnected');
+    return connected ?? false;
   }
 
   /// Sets vibration intensity (0â€“20).
@@ -152,44 +182,118 @@ class BleChannel {
   // â”€â”€ Pavlok â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   /// Starts a BLE scan for a Pavlok wristband in range.
-  static Future<void> pavlokScan() => _service.pavlokScan();
+  static Future<void> pavlokScan() async {
+    if (_useNativePavlok) {
+      await _invokeNative('pavlok.scan', () => _service.pavlokScan());
+      return;
+    }
+    await _service.pavlokScan();
+  }
+
+  /// Scans Pavlok candidates via native BLE without auto-connect.
+  static Future<List<Map<String, dynamic>>> pavlokScanCandidatesNative({
+    int timeoutMs = 8000,
+  }) async {
+    final raw = await _native.invokeMethod<List<dynamic>>(
+      'pavlok.scanCandidates',
+      {'timeoutMs': timeoutMs},
+    );
+    return _asNativeCandidateList(raw);
+  }
+
+  /// Connects Pavlok to a selected native BLE address.
+  static Future<void> pavlokConnectAddressNative(String address) async {
+    await _native.invokeMethod<void>('pavlok.connectAddress', {'address': address});
+  }
 
   /// Stops the Pavlok BLE scan.
-  static Future<void> pavlokStopScan() => _service.pavlokStopScan();
+  static Future<void> pavlokStopScan() async {
+    if (_useNativePavlok) {
+      await _invokeNative('pavlok.stopScan', () => _service.pavlokStopScan());
+      return;
+    }
+    await _service.pavlokStopScan();
+  }
 
   /// Disconnects from the Pavlok wristband.
-  static Future<void> pavlokDisconnect() => _service.pavlokDisconnect();
+  static Future<void> pavlokDisconnect() async {
+    if (_useNativePavlok) {
+      await _invokeNative('pavlok.disconnect', () => _service.pavlokDisconnect());
+      return;
+    }
+    await _service.pavlokDisconnect();
+  }
+
+  static Future<bool> pavlokIsConnectedNative() async {
+    final connected = await _native.invokeMethod<bool>('pavlok.isConnected');
+    return connected ?? false;
+  }
 
   /// Delivers an electric zap.
   /// [intensity] 0â€“255; [durationMs] in milliseconds.
-  static Future<void> pavlokZap({int intensity = 64, int durationMs = 500}) =>
-      _service.pavlokZap(intensity: intensity, durationMs: durationMs);
+  static Future<void> pavlokZap({int intensity = 64, int durationMs = 500}) async {
+    if (_useNativePavlok) {
+      await _invokeNative(
+        'pavlok.zap',
+        () => _service.pavlokZap(intensity: intensity, durationMs: durationMs),
+        {'intensity': intensity, 'durationMs': durationMs},
+      );
+      return;
+    }
+    await _service.pavlokZap(intensity: intensity, durationMs: durationMs);
+  }
 
   /// Activates wristband vibration.
   static Future<void> pavlokVibrate(
-          {int intensity = 128, int durationMs = 2000}) =>
-      _service.pavlokVibrate(intensity: intensity, durationMs: durationMs);
+      {int intensity = 128, int durationMs = 2000}) async {
+    if (_useNativePavlok) {
+      await _invokeNative(
+        'pavlok.vibrate',
+        () => _service.pavlokVibrate(intensity: intensity, durationMs: durationMs),
+        {'intensity': intensity, 'durationMs': durationMs},
+      );
+      return;
+    }
+    await _service.pavlokVibrate(intensity: intensity, durationMs: durationMs);
+  }
 
   /// Triggers an audible beep.
   static Future<void> pavlokBeep(
-          {int intensity = 128, int durationMs = 1000}) =>
-      _service.pavlokBeep(intensity: intensity, durationMs: durationMs);
+      {int intensity = 128, int durationMs = 1000}) async {
+    if (_useNativePavlok) {
+      await _invokeNative(
+        'pavlok.beep',
+        () => _service.pavlokBeep(intensity: intensity, durationMs: durationMs),
+        {'intensity': intensity, 'durationMs': durationMs},
+      );
+      return;
+    }
+    await _service.pavlokBeep(intensity: intensity, durationMs: durationMs);
+  }
 
   /// Stops all active Pavlok stimulation.
-  static Future<void> pavlokStopAll() => _service.pavlokStopAll();
+  static Future<void> pavlokStopAll() async {
+    if (_useNativePavlok) {
+      await _invokeNative('pavlok.stopAll', () => _service.pavlokStopAll());
+      return;
+    }
+    await _service.pavlokStopAll();
+  }
 
   static Future<void> _invokeLovenseNative(
     String method,
     Future<void> Function() fallback, [
     Map<String, Object?>? arguments,
   ]) async {
-    try {
-      await _native.invokeMethod<void>(method, arguments);
-    } on MissingPluginException {
-      await fallback();
-    } on PlatformException {
-      await fallback();
-    }
+    await _invokeNative(method, fallback, arguments);
+  }
+
+  static Future<void> _invokeNative(
+    String method,
+    Future<void> Function() _, [
+    Map<String, Object?>? arguments,
+  ]) async {
+    await _native.invokeMethod<void>(method, arguments);
   }
 
   static void _scheduleLovenseStop(int durationMs) {
@@ -201,6 +305,14 @@ class BleChannel {
     _lovenseTimedStopTimer = Timer(Duration(milliseconds: durationMs), () {
       lovenseStopAll();
     });
+  }
+
+  static List<Map<String, dynamic>> _asNativeCandidateList(List<dynamic>? raw) {
+    if (raw == null) return const <Map<String, dynamic>>[];
+    return raw
+        .whereType<Map>()
+        .map((e) => Map<String, dynamic>.from(e))
+        .toList(growable: false);
   }
 }
 

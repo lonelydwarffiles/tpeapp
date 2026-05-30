@@ -47,7 +47,6 @@ class TpeFlutterActivity : FlutterFragmentActivity() {
         val messenger = flutterEngine.dartExecutor.binaryMessenger
 
         PermissionsChannel.register(messenger, this)
-        HealthConnectChannel.register(messenger, this)
         AccessibilitySetupChannel.register(messenger, this)
         FilterServiceChannel.register(messenger, applicationContext)
         DeviceAdminChannel.register(messenger, this)

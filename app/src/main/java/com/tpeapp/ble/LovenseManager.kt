@@ -38,6 +38,34 @@ object LovenseManager {
     /** Lovense TX write characteristic UUID (FFF2). */
     val TX_UUID: UUID = UUID.fromString("0000fff2-0000-1000-8000-00805f9b34fb")
 
+    /** Common Lovense service/characteristic variants seen across models/firmware. */
+    private val ALT_SERVICE_UUIDS: Set<UUID> = setOf(
+        UUID.fromString("0000ffc0-0000-1000-8000-00805f9b34fb"),
+        UUID.fromString("52300001-0023-4bd4-bbd5-a6920e4c5653"),
+    )
+
+    private val ALT_TX_UUIDS: Set<UUID> = setOf(
+        UUID.fromString("0000fff3-0000-1000-8000-00805f9b34fb"),
+        UUID.fromString("0000ffc1-0000-1000-8000-00805f9b34fb"),
+        UUID.fromString("52300002-0023-4bd4-bbd5-a6920e4c5653"),
+        UUID.fromString("52300003-0023-4bd4-bbd5-a6920e4c5653"),
+    )
+
+    private val LOVENSE_NAME_HINTS = listOf(
+        "lovense",
+        "lush",
+        "hush",
+        "dolce",
+        "nora",
+        "max",
+        "edge",
+        "osci",
+        "ferri",
+        "ambra",
+        "domi",
+        "hyphy",
+    )
+
     @Volatile private var ble: BleManager? = null
 
     // ------------------------------------------------------------------
@@ -55,6 +83,9 @@ object LovenseManager {
                 context = context.applicationContext,
                 serviceUuid = SERVICE_UUID,
                 charUuid = TX_UUID,
+                serviceUuidAlternates = ALT_SERVICE_UUIDS,
+                charUuidAlternates = ALT_TX_UUIDS,
+                allowWritableCharFallback = true,
             )
         }
     }
@@ -63,6 +94,27 @@ object LovenseManager {
     fun startScan() {
         checkInit("startScan")
         ble!!.startScan()
+    }
+
+    /** Scans for nearby Lovense candidates without auto-connecting. */
+    fun scanCandidates(
+        timeoutMs: Long = 8_000L,
+        onComplete: (List<Map<String, Any?>>) -> Unit,
+    ) {
+        checkInit("scanCandidates")
+        ble!!.scanCandidates(timeoutMs) { candidates ->
+            val preferred = candidates.filter { candidate ->
+                val name = (candidate["name"]?.toString() ?: "").lowercase()
+                LOVENSE_NAME_HINTS.any { hint -> name.contains(hint) }
+            }
+            onComplete(if (preferred.isNotEmpty()) preferred else candidates)
+        }
+    }
+
+    /** Connects to a Lovense device by BLE MAC address. */
+    fun connectAddress(address: String) {
+        checkInit("connectAddress")
+        ble!!.connect(address)
     }
 
     /** Stops any ongoing BLE scan. */
@@ -88,6 +140,8 @@ object LovenseManager {
     fun setEventListener(listener: BleManager.EventListener?) {
         ble?.setEventListener(listener)
     }
+
+    fun isConnected(): Boolean = ble?.isReady() == true
 
     // ------------------------------------------------------------------
     //  Toy commands
