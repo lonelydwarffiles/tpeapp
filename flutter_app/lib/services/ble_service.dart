@@ -47,6 +47,12 @@ class BleService extends ChangeNotifier {
       Guid('0000fee9-0000-1000-8000-00805f9b34fb');
   static final _pavlokTxUuid =
       Guid('d44bc439-abfd-45a2-b575-925416129600');
+    static final _pavlokVibrateUuid =
+      Guid('00001001-0000-1000-8000-00805f9b34fb');
+    static final _pavlokBeepUuid =
+      Guid('00001002-0000-1000-8000-00805f9b34fb');
+    static final _pavlokZapUuid =
+      Guid('00001003-0000-1000-8000-00805f9b34fb');
     static const _pavlokServicePrefix = '156e';
   static const _knownPavlokMac = 'ca:98:6a:5c:fa:68';
   static const _strictPavlokMacMatch = true;
@@ -81,6 +87,7 @@ class BleService extends ChangeNotifier {
 
   BluetoothDevice? _pavlokDevice;
   BluetoothCharacteristic? _pavlokTx;
+  List<BluetoothCharacteristic> _pavlokTxCandidates = const [];
   String? _pavlokError;
 
   StreamSubscription<List<ScanResult>>? _scanSub;
@@ -227,6 +234,7 @@ class BleService extends ChangeNotifier {
     await _pavlokDevice?.disconnect();
     _pavlokDevice = null;
     _pavlokTx = null;
+    _pavlokTxCandidates = const [];
     _pavlokError = null;
     notifyListeners();
   }
@@ -247,7 +255,8 @@ class BleService extends ChangeNotifier {
       await device.connect(license: License.nonprofit, autoConnect: false);
       _pavlokDevice = device;
       final services = await device.discoverServices();
-      _pavlokTx = _findPavlokTx(services);
+      _pavlokTxCandidates = _findPavlokTxCandidates(services);
+      _pavlokTx = _pavlokTxCandidates.isNotEmpty ? _pavlokTxCandidates.first : null;
       if (_pavlokTx != null) {
         notifyListeners();
         return;
@@ -263,40 +272,53 @@ class BleService extends ChangeNotifier {
   }
 
   Future<void> _pavlokSend(int type, int intensity, int durationMs) async {
-    final char = _pavlokTx;
-    if (char == null) {
+    final candidates = _pavlokTxCandidates;
+    if (candidates.isEmpty) {
       _pavlokError = 'Pavlok device is not paired.';
       notifyListeners();
       return;
     }
-    final durationUnit = ((durationMs + 50) ~/ 100).clamp(0, 255);
-    final payloads = _buildPavlokPayloadCandidates(
-      char.characteristicUuid,
-      type,
-      intensity.clamp(0, 255),
-      durationUnit,
-    );
+    final intensityValue = intensity.clamp(0, 100);
+    final preferredIds = _preferredPavlokCharIdsForType(type);
 
     Object? lastError;
-    var successCount = 0;
-    for (final payload in payloads) {
-      try {
-        await char.write(
-          payload,
-          withoutResponse: _useWriteWithoutResponse(char),
-        );
-        successCount++;
-      } catch (error) {
-        lastError = error;
+    String lastCharId = 'unknown';
+    var noResourceHits = 0;
+    final prioritizedCandidates = _prioritizePavlokCandidates(candidates, preferredIds);
+    for (final char in prioritizedCandidates) {
+      lastCharId = char.characteristicUuid.str.toLowerCase();
+      final payloads = _buildPavlokPayloadCandidates(
+        char.characteristicUuid,
+        type,
+        intensityValue,
+        durationMs,
+      );
+      if (payloads.isEmpty) {
+        continue;
       }
-    }
-
-    if (successCount > 0) {
-      return;
+      for (final payload in payloads) {
+        try {
+          await char.write(
+            payload,
+            withoutResponse: _pavlokUseWriteWithoutResponse(char),
+          );
+          // Stop at first successful write to avoid duplicate actuation.
+          return;
+        } catch (error) {
+          lastError = error;
+          if (error.toString().toLowerCase().contains('gatt_no_resources')) {
+            noResourceHits++;
+            // Back off when queue pressure is reported.
+            await Future<void>.delayed(const Duration(milliseconds: 180));
+          }
+        }
+      }
+      // Small guard interval between characteristics.
+      await Future<void>.delayed(const Duration(milliseconds: 80));
     }
 
     _pavlokError =
-        'Pavlok command failed on ${char.characteristicUuid.str.toLowerCase()}: $lastError';
+        'Pavlok command failed on $lastCharId (queue hits: $noResourceHits): $lastError';
     notifyListeners();
     throw StateError(_pavlokError!);
   }
@@ -392,11 +414,18 @@ class BleService extends ChangeNotifier {
     return ordered;
   }
 
-  BluetoothCharacteristic? _findPavlokTx(List<BluetoothService> services) {
+  List<BluetoothCharacteristic> _findPavlokTxCandidates(
+      List<BluetoothService> services) {
+    final byId = <String, BluetoothCharacteristic>{};
+
+    void add(BluetoothCharacteristic char) {
+      byId[char.characteristicUuid.str.toLowerCase()] = char;
+    }
+
     for (final service in services) {
       for (final char in service.characteristics) {
         if (char.characteristicUuid == _pavlokTxUuid && _canWrite(char)) {
-          return char;
+          add(char);
         }
       }
     }
@@ -405,7 +434,7 @@ class BleService extends ChangeNotifier {
       if (service.serviceUuid == _pavlokServiceUuid) {
         for (final char in service.characteristics) {
           if (_canWrite(char) && _isLikelyPavlokTx(char.characteristicUuid)) {
-            return char;
+            add(char);
           }
         }
       }
@@ -424,7 +453,7 @@ class BleService extends ChangeNotifier {
         }
         final cid = char.characteristicUuid.str.toLowerCase();
         if (cid == '0007' || cid.endsWith('0007')) {
-          return char;
+          add(char);
         }
       }
     }
@@ -440,7 +469,7 @@ class BleService extends ChangeNotifier {
         }
         final cid = char.characteristicUuid.str.toLowerCase();
         if (cid == '0008' || cid.endsWith('0008')) {
-          return char;
+          add(char);
         }
       }
     }
@@ -454,7 +483,7 @@ class BleService extends ChangeNotifier {
         if (_canWrite(char)) {
           final cid = char.characteristicUuid.str.toLowerCase();
           if (cid == '1001' || cid.endsWith('1001')) {
-            return char;
+            add(char);
           }
         }
       }
@@ -467,12 +496,16 @@ class BleService extends ChangeNotifier {
       }
       for (final char in service.characteristics) {
         if (_canWrite(char) && _isLikelyPavlokTx(char.characteristicUuid)) {
-          return char;
+          add(char);
         }
       }
     }
 
-    return null;
+    final ordered = byId.values.toList();
+    ordered.sort((a, b) =>
+        _pavlokTxPriority(a.characteristicUuid)
+            .compareTo(_pavlokTxPriority(b.characteristicUuid)));
+    return ordered;
   }
 
   bool _canWrite(BluetoothCharacteristic char) {
@@ -481,6 +514,14 @@ class BleService extends ChangeNotifier {
 
   bool _useWriteWithoutResponse(BluetoothCharacteristic char) {
     return !char.properties.write && char.properties.writeWithoutResponse;
+  }
+
+  bool _pavlokUseWriteWithoutResponse(BluetoothCharacteristic char) {
+    // Prefer acknowledged writes for Pavlok to avoid queue saturation.
+    if (char.properties.write) {
+      return false;
+    }
+    return _useWriteWithoutResponse(char);
   }
 
   bool _isStandardService(Guid serviceUuid) {
@@ -504,6 +545,10 @@ class BleService extends ChangeNotifier {
     return id.contains('d44bc439') ||
         id == '1001' ||
         id.endsWith('1001') ||
+      id == '1002' ||
+      id.endsWith('1002') ||
+      id == '1003' ||
+      id.endsWith('1003') ||
         id == '0007' ||
         id == '0008';
   }
@@ -512,42 +557,98 @@ class BleService extends ChangeNotifier {
     Guid characteristicUuid,
     int type,
     int intensity,
-    int durationUnit,
+    int durationMs,
   ) {
     final id = characteristicUuid.str.toLowerCase();
-    final base = [type, intensity, durationUnit];
+    final rrSingle = 0x81;
+    final ta = _pavlokTimeCodeForMs(durationMs);
+    final to = _pavlokTimeCodeForMs(durationMs);
 
-    if (id == '0007' || id.endsWith('0007') || id == '0008' || id.endsWith('0008')) {
-      final swapped = <int>[type, durationUnit, intensity];
-      final prefixed4 = <int>[0, type, intensity, durationUnit];
-      final prefixed4Swapped = <int>[0, type, durationUnit, intensity];
-      final padded8 = <int>[...base, 0, 0, 0, 0, 0];
-      return [
-        base,
-        swapped,
-        prefixed4,
-        prefixed4Swapped,
-        padded8,
-      ];
+    final isVibrateChar =
+        id == '1001' || id.endsWith('1001') || id == '0007' || id.endsWith('0007');
+    final isBeepChar =
+        id == '1002' || id.endsWith('1002') || id == '0008' || id.endsWith('0008');
+    final isZapChar = id == '1003' || id.endsWith('1003');
+
+    if (type == _cmdVibrate && isVibrateChar) {
+      // Pavlok-S vibrate packet: RR 0C II TA TO
+      return [<int>[rrSingle, 0x0c, intensity, ta, to]];
     }
 
-    if (!(id == '1001' || id.endsWith('1001'))) {
-      return [base];
+    if (type == _cmdBeep && isBeepChar) {
+      // Pavlok-S beep packet: RR 0C II TA TO
+      return [<int>[rrSingle, 0x0c, intensity, ta, to]];
     }
 
-    final padded8 = <int>[...base, 0, 0, 0, 0, 0];
-    final prefixed4 = <int>[0, ...base];
-    final padded20 = List<int>.filled(20, 0);
-    padded20[0] = type;
-    padded20[1] = intensity;
-    padded20[2] = durationUnit;
+    if (type == _cmdZap && isZapChar) {
+      // Pavlok-S zap packet: RR II
+      return [<int>[rrSingle, intensity]];
+    }
 
-    return [
-      base,
-      prefixed4,
-      padded8,
-      padded20,
-    ];
+    // Conservative fallback for older/alternate profiles.
+    if ((id == '0007' || id.endsWith('0007') || id == '0008' || id.endsWith('0008')) &&
+        (type == _cmdVibrate || type == _cmdBeep)) {
+      return [<int>[rrSingle, 0x0c, intensity, ta, to]];
+    }
+
+    return const [];
+  }
+
+  int _pavlokTimeCodeForMs(int durationMs) {
+    if (durationMs > 10000) {
+      return 62;
+    }
+    if (durationMs >= 3000) {
+      return ((durationMs - 3000) ~/ 500) | 48;
+    }
+    if (durationMs >= 1000) {
+      return ((durationMs - 1000) ~/ 100) | 32;
+    }
+    if (durationMs >= 200) {
+      return ((durationMs - 200) ~/ 50) | 16;
+    }
+    return durationMs ~/ 10;
+  }
+
+  Set<String> _preferredPavlokCharIdsForType(int type) {
+    if (type == _cmdVibrate) {
+      return const {'1001', '0007'};
+    }
+    if (type == _cmdBeep) {
+      return const {'1002', '0008'};
+    }
+    if (type == _cmdZap) {
+      return const {'1003'};
+    }
+    return const <String>{};
+  }
+
+  List<BluetoothCharacteristic> _prioritizePavlokCandidates(
+    List<BluetoothCharacteristic> input,
+    Set<String> preferredIds,
+  ) {
+    if (preferredIds.isEmpty) {
+      return input;
+    }
+    final preferred = <BluetoothCharacteristic>[];
+    final fallback = <BluetoothCharacteristic>[];
+    for (final char in input) {
+      final id = char.characteristicUuid.str.toLowerCase();
+      final shortId = _shortGuidTail(id);
+      if (preferredIds.contains(shortId)) {
+        preferred.add(char);
+      } else {
+        fallback.add(char);
+      }
+    }
+    return [...preferred, ...fallback];
+  }
+
+  String _shortGuidTail(String raw) {
+    if (raw.length < 4) {
+      return raw;
+    }
+    return raw.substring(raw.length - 4);
   }
 
   int _lovenseTxPriority(Guid uuid) {
@@ -558,6 +659,24 @@ class BleService extends ChangeNotifier {
     if (id.contains('fff2')) return 3;
     if (id.contains('6e400002')) return 4;
     return 10;
+  }
+
+  int _pavlokTxPriority(Guid uuid) {
+    final id = uuid.str.toLowerCase();
+    if (id == '1001' || id.endsWith('1001')) return 0;
+    if (id == '1002' || id.endsWith('1002')) return 1;
+    if (id == '1003' || id.endsWith('1003')) return 2;
+    if (id == '0007' || id.endsWith('0007')) return 0;
+    if (id == '0008' || id.endsWith('0008')) return 1;
+    if (id.contains('d44bc439')) return 4;
+    return 10;
+  }
+
+  List<int> _pavlokTypeCandidates(int type) {
+    final out = <int>[type];
+    if (type > 0) out.add(type - 1);
+    if (type < 255) out.add(type + 1);
+    return out.toSet().toList(growable: false);
   }
 
   bool _isKnownPavlok(BluetoothDevice device) {
