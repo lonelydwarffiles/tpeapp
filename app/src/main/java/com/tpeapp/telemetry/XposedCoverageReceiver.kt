@@ -71,6 +71,12 @@ class XposedCoverageReceiver : BroadcastReceiver() {
                 put("timestamp", intent.getLongExtra(EXTRA_TIMESTAMP, System.currentTimeMillis()))
             }
 
+            Log.i(
+                TAG,
+                "coverage lane=${payload.optString("lane")} stage=${payload.optString("stage")} " +
+                    "sensitive=${payload.optBoolean("sensitive", false)}",
+            )
+
             WebhookManager.dispatchEvent(webhookUrl, bearerToken, payload)
         } catch (t: Throwable) {
             Log.w(TAG, "Failed to dispatch Xposed coverage telemetry", t)

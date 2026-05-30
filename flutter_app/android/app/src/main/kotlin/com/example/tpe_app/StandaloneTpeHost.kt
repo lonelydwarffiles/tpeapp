@@ -552,7 +552,9 @@ object StandaloneTpeHost {
                 "isAdminActive" -> result.success(prefs.getBoolean(flutterKey(ADMIN_ACTIVE_KEY), false))
                 "requestActivation" -> {
                     runCatching {
-                        activity.startActivity(Intent(Settings.ACTION_DEVICE_ADMIN_SETTINGS))
+                        activity.startActivity(Intent("android.settings.DEVICE_ADMIN_SETTINGS"))
+                    }.recoverCatching {
+                        activity.startActivity(Intent(Settings.ACTION_SECURITY_SETTINGS))
                     }
                     result.success(null)
                 }

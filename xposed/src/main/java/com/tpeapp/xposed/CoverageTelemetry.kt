@@ -21,6 +21,7 @@ object CoverageTelemetry {
     const val LANE_OKHTTP = "okhttp"
 
     const val STAGE_SCAN_RESULT = "scan_result"
+    const val STAGE_BYPASS_PERMITTED = "bypass_permitted"
     const val STAGE_SERVICE_UNAVAILABLE = "service_unavailable"
     const val STAGE_SCAN_TIMEOUT = "scan_timeout"
     const val STAGE_SCAN_ERROR = "scan_error"

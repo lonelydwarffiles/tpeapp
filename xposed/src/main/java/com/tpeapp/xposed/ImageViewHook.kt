@@ -62,6 +62,7 @@ object ImageViewHook {
     }
     private val cacheLock = Any()
     private val latestViewRequest = java.util.Collections.synchronizedMap(WeakHashMap<ImageView, Long>())
+    private val suppressedViewCalls = java.util.Collections.synchronizedMap(WeakHashMap<ImageView, Int>())
 
     /**
      * Re-entrancy guard for the main thread.
@@ -102,9 +103,9 @@ object ImageViewHook {
 
     private val setBitmapHook = object : XC_MethodHook() {
         override fun beforeHookedMethod(param: MethodHookParam) {
-            if (inHook.get() == true) return  // our own internal call — let original proceed
-            val bitmap = param.args[0] as? Bitmap ?: return
             val view   = param.thisObject as? ImageView ?: return
+            if (consumeSuppressedCall(view) || inHook.get() == true) return
+            val bitmap = param.args[0] as? Bitmap ?: return
 
             param.result = null
             handleInterceptedBitmap(view, bitmap)
@@ -113,10 +114,10 @@ object ImageViewHook {
 
     private val setDrawableHook = object : XC_MethodHook() {
         override fun beforeHookedMethod(param: MethodHookParam) {
-            if (inHook.get() == true) return  // our own internal call — let original proceed
+            val view     = param.thisObject as? ImageView ?: return
+            if (consumeSuppressedCall(view) || inHook.get() == true) return
             val drawable = param.args[0] as? BitmapDrawable ?: return  // only handle BitmapDrawable
             val bitmap   = drawable.bitmap ?: return
-            val view     = param.thisObject as? ImageView ?: return
 
             param.result = null
             handleInterceptedBitmap(view, bitmap)
@@ -128,6 +129,12 @@ object ImageViewHook {
         latestViewRequest[view] = requestId
 
         if (MediaFilterRuntimeConfig.isNudityPermittedByHandler()) {
+            CoverageTelemetry.report(
+                lane = CoverageTelemetry.LANE_IMAGEVIEW,
+                stage = CoverageTelemetry.STAGE_BYPASS_PERMITTED,
+                reason = "nudity_permitted_by_handler",
+            )
+            Log.i(TAG, "Bypassing censor (handler permitted) request=$requestId")
             runOnUiThread(view) { revealIfLatest(view, requestId, original) }
             return
         }
@@ -213,6 +220,9 @@ object ImageViewHook {
                     confidence = confidence,
                     latencyMs = System.currentTimeMillis() - startedAt,
                 )
+                if (isSensitive) {
+                    Log.i(TAG, "CENSOR_APPLIED request=$requestId confidence=$confidence")
+                }
                 val finalBitmap = if (isSensitive) createCensoredBitmap(original) else original
                 runOnUiThread(view) {
                     revealIfLatest(view, requestId, finalBitmap)
@@ -233,6 +243,7 @@ object ImageViewHook {
     }
 
     private fun setPlaceholder(view: ImageView) {
+        markSuppressedCall(view)
         inHook.set(true)
         try {
             view.setImageDrawable(
@@ -247,6 +258,7 @@ object ImageViewHook {
     }
 
     private fun revealBitmap(view: ImageView, bitmap: Bitmap) {
+        markSuppressedCall(view)
         inHook.set(true)
         try {
             view.setImageBitmap(bitmap)
@@ -303,6 +315,25 @@ object ImageViewHook {
     private fun putCachedDecision(key: Int, sensitive: Boolean) {
         synchronized(cacheLock) {
             decisionCache[key] = sensitive
+        }
+    }
+
+    private fun markSuppressedCall(view: ImageView) {
+        synchronized(suppressedViewCalls) {
+            val current = suppressedViewCalls[view] ?: 0
+            suppressedViewCalls[view] = current + 1
+        }
+    }
+
+    private fun consumeSuppressedCall(view: ImageView): Boolean {
+        synchronized(suppressedViewCalls) {
+            val remaining = suppressedViewCalls[view] ?: return false
+            if (remaining <= 1) {
+                suppressedViewCalls.remove(view)
+            } else {
+                suppressedViewCalls[view] = remaining - 1
+            }
+            return true
         }
     }
 
