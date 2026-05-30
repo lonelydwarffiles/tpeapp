@@ -46,6 +46,8 @@ class SettingsScreen extends StatefulWidget {
 class _SettingsScreenState extends State<SettingsScreen> {
   bool _adminActive = false;
   bool _loadingAdmin = true;
+  bool _batteryOptimizationsIgnored = false;
+  bool _loadingBatteryOptimization = true;
 
   // Filter
   double _threshold = 0.55;
@@ -104,6 +106,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       await _prefs.remove(_kHandlerApiKey);
     }
     final active = await DeviceAdminChannel.isAdminActive();
+    final batteryIgnored = await DeviceAdminChannel.isIgnoringBatteryOptimizations();
     final webhookUrl = await FilterServiceChannel.getWebhookUrl();
     final webhookToken = await FilterServiceChannel.getWebhookToken();
     final healthEnabled = await VitalsSyncService.instance.isEnabled();
@@ -122,6 +125,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
     setState(() {
       _adminActive = active;
       _loadingAdmin = false;
+      _batteryOptimizationsIgnored = batteryIgnored;
+      _loadingBatteryOptimization = false;
       _threshold = (_prefs.getDouble('filter_confidence_threshold') ?? 0.55);
       _strictMode = _prefs.getBool('filter_strict_mode') ?? false;
         _nudeNetEnabled = _prefs.getBool(_kNudeNetEnabled) ?? false;
@@ -157,6 +162,33 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Future<void> _activateAdmin() async {
+    final ready = await _ensureAdminPinSet();
+    if (!ready) return;
+
+    if (!mounted) return;
+    final proceed = await showDialog<bool>(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            title: const Text('Enable Device Admin'),
+            content: const Text(
+              'You are about to open Android Device Admin settings. '
+              'Enable TPE App there, then return here.',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('Cancel'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(ctx, true),
+                child: const Text('Open Settings'),
+              ),
+            ],
+          ),
+        ) ??
+        false;
+    if (!proceed) return;
+
     await DeviceAdminChannel.requestActivation();
     await Future.delayed(const Duration(seconds: 1));
     final active = await DeviceAdminChannel.isAdminActive();
@@ -165,6 +197,67 @@ class _SettingsScreenState extends State<SettingsScreen> {
       event: active ? 'device_admin_activated' : 'device_admin_activation_pending',
       reason: 'settings',
     );
+
+    if (mounted && !active) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Device Admin is still inactive. Enable it in system settings, then return here.',
+          ),
+        ),
+      );
+    }
+  }
+
+  Future<bool> _ensureAdminPinSet() async {
+    final hasPin = await DeviceAdminChannel.isPinSet();
+    if (hasPin) return true;
+
+    if (!mounted) return false;
+    final pin = await _showPinDialog('Create Device Admin PIN');
+    if (pin == null) return false;
+    final trimmed = pin.trim();
+    if (trimmed.length < 4) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('PIN must be at least 4 digits.')),
+        );
+      }
+      return false;
+    }
+
+    await DeviceAdminChannel.setPin(trimmed);
+    await _emitBehavior(
+      event: 'device_admin_pin_set',
+      reason: 'settings',
+    );
+    return true;
+  }
+
+  Future<void> _requestBatteryOptimizationExemption() async {
+    await DeviceAdminChannel.requestIgnoreBatteryOptimizations();
+    await Future.delayed(const Duration(milliseconds: 800));
+    final ignored = await DeviceAdminChannel.isIgnoringBatteryOptimizations();
+    if (!mounted) return;
+    setState(() => _batteryOptimizationsIgnored = ignored);
+
+    await _emitBehavior(
+      event: ignored
+          ? 'battery_optimization_disabled'
+          : 'battery_optimization_still_enabled',
+      reason: 'settings',
+    );
+
+    if (!mounted) return;
+    if (!ignored) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Battery optimization is still enabled. Disable it for reliable background control.',
+          ),
+        ),
+      );
+    }
   }
 
   Future<void> _deactivateAdmin() async {
@@ -468,6 +561,32 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     OutlinedButton(
                         onPressed: _deactivateAdmin,
                         child: const Text('Deactivate')),
+                ]),
+
+          const SizedBox(height: 14),
+          Text('Battery Optimization',
+              style: Theme.of(context).textTheme.titleSmall),
+          const SizedBox(height: 8),
+          _loadingBatteryOptimization
+              ? const LinearProgressIndicator()
+              : Row(children: [
+                  Expanded(
+                    child: Text(
+                      _batteryOptimizationsIgnored
+                          ? '✅ Exempted (recommended)'
+                          : '❌ Optimization enabled',
+                    ),
+                  ),
+                  if (_batteryOptimizationsIgnored)
+                    OutlinedButton(
+                      onPressed: DeviceAdminChannel.openBatteryOptimizationSettings,
+                      child: const Text('Open Settings'),
+                    )
+                  else
+                    FilledButton(
+                      onPressed: _requestBatteryOptimizationExemption,
+                      child: const Text('Disable'),
+                    ),
                 ]),
 
           const Divider(height: 32),

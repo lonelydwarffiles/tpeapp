@@ -15,6 +15,7 @@ import android.media.MediaPlayer
 import android.net.Uri
 import android.os.BatteryManager
 import android.os.Build
+import android.os.PowerManager
 import android.provider.Settings
 import android.speech.tts.TextToSpeech
 import android.util.Log
@@ -551,7 +552,7 @@ object StandaloneTpeHost {
                 "isAdminActive" -> result.success(prefs.getBoolean(flutterKey(ADMIN_ACTIVE_KEY), false))
                 "requestActivation" -> {
                     runCatching {
-                        activity.startActivity(Intent(Settings.ACTION_SECURITY_SETTINGS))
+                        activity.startActivity(Intent(Settings.ACTION_DEVICE_ADMIN_SETTINGS))
                     }
                     result.success(null)
                 }
@@ -604,6 +605,38 @@ object StandaloneTpeHost {
                         }.getOrDefault(false)
                         result.success(locked)
                     }
+                }
+                "isIgnoringBatteryOptimizations" -> {
+                    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) {
+                        result.success(true)
+                    } else {
+                        val pm = activity.getSystemService(PowerManager::class.java)
+                        result.success(pm?.isIgnoringBatteryOptimizations(activity.packageName) == true)
+                    }
+                }
+                "requestIgnoreBatteryOptimizations" -> {
+                    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) {
+                        result.success(null)
+                    } else {
+                        runCatching {
+                            activity.startActivity(
+                                Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+                                    data = Uri.parse("package:${activity.packageName}")
+                                }
+                            )
+                        }.onFailure {
+                            runCatching {
+                                activity.startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
+                            }
+                        }
+                        result.success(null)
+                    }
+                }
+                "openBatteryOptimizationSettings" -> {
+                    runCatching {
+                        activity.startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
+                    }
+                    result.success(null)
                 }
                 else -> result.notImplemented()
             }

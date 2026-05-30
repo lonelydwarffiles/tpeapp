@@ -14,7 +14,6 @@ import '../services/websocket_service.dart';
 import 'check_in_screen.dart';
 import 'intiface_screen.dart';
 import 'questions_screen.dart';
-import 'screen_share_screen.dart';
 import 'settings_screen.dart';
 import 'task_list_screen.dart';
 
@@ -327,11 +326,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         title: 'NudeNet Blocker',
         icon: Icons.shield_outlined,
         screenBuilder: () => const NudeNetBlockerScreen(),
-      ),
-      _DashboardFeature(
-        title: 'WebRTC Video',
-        icon: Icons.videocam_outlined,
-        screenBuilder: () => const ScreenShareScreen(),
       ),
       _DashboardFeature(
         title: 'Daily Check-In',

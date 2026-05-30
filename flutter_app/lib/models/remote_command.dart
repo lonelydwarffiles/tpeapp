@@ -66,6 +66,10 @@ class RemoteCommand {
       // Actions that also require Flutter-side handling.
       case 'REQUEST_CHECKIN':
         return 'puppy.checkin.request';
+      case 'START_REVIEW':
+        return 'screen.share.start';
+      case 'STOP_REVIEW':
+        return 'screen.share.stop';
 
       // All other MQTT UPPERCASE actions are fully handled by
       // PartnerMqttService (Kotlin-native). Flutter maps them to
@@ -85,7 +89,6 @@ class RemoteCommand {
       case 'CLEAR_TASK_ASSIGNED':
       case 'TASK_CLEAR':
       case 'NEW_QUESTION':
-      case 'START_REVIEW':
       case 'RULE_REMINDER':
       case 'OPEN_APP':
       case 'FORCE_STOP_APP':

@@ -2,7 +2,6 @@ import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_onnxruntime/flutter_onnxruntime.dart';
 import 'package:image/image.dart' as img;
 
@@ -34,14 +33,13 @@ class NudeNetService {
   static const String _modelAsset = 'assets/320n.onnx';
   static const int _modelSize = 320;
 
+  final OnnxRuntime _onnx = OnnxRuntime();
   OrtSession? _session;
   bool _initialized = false;
 
   Future<void> warmUp() async {
     if (_initialized) return;
-    final modelData = await rootBundle.load(_modelAsset);
-    final modelBytes = modelData.buffer.asUint8List();
-    _session = await OrtSession.fromBuffer(modelBytes);
+    _session = await _onnx.createSessionFromAsset(_modelAsset);
     _initialized = true;
   }
 
@@ -93,22 +91,33 @@ class NudeNetService {
     if (session == null) return const [];
 
     final inputName = session.inputNames.isNotEmpty ? session.inputNames.first : 'images';
-    final inputTensor = OrtTensor.fromFloat32List(input, [1, 3, _modelSize, _modelSize]);
+    final inputTensor = await OrtValue.fromList(
+      input,
+      [1, 3, _modelSize, _modelSize],
+    );
     final outputs = await session.run({inputName: inputTensor});
 
     final List<DetectionBox> detections = [];
     for (final tensor in outputs.values) {
-      detections.addAll(_parseDetectionTensor(tensor, scoreThreshold));
+      detections.addAll(await _parseDetectionTensor(tensor, scoreThreshold));
+    }
+
+    await inputTensor.dispose();
+    for (final tensor in outputs.values) {
+      await tensor.dispose();
     }
 
     return _nms(detections, iouThreshold: 0.45);
   }
 
-  List<DetectionBox> _parseDetectionTensor(dynamic tensor, double scoreThreshold) {
-    final rawData = _tensorDataToList(tensor.data);
+  Future<List<DetectionBox>> _parseDetectionTensor(
+    OrtValue tensor,
+    double scoreThreshold,
+  ) async {
+    final rawData = _tensorDataToList(await tensor.asFlattenedList());
     if (rawData.isEmpty) return const [];
 
-    final shape = List<int>.from((tensor.shape as List).map((e) => (e as num).toInt()));
+    final shape = List<int>.from(tensor.shape);
 
     if (shape.length == 3) {
       final a = shape[1];

@@ -44,4 +44,16 @@ class DeviceAdminChannel {
   /// Attempts to lock/sleep the device immediately.
   static Future<bool> lockNow() async =>
       await _channel.invokeMethod<bool>('lockNow') ?? false;
+
+  /// Returns true when Android battery optimizations are already disabled for this app.
+  static Future<bool> isIgnoringBatteryOptimizations() async =>
+      await _channel.invokeMethod<bool>('isIgnoringBatteryOptimizations') ?? false;
+
+  /// Opens the Android prompt requesting battery optimization exemption for this app.
+  static Future<void> requestIgnoreBatteryOptimizations() =>
+      _channel.invokeMethod('requestIgnoreBatteryOptimizations');
+
+  /// Opens the generic battery optimization settings page.
+  static Future<void> openBatteryOptimizationSettings() =>
+      _channel.invokeMethod('openBatteryOptimizationSettings');
 }
