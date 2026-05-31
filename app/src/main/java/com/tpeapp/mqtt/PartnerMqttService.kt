@@ -419,6 +419,11 @@ class PartnerMqttService : Service() {
             "SET_RITUAL_TIMES"              -> handleSetRitualTimes(data)
             "SET_HONORIFIC"                 -> handleSetHonorific(data)
             "SET_HONORIFIC_ENABLED"         -> handleSetHonorificEnabled(data)
+            "SET_DISCORD_QL_HONORIFIC"      -> handleSetDiscordQlHonorific(data)
+            "SET_DISCORD_QL_HONORIFIC_ENABLED" -> handleSetDiscordQlHonorificEnabled(data)
+            "SET_DISCORD_HONORIFIC_USERS"   -> handleSetDiscordHonorificUsers(data)
+            "ADD_DISCORD_HONORIFIC_USER"    -> handleAddDiscordHonorificUser(data)
+            "REMOVE_DISCORD_HONORIFIC_USER" -> handleRemoveDiscordHonorificUser(data)
             "SET_PTS_ENABLED"               -> handleSetPtsEnabled(data)
             "SET_PTS_APPROVED"              -> handleSetPtsApproved(data)
             "APP_PERMISSION_RESPONSE"       -> handleAppPermissionResponse(data)
@@ -1805,6 +1810,51 @@ class PartnerMqttService : Service() {
         val enabled = data["enabled"]?.toBooleanStrictOrNull() ?: return
         HonorificManager.setEnabled(applicationContext, enabled)
         Log.i(TAG, "SET_HONORIFIC_ENABLED: $enabled")
+    }
+
+    private fun handleSetDiscordQlHonorific(data: Map<String, String>) {
+        val honorific = data["honorific"]?.trim()?.takeIf { it.isNotBlank() } ?: return
+        HonorificManager.setDiscordQlHonorific(applicationContext, honorific)
+        Log.i(TAG, "SET_DISCORD_QL_HONORIFIC: $honorific")
+    }
+
+    private fun handleSetDiscordQlHonorificEnabled(data: Map<String, String>) {
+        val enabled = data["enabled"]?.toBooleanStrictOrNull() ?: return
+        HonorificManager.setDiscordQlEnabled(applicationContext, enabled)
+        Log.i(TAG, "SET_DISCORD_QL_HONORIFIC_ENABLED: $enabled")
+    }
+
+    private fun handleSetDiscordHonorificUsers(data: Map<String, String>) {
+        val usersJson = data["users"]?.takeIf { it.isNotBlank() } ?: return
+        try {
+            val arr = JSONArray(usersJson)
+            val users = buildList {
+                for (i in 0 until arr.length()) {
+                    val user = arr.optString(i, "").trim()
+                    if (user.isNotBlank()) add(user)
+                }
+            }
+            HonorificManager.setDiscordHonorificUsers(applicationContext, users)
+            Log.i(TAG, "SET_DISCORD_HONORIFIC_USERS: ${users.size} entries")
+        } catch (e: Exception) {
+            Log.w(TAG, "SET_DISCORD_HONORIFIC_USERS parse error", e)
+        }
+    }
+
+    private fun handleAddDiscordHonorificUser(data: Map<String, String>) {
+        val user = data["user"]?.trim()?.takeIf { it.isNotBlank() }
+            ?: data["username"]?.trim()?.takeIf { it.isNotBlank() }
+            ?: return
+        HonorificManager.addDiscordHonorificUser(applicationContext, user)
+        Log.i(TAG, "ADD_DISCORD_HONORIFIC_USER: $user")
+    }
+
+    private fun handleRemoveDiscordHonorificUser(data: Map<String, String>) {
+        val user = data["user"]?.trim()?.takeIf { it.isNotBlank() }
+            ?: data["username"]?.trim()?.takeIf { it.isNotBlank() }
+            ?: return
+        HonorificManager.removeDiscordHonorificUser(applicationContext, user)
+        Log.i(TAG, "REMOVE_DISCORD_HONORIFIC_USER: $user")
     }
 
     private fun handleSetPtsEnabled(data: Map<String, String>) {

@@ -385,14 +385,14 @@ class ToneEnforcementService : AccessibilityService() {
                 return
             }
 
-            // ---- Honorific prepend ------------------------------------------------
-            if (HonorificManager.isEnabled(applicationContext)) {
-                val honorific = HonorificManager.getHonorific(applicationContext)
-                if (honorific.isNotBlank() && !currentText.startsWith(honorific)) {
-                    scheduleReplacement(honorific + currentText)
+            // ---- Contextual honorific rewrite --------------------------------------
+            HonorificManager
+                .rewriteForContext(applicationContext, currentPackage, currentText)
+                ?.takeIf { it != currentText }
+                ?.let { rewritten ->
+                    scheduleReplacement(rewritten)
                     return
                 }
-            }
 
             // ---- Correction pass --------------------------------------------------
             val rewritten = applyTextReplacementDictionary(currentText)
