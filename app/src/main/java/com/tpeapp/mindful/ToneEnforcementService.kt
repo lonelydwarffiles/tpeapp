@@ -96,6 +96,56 @@ class ToneEnforcementService : AccessibilityService() {
             Regex("""\b(the|a|an|and|or|but)\s+\1\b""", RegexOption.IGNORE_CASE) to "$1"
         )
 
+            /**
+             * Replacement personas coordinate all self-reference pronouns (I, me, my, etc.)
+             * so they form a consistent voice within a session.
+             */
+            private data class ReplacementPersona(
+                val name: String,
+                val replacements: Map<String, String>
+            )
+
+            private val SELF_REFERENCE_PERSONAS = listOf(
+                ReplacementPersona(
+                    "puppy",
+                    mapOf(
+                        """(?i)\bI\b""" to "puppy",
+                        """(?i)\bme\b""" to "it",
+                        """(?i)\bmyself\b""" to "itself",
+                        """(?i)\bmy\b""" to "its",
+                        """(?i)\bmine\b""" to "its"
+                    )
+                ),
+                ReplacementPersona(
+                    "mutt",
+                    mapOf(
+                        """(?i)\bI\b""" to "this mutt",
+                        """(?i)\bme\b""" to "it",
+                        """(?i)\bmyself\b""" to "itself",
+                        """(?i)\bmy\b""" to "its",
+                        """(?i)\bmine\b""" to "its"
+                    )
+                ),
+                ReplacementPersona(
+                    "it",
+                    mapOf(
+                        """(?i)\bI\b""" to "it",
+                        """(?i)\bme\b""" to "it",
+                        """(?i)\bmyself\b""" to "itself",
+                        """(?i)\bmy\b""" to "its",
+                        """(?i)\bmine\b""" to "its"
+                    )
+                )
+            )
+
+            private val SELF_REFERENCE_PATTERNS = setOf(
+                """(?i)\bI\b""",
+                """(?i)\bme\b""",
+                """(?i)\bmyself\b""",
+                """(?i)\bmy\b""",
+                """(?i)\bmine\b"""
+            )
+
         /** Package-name substrings that identify messaging/SMS apps for PTS gating. */
         private val MESSAGING_PACKAGE_KEYWORDS = listOf(
             "sms", "message", "whatsapp", "telegram", "signal", "messenger",
@@ -212,6 +262,13 @@ class ToneEnforcementService : AccessibilityService() {
      * (e.g., "I" stays as "puppy" throughout a message, not varying per keystroke).
      */
     private val sessionReplacementChoices = mutableMapOf<String, String>()
+
+        /**
+         * Tracks the chosen persona for self-reference pronouns this session.
+         * Once a self-reference pattern is matched, a persona is selected and
+         * applied to ALL self-reference patterns for consistency.
+         */
+        private var sessionPersona: ReplacementPersona? = null
 
     // ------------------------------------------------------------------
     //  Focus-change tracking (used to reset session state)
@@ -546,12 +603,25 @@ class ToneEnforcementService : AccessibilityService() {
                     }
                     else -> continue
                 }
-                // Get or pick a consistent replacement for this session.
-                // If we've already chosen a replacement for this pattern this session,
-                // reuse it. Otherwise, randomly pick one and cache it for consistency.
-                val replacement = sessionReplacementChoices.getOrPut(pattern) {
-                    replacements.random()
-                }
+                    // Check if this is a self-reference pattern (I, me, my, myself, mine).
+                    val isSelfReference = SELF_REFERENCE_PATTERNS.contains(pattern)
+
+                    // If it's a self-reference and we haven't picked a persona yet, pick one now.
+                    // The persona defines consistent replacements for ALL self-reference pronouns.
+                    if (isSelfReference && sessionPersona == null) {
+                        sessionPersona = SELF_REFERENCE_PERSONAS.random()
+                        Log.i(TAG, "Selected persona for session: ${sessionPersona?.name}")
+                    }
+
+                    // Get replacement from persona if self-reference, otherwise use session cache.
+                    val replacement = if (isSelfReference && sessionPersona != null) {
+                        sessionPersona!!.replacements[pattern] ?: continue
+                    } else {
+                        // For non-self-reference patterns, use random selection cache.
+                        sessionReplacementChoices.getOrPut(pattern) {
+                            replacements.random()
+                        }
+                    }
                 runCatching {
                     val beforeRewrite = rewritten
                     rewritten = rewritten.replace(pattern.toRegex(), replacement)
@@ -589,19 +659,19 @@ class ToneEnforcementService : AccessibilityService() {
     private fun postProcessGrammar(text: String): String {
         var corrected = text
         for ((pattern, replacement) in GRAMMAR_RULES) {
-            val ruleId = pattern.pattern  // Use the regex pattern string as ID
-            if (grammarBypassRules.contains(ruleId)) {
-                Log.d(TAG, "Skipping bypassed grammar rule: $ruleId")
+                val ruleId = pattern.pattern  // Use the regex pattern string as ID
+                if (grammarBypassRules.contains(ruleId)) {
+                    Log.d(TAG, "Skipping bypassed grammar rule: $ruleId")
                 continue
             }
             runCatching {
                 val before = corrected
                 corrected = pattern.replace(corrected, replacement)
                 if (corrected != before) {
-                    Log.i(TAG, "Grammar corrected: $ruleId")
+                        Log.i(TAG, "Grammar corrected: $ruleId")
                 }
             }.onFailure { err ->
-                Log.w(TAG, "Grammar rule failed: $ruleId", err)
+                    Log.w(TAG, "Grammar rule failed: $ruleId", err)
             }
         }
         return corrected
@@ -665,6 +735,7 @@ class ToneEnforcementService : AccessibilityService() {
         grammarBypassRules.clear()
         recentDictReplacements.clear()
         sessionReplacementChoices.clear()
+            sessionPersona = null
         lastCorrectedWord       = null
         lastCorrectionTimestamp = 0L
         lastReplacementAcceptedAt = 0L

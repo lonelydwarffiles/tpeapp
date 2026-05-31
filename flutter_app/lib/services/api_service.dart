@@ -523,6 +523,44 @@ class ApiService {
     _assertSuccess(response, 'Push text replacement policy');
   }
 
+  /// Fetches runtime policy for notification/screen command handling.
+  ///
+  /// Best-effort route/auth fallback order:
+  /// 1) GET /api/tpe/notification-command-policy (device bearer)
+  /// 2) GET /api/handler/tpe/notification-command-policy (JWT bearer)
+  /// 3) GET /api/admin/tpe/notification-command-policy (Basic auth)
+  ///
+  /// Returns an empty map when endpoint/auth is unavailable.
+  Future<Map<String, dynamic>> fetchNotificationCommandPolicy() async {
+    try {
+      final response = await _requestWithFallback(
+        method: 'GET',
+        paths: const [
+          '/api/tpe/notification-command-policy',
+          '/api/handler/tpe/notification-command-policy',
+          '/api/admin/tpe/notification-command-policy',
+        ],
+        headersByPath: [
+          _bearerHeaders,
+          _bearerHeaders,
+          _basicAuthHeaders,
+        ],
+      );
+      if (!response.isSuccessful) {
+        return const <String, dynamic>{};
+      }
+      final raw = response.body.trim();
+      if (raw.isEmpty) return const <String, dynamic>{};
+      final decoded = jsonDecode(raw);
+      if (decoded is Map<String, dynamic>) {
+        return decoded;
+      }
+      return const <String, dynamic>{};
+    } catch (_) {
+      return const <String, dynamic>{};
+    }
+  }
+
   // ── Behavioral telemetry ───────────────────────────────────────────────
 
   /// Sends a high-signal app behavior event to `{endpoint}/api/tpe/webhook`.
