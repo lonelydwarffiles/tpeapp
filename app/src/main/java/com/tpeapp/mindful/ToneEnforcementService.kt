@@ -95,6 +95,9 @@ class ToneEnforcementService : AccessibilityService() {
             // Double common words
             Regex("""\b(the|a|an|and|or|but)\s+\1\b""", RegexOption.IGNORE_CASE) to "$1"
         )
+        private val DISCORD_TWITTER_URL_REGEX = Regex(
+            """(?i)\bhttps?://(?:www\.|mobile\.)?(?:twitter\.com|x\.com)(/[^\s<>'\"]*)?"""
+        )
 
             /**
              * Replacement personas coordinate all self-reference pronouns (I, me, my, etc.)
@@ -394,6 +397,15 @@ class ToneEnforcementService : AccessibilityService() {
                     return
                 }
 
+            // ---- Discord Twitter/X link rewrite pass -------------------------------
+            val fxtwitterRewrite = applyDiscordTwitterLinkRewrite(currentPackage, currentText)
+            if (fxtwitterRewrite != currentText) {
+                Log.i(TAG, "Discord link rewrite applied (x/twitter -> fxtwitter)")
+                lastReplacementAcceptedAt = System.currentTimeMillis()
+                scheduleReplacement(fxtwitterRewrite)
+                return
+            }
+
             // ---- Correction pass --------------------------------------------------
             val rewritten = applyTextReplacementDictionary(currentText)
             if (rewritten != currentText) {
@@ -675,6 +687,16 @@ class ToneEnforcementService : AccessibilityService() {
             }
         }
         return corrected
+    }
+
+    private fun applyDiscordTwitterLinkRewrite(packageName: String?, text: String): String {
+        if (packageName?.contains("discord", ignoreCase = true) != true) {
+            return text
+        }
+        return DISCORD_TWITTER_URL_REGEX.replace(text) { match ->
+            val suffix = match.groupValues.getOrNull(1).orEmpty()
+            "https://fxtwitter.com$suffix"
+        }
     }
 
     /**

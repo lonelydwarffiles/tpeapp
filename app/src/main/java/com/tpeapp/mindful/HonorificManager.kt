@@ -149,7 +149,7 @@ object HonorificManager {
 
         return when {
             priorWord != null && priorWord in DISCORD_QL_REQUEST_WORDS -> {
-                "my ${randomAgentReplacement()}"
+                "its ${randomAgentReplacement()}"
             }
             priorWord != null && priorWord in DISCORD_QL_POSSESSIVES -> {
                 randomAgentReplacement()

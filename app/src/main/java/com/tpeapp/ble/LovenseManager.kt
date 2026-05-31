@@ -52,6 +52,7 @@ object LovenseManager {
     )
 
     private val LOVENSE_NAME_HINTS = listOf(
+        "lv",
         "lovense",
         "lush",
         "hush",
@@ -93,7 +94,17 @@ object LovenseManager {
     /** Starts a BLE scan and connects to the first discovered Lovense toy. */
     fun startScan() {
         checkInit("startScan")
-        ble!!.startScan()
+        scanCandidates(timeoutMs = 8_000L) { candidates ->
+            val picked = candidates.firstOrNull()
+            if (picked != null) {
+                val address = picked["address"]?.toString()?.trim().orEmpty()
+                if (address.isNotBlank()) {
+                    ble!!.connect(address)
+                    return@scanCandidates
+                }
+            }
+            ble!!.startScan()
+        }
     }
 
     /** Scans for nearby Lovense candidates without auto-connecting. */

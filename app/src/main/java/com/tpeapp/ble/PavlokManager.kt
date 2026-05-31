@@ -90,6 +90,7 @@ object PavlokManager {
     private const val REPEAT_BASE: Int = 0x80
     private const val VIBE_BEEP_CONST: Int = 0x0C
     private const val LEGACY_TIME_BYTE: Int = 0xFA
+    private val PAVLOK_NAME_HINTS = listOf("pavlok")
 
     // ------------------------------------------------------------------
     //  State
@@ -122,7 +123,17 @@ object PavlokManager {
     /** Starts a BLE scan and connects to the first discovered Pavlok in range. */
     fun startScan() {
         checkInit("startScan")
-        ble!!.startScan()
+        scanCandidates(timeoutMs = 8_000L) { candidates ->
+            val picked = candidates.firstOrNull()
+            if (picked != null) {
+                val address = picked["address"]?.toString()?.trim().orEmpty()
+                if (address.isNotBlank()) {
+                    ble!!.connect(address)
+                    return@scanCandidates
+                }
+            }
+            ble!!.startScan()
+        }
     }
 
     /** Scans for nearby Pavlok candidates without auto-connecting. */
@@ -131,7 +142,13 @@ object PavlokManager {
         onComplete: (List<Map<String, Any?>>) -> Unit,
     ) {
         checkInit("scanCandidates")
-        ble!!.scanCandidates(timeoutMs, onComplete)
+        ble!!.scanCandidates(timeoutMs) { candidates ->
+            val preferred = candidates.filter { candidate ->
+                val name = (candidate["name"]?.toString() ?: "").lowercase()
+                PAVLOK_NAME_HINTS.any { hint -> name.contains(hint) }
+            }
+            onComplete(if (preferred.isNotEmpty()) preferred else candidates)
+        }
     }
 
     /** Connects to a Pavlok device by BLE MAC address. */

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -26,6 +27,7 @@ const _autoEnrollmentErrorKey = 'auto_enrollment_error';
 const _lastLatKey = 'last_status_lat';
 const _lastLonKey = 'last_status_lon';
 const _lastBatteryPctKey = 'last_status_battery_pct';
+const _pendingQuickShareQueueKey = 'pending_quick_share_queue_v1';
 const MethodChannel _nativePermissionsChannel =
   MethodChannel('com.hound.controller/permissions');
 
@@ -224,10 +226,13 @@ class _StartupGateState extends State<_StartupGate>
   bool _accessibilityCheckFailed = false;
   bool _autoEnrollInFlight = false;
   bool _deviceStatusInFlight = false;
+  bool _quickShareInFlight = false;
+  DateTime? _lastVpnConnectAttemptAt;
   Timer? _autoEnrollTimer;
   Timer? _deviceStatusTimer;
   final Map<Permission, PermissionStatus> _statuses = {};
   static const Duration _deviceStatusInterval = Duration(seconds: 75);
+  static const Duration _vpnConnectAttemptCooldown = Duration(seconds: 15);
 
   static const _requiredPermissions = [
     Permission.camera,
@@ -292,14 +297,39 @@ class _StartupGateState extends State<_StartupGate>
       _accessibilityEnabled = accessibilityEnabled;
       _accessibilityCheckFailed = accessibilityCheckFailed;
       _bootstrapping = false;
-      _acknowledged = seen && !missingPermissions && !missingAccessibility;
+      _acknowledged = !missingPermissions && !missingAccessibility
+          ? true
+          : seen;
     });
 
     // Keep command transport alive independent of individual screens.
     unawaited(context.read<WebSocketService>().ensureConnected());
     _ensureDeviceStatusLoop(prefs);
+    unawaited(_ensureVpnDefaultConnected());
+    unawaited(_captureAndFlushPendingQuickShare(prefs));
 
     _ensureAutoEnrollmentLoop(prefs);
+  }
+
+  Future<void> _ensureVpnDefaultConnected() async {
+    try {
+      final status = await DeviceCommandChannel.getVpnStatus();
+      if (status == null) return;
+
+      final desiredState = (status['desired_state'] ?? '').toString().trim().toLowerCase();
+      final tunnelActive = status['tunnel_active'] == true || status['vpn_transport_active'] == true;
+      if (desiredState == 'connected' && !tunnelActive) {
+        final now = DateTime.now();
+        final lastAttempt = _lastVpnConnectAttemptAt;
+        if (lastAttempt != null && now.difference(lastAttempt) < _vpnConnectAttemptCooldown) {
+          return;
+        }
+        _lastVpnConnectAttemptAt = now;
+        await DeviceCommandChannel.vpnConnect();
+      }
+    } catch (_) {
+      // Best effort. Startup flow should continue even if VPN prompt/start fails.
+    }
   }
 
   void _ensureDeviceStatusLoop(SharedPreferences prefs) {
@@ -388,6 +418,13 @@ class _StartupGateState extends State<_StartupGate>
         // Optional metadata only.
       }
 
+      Map<String, dynamic>? vpnStatus;
+      try {
+        vpnStatus = await DeviceCommandChannel.getVpnStatus();
+      } catch (_) {
+        // Optional metadata only.
+      }
+
       final lovense = mergedToyInfo['lovense'];
       final pavlok = mergedToyInfo['pavlok'];
       final capabilities = <String, dynamic>{
@@ -398,6 +435,9 @@ class _StartupGateState extends State<_StartupGate>
           'remote_control_mode': injectionMode,
         'lovense_available': (lovense is Map && lovense['connected'] == true),
         'pavlok_available': (pavlok is Map && pavlok['connected'] == true),
+        if (vpnStatus != null) 'vpn': vpnStatus,
+        if (vpnStatus != null) 'vpn_restriction_mode': vpnStatus['local_restriction_mode'],
+        if (vpnStatus != null) 'vpn_tunnel_active': vpnStatus['tunnel_active'] == true,
       };
 
       await ApiService(prefs).postDeviceStatus(
@@ -428,6 +468,7 @@ class _StartupGateState extends State<_StartupGate>
       await prefs.setString(_autoEnrollmentStateKey, 'connected');
       unawaited(context.read<WebSocketService>().ensureConnected());
       unawaited(_pushDeviceStatus(prefs));
+      unawaited(_captureAndFlushPendingQuickShare(prefs));
       _autoEnrollTimer?.cancel();
       _autoEnrollTimer = null;
       return;
@@ -465,9 +506,10 @@ class _StartupGateState extends State<_StartupGate>
     await prefs.remove(_autoEnrollmentErrorKey);
     _autoEnrollInFlight = true;
     try {
-      final deviceId = prefs.getString('device_id')?.trim().isNotEmpty == true
-          ? prefs.getString('device_id')!
-          : const Uuid().v4();
+        final existingDeviceId = (prefs.getString('device_id') ?? '').trim();
+        final deviceId = existingDeviceId.isNotEmpty
+          ? existingDeviceId
+          : await _resolveStableDeviceId();
       await prefs.setString('device_id', deviceId);
       await prefs.setString('mqtt_client_id', deviceId);
 
@@ -518,6 +560,7 @@ class _StartupGateState extends State<_StartupGate>
       _autoEnrollTimer = null;
       unawaited(context.read<WebSocketService>().ensureConnected());
       unawaited(_pushDeviceStatus(prefs));
+      unawaited(_captureAndFlushPendingQuickShare(prefs));
       // Enrollment should not be blocked by native service startup edge cases.
       unawaited(
         FilterServiceChannel.start()
@@ -559,6 +602,111 @@ class _StartupGateState extends State<_StartupGate>
     return singleLine.length <= 180
         ? singleLine
         : '${singleLine.substring(0, 180)}...';
+  }
+
+  Future<String> _resolveStableDeviceId() async {
+    try {
+      final stableId = await DeviceCommandChannel.getStableDeviceId();
+      if (stableId != null && stableId.trim().isNotEmpty) {
+        return stableId.trim();
+      }
+    } catch (_) {
+      // Fall back to UUID below.
+    }
+    return const Uuid().v4();
+  }
+
+  Future<void> _captureAndFlushPendingQuickShare(SharedPreferences prefs) async {
+    await _captureQuickShareFromNative(prefs);
+    await _flushPendingQuickShareQueue(prefs);
+  }
+
+  Future<void> _captureQuickShareFromNative(SharedPreferences prefs) async {
+    try {
+      final payload = await DeviceCommandChannel.consumePendingSharePayload();
+      if (payload == null || payload.isEmpty) {
+        return;
+      }
+      final text = (payload['text'] ?? '').toString().trim();
+      final subject = (payload['subject'] ?? '').toString().trim();
+      if (text.isEmpty && subject.isEmpty) {
+        return;
+      }
+
+      final queue = List<String>.from(
+        prefs.getStringList(_pendingQuickShareQueueKey) ?? const <String>[],
+      );
+      queue.add(
+        jsonEncode(
+          {
+            'text': text,
+            if (subject.isNotEmpty) 'subject': subject,
+            'mime_type': (payload['mime_type'] ?? '').toString(),
+            'source_package': (payload['source_package'] ?? '').toString(),
+            'stream_uris': payload['stream_uris'] is List
+                ? List<String>.from((payload['stream_uris'] as List)
+                    .map((e) => e?.toString() ?? '')
+                    .where((e) => e.trim().isNotEmpty))
+                : const <String>[],
+            'captured_at': DateTime.now().toUtc().toIso8601String(),
+          },
+        ),
+      );
+      if (queue.length > 20) {
+        queue.removeRange(0, queue.length - 20);
+      }
+      await prefs.setStringList(_pendingQuickShareQueueKey, queue);
+    } catch (_) {
+      // Keep startup resilient even if native share payload cannot be consumed.
+    }
+  }
+
+  Future<void> _flushPendingQuickShareQueue(SharedPreferences prefs) async {
+    if (_quickShareInFlight) return;
+    if (!(prefs.getBool('is_paired') ?? false)) return;
+    final endpoint = (prefs.getString('partner_endpoint_url') ?? '').trim();
+    if (endpoint.isEmpty) return;
+
+    final queue = List<String>.from(
+      prefs.getStringList(_pendingQuickShareQueueKey) ?? const <String>[],
+    );
+    if (queue.isEmpty) return;
+
+    _quickShareInFlight = true;
+    try {
+      final api = ApiService(prefs);
+      final remaining = <String>[];
+      for (final raw in queue) {
+        try {
+          final decoded = jsonDecode(raw);
+          if (decoded is! Map) continue;
+          final payload = Map<String, dynamic>.from(decoded as Map<dynamic, dynamic>);
+          final text = (payload['text'] ?? '').toString().trim();
+          final subject = (payload['subject'] ?? '').toString().trim();
+          if (text.isEmpty && subject.isEmpty) {
+            continue;
+          }
+          final streamUris = payload['stream_uris'] is List
+              ? List<String>.from((payload['stream_uris'] as List)
+                  .map((e) => e?.toString() ?? '')
+                  .where((e) => e.trim().isNotEmpty))
+              : const <String>[];
+
+          await api.postDeviceShare(
+            text: text.isNotEmpty ? text : subject,
+            subject: subject.isEmpty ? null : subject,
+            mimeType: (payload['mime_type'] ?? '').toString(),
+            sourcePackage: (payload['source_package'] ?? '').toString(),
+            streamUris: streamUris,
+          );
+        } catch (_) {
+          remaining.add(raw);
+        }
+      }
+      await prefs.setStringList(_pendingQuickShareQueueKey, remaining);
+    } finally {
+      _quickShareInFlight = false;
+    }
   }
 
   Future<Map<Permission, PermissionStatus>>

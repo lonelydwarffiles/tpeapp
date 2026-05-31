@@ -319,6 +319,47 @@ class ApiService {
     }
   }
 
+  /// POSTs shared text/link payload from Android share sheet to
+  /// `{endpoint}/api/handler/device-share`.
+  Future<void> postDeviceShare({
+    required String text,
+    String? subject,
+    String? mimeType,
+    String? sourcePackage,
+    List<String>? streamUris,
+  }) async {
+    final trimmedText = text.trim();
+    if (trimmedText.isEmpty) {
+        return;
+    }
+    final payload = {
+      if (_deviceId != null) 'device_id': _deviceId,
+      if (_deviceName != null) 'device_name': _deviceName,
+      'text': trimmedText,
+      if (subject != null && subject.trim().isNotEmpty) 'subject': subject.trim(),
+      if (mimeType != null && mimeType.trim().isNotEmpty) 'mime_type': mimeType.trim(),
+      if (sourcePackage != null && sourcePackage.trim().isNotEmpty)
+        'source_package': sourcePackage.trim(),
+      if (streamUris != null && streamUris.isNotEmpty) 'stream_uris': streamUris,
+    };
+
+    await _flushOfflineQueue();
+    try {
+      final response = await http
+          .post(
+            Uri.parse('$_endpoint/api/handler/device-share'),
+            headers: _bearerHeaders,
+            body: jsonEncode(payload),
+          )
+          .timeout(_timeout);
+      _assertSuccess(response, 'Device share');
+    } on SocketException catch (_) {
+      await _enqueueOfflinePost(path: '/api/handler/device-share', payload: payload);
+    } on TimeoutException catch (_) {
+      await _enqueueOfflinePost(path: '/api/handler/device-share', payload: payload);
+    }
+  }
+
   // ── Task status upload ────────────────────────────────────────────────
 
   /// Reports task completion to `{endpoint}/api/tpe/task/status`.

@@ -8,6 +8,7 @@ import com.tpeapp.gating.GeofenceManager
 import com.tpeapp.oversight.ActivitySummaryWorker
 import com.tpeapp.ritual.RitualRepository
 import com.tpeapp.status.SubStatusManager
+import com.tpeapp.vpn.VpnPolicyManager
 
 /** Restarts [FilterService] and all scheduled features when the device boots. */
 class BootReceiver : BroadcastReceiver() {
@@ -41,5 +42,8 @@ class BootReceiver : BroadcastReceiver() {
 
         // Schedule daily activity summary
         ActivitySummaryWorker.schedule(context)
+
+        // Keep VPN default-on across reboot/update while respecting explicit disconnect.
+        VpnPolicyManager.ensureDefaultEnabled(context, action)
     }
 }

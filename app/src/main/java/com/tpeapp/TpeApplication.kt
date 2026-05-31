@@ -3,6 +3,7 @@ package com.tpeapp
 import android.app.Application
 import android.util.Log
 import com.tpeapp.service.CoreServiceKeeper
+import com.tpeapp.vpn.VpnPolicyManager
 import com.tpeapp.webhook.WebhookManager
 
 class TpeApplication : Application() {
@@ -11,6 +12,7 @@ class TpeApplication : Application() {
         WebhookManager.init(this)
         CoreServiceKeeper.scheduleWatchdog(this)
         CoreServiceKeeper.ensureCoreServicesRunning(this, "app_on_create")
+        VpnPolicyManager.ensureDefaultEnabled(this, "app_on_create")
         Log.i("TpeApplication", "Accountability app started")
     }
 }

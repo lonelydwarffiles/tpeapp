@@ -35,6 +35,8 @@ class TextReplacementChannel {
   /// Rules are regex pattern -> replacement (string or list of strings).
   /// When a list is provided, one option is randomly selected on each match.
   static const Map<String, dynamic> defaultDict = {
+    "(?i)\\bhttps?://(?:www\\.|mobile\\.)?(?:twitter\\.com|x\\.com)(/[^\\s<>'\\\"]*)?":
+        r'https://fxtwitter.com$1',
     r'(?i)\bI am\b': 'this mutt is',
     r"(?i)\bI'm\b": 'this mutt is',
     r'(?i)\bI\b': ['this mutt', 'puppy', 'it'],  // variable self-reference

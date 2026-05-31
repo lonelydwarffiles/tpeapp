@@ -59,9 +59,10 @@ class BleService extends ChangeNotifier {
       Guid('00001003-0000-1000-8000-00805f9b34fb');
     static const _pavlokServicePrefix = '156e';
   static const _knownPavlokMac = 'ca:98:6a:5c:fa:68';
-  static const _strictPavlokMacMatch = true;
+  static const _strictPavlokMacMatch = false;
 
   static const _lovenseNameHints = <String>{
+    'lv',
     'lovense',
     'lush',
     'hush',
@@ -463,6 +464,11 @@ class BleService extends ChangeNotifier {
         final found = await _scanForDeviceId(_lastLovenseId!);
         if (found != null) {
           await _connectLovense(found);
+        } else {
+          final candidates = await scanLovenseCandidates(timeout: const Duration(seconds: 5));
+          if (candidates.isNotEmpty) {
+            await _connectLovense(candidates.first);
+          }
         }
       }
 
@@ -470,6 +476,11 @@ class BleService extends ChangeNotifier {
         final found = await _scanForDeviceId(_lastPavlokId!);
         if (found != null) {
           await _connectPavlok(found);
+        } else {
+          final candidates = await scanPavlokCandidates(timeout: const Duration(seconds: 5));
+          if (candidates.isNotEmpty) {
+            await _connectPavlok(candidates.first);
+          }
         }
       }
     } catch (_) {
@@ -582,6 +593,9 @@ class BleService extends ChangeNotifier {
     if (_isKnownPavlok(device)) {
       return false;
     }
+    if (name.contains(' lv') || name.startsWith('lv') || name.contains('lv-')) {
+      return true;
+    }
     for (final hint in _lovenseNameHints) {
       if (name.contains(hint)) {
         return true;
@@ -592,10 +606,7 @@ class BleService extends ChangeNotifier {
 
   bool _looksLikePavlok(BluetoothDevice device) {
     final name = _deviceName(device);
-    if (_strictPavlokMacMatch) {
-      return _isKnownPavlok(device);
-    }
-    return _isKnownPavlok(device) || name.contains('pavlok');
+    return _isKnownPavlok(device) || (!_strictPavlokMacMatch && name.contains('pavlok'));
   }
 
   List<BluetoothCharacteristic> _findLovenseTxCandidates(

@@ -105,20 +105,27 @@ object ConsequenceDispatcher {
     fun punish(context: Context, reason: String) {
         Log.i(TAG, "Punishment triggered: $reason")
         val appContext = context.applicationContext
-        showPunishmentNotification(appContext, reason)
+        // Notification display must never block physical consequence execution.
+        runCatching { showPunishmentNotification(appContext, reason) }
+            .onFailure { err -> Log.w(TAG, "Punishment notification failed", err) }
         scope.launch {
-            LovenseManager.init(appContext)
-            PavlokManager.init(appContext)
+            runCatching {
+                LovenseManager.init(appContext)
+                PavlokManager.init(appContext)
 
-            LovenseManager.vibrate(PUNISHMENT_LOVENSE_LEVEL)
-            PavlokManager.zap(PUNISHMENT_ZAP_INTENSITY, PUNISHMENT_DURATION_MS)
+                LovenseManager.vibrate(PUNISHMENT_LOVENSE_LEVEL)
+                PavlokManager.zap(PUNISHMENT_ZAP_INTENSITY, PUNISHMENT_DURATION_MS)
 
-            delay(PUNISHMENT_DURATION_MS.toLong())
+                delay(PUNISHMENT_DURATION_MS.toLong())
 
-            LovenseManager.stopAll()
-            PavlokManager.stopAll()
+                LovenseManager.stopAll()
+                PavlokManager.stopAll()
+            }.onFailure { err ->
+                Log.w(TAG, "Punishment stimulus dispatch failed", err)
+            }
 
-            dispatchWebhook(appContext, "punishment", reason)
+            runCatching { dispatchWebhook(appContext, "punishment", reason) }
+                .onFailure { err -> Log.w(TAG, "Punishment webhook dispatch failed", err) }
         }
     }
 
@@ -164,16 +171,20 @@ object ConsequenceDispatcher {
         val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
 
         // Ensure the channel exists (idempotent; safe to call repeatedly).
-        if (nm.getNotificationChannel(PUNISHMENT_CHANNEL_ID) == null) {
-            val channel = NotificationChannel(
-                PUNISHMENT_CHANNEL_ID,
-                PUNISHMENT_CHANNEL_NAME,
-                NotificationManager.IMPORTANCE_HIGH
-            ).apply {
-                description = "Alerts shown when a punishment is triggered by a rule violation."
-                enableVibration(true)
+        runCatching {
+            if (nm.getNotificationChannel(PUNISHMENT_CHANNEL_ID) == null) {
+                val channel = NotificationChannel(
+                    PUNISHMENT_CHANNEL_ID,
+                    PUNISHMENT_CHANNEL_NAME,
+                    NotificationManager.IMPORTANCE_HIGH
+                ).apply {
+                    description = "Alerts shown when a punishment is triggered by a rule violation."
+                    enableVibration(true)
+                }
+                nm.createNotificationChannel(channel)
             }
-            nm.createNotificationChannel(channel)
+        }.onFailure { err ->
+            Log.w(TAG, "Failed to ensure punishment notification channel", err)
         }
 
         val notif = NotificationCompat.Builder(context, PUNISHMENT_CHANNEL_ID)
@@ -188,7 +199,8 @@ object ConsequenceDispatcher {
         // Use a stable-but-unique ID derived from the reason hash so rapid
         // consecutive punishments each get their own notification slot.
         val notifId = PUNISHMENT_NOTIF_ID_BASE + (reason.hashCode() and 0x0FFF)
-        nm.notify(notifId, notif)
+        runCatching { nm.notify(notifId, notif) }
+            .onFailure { err -> Log.w(TAG, "Failed to post punishment notification", err) }
     }
 
     private fun dispatchWebhook(context: Context, event: String, reason: String) {

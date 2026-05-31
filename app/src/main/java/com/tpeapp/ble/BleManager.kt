@@ -665,15 +665,34 @@ class BleManager(
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             // API 33+: new type-safe overload
-            val result = currentGatt.writeCharacteristic(
+            var effectiveWriteType = writeType
+            var result = currentGatt.writeCharacteristic(
                 characteristic,
                 data,
                 writeType,
             )
+            if (result != BluetoothGatt.GATT_SUCCESS &&
+                writeType == BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE &&
+                supportsWithResponse) {
+                Log.w(TAG, "writeCharacteristic (API33) no-response returned $result; retrying with response")
+                result = currentGatt.writeCharacteristic(
+                    characteristic,
+                    data,
+                    BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT,
+                )
+                if (result == BluetoothGatt.GATT_SUCCESS) {
+                    effectiveWriteType = BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
+                    emit("write_attempt", mapOf(
+                        "bytes" to data.size,
+                        "write_type" to BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT,
+                        "retry_after_no_response_failure" to true,
+                    ))
+                }
+            }
             if (result != BluetoothGatt.GATT_SUCCESS) {
                 Log.w(TAG, "writeCharacteristic (API33) returned $result")
                 emit("write_failed", mapOf("status" to result))
-            } else if (writeType == BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE) {
+            } else if (effectiveWriteType == BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE) {
                 // No-response writes may not trigger onCharacteristicWrite on all devices.
                 emit("write_ok", mapOf("mode" to "no_response", "bytes" to data.size))
             }

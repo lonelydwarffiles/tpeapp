@@ -61,28 +61,8 @@ class NotificationBuzzService {
       return;
     }
 
-    if (!_policy.enabled) {
-      return;
-    }
-    if (!_policy.allowSources.contains(parsed.source)) {
-      return;
-    }
-    if (_policy.packageAllowlist.isNotEmpty &&
-        !_policy.packageAllowlist.contains(parsed.packageName)) {
-      return;
-    }
-    if (_policy.packageBlocklist.contains(parsed.packageName)) {
-      return;
-    }
-
-    final appRule = _policy.ruleForPackage(parsed.packageName);
-    final minConfidence = appRule?.minConfidence ?? _policy.minConfidence;
-    if (parsed.confidence < minConfidence) {
-      return;
-    }
-    if (appRule != null &&
-        appRule.allowedCommands.isNotEmpty &&
-        !appRule.allowedCommands.contains(parsed.command)) {
+    // Contract: only explicit notification text commands trigger BLE actuation.
+    if (parsed.source != 'notification') {
       return;
     }
 
@@ -91,15 +71,6 @@ class NotificationBuzzService {
       return;
     }
     if (_isDeduped(parsed, nowMs)) {
-      return;
-    }
-
-    if (_policy.dryRun) {
-      developer.log(
-        'notification-command dry-run: ${parsed.command} from ${parsed.packageName} '
-        'source=${parsed.source} confidence=${parsed.confidence.toStringAsFixed(2)} raw="${parsed.raw}"',
-        name: 'NotificationBuzzService',
-      );
       return;
     }
 
@@ -115,21 +86,43 @@ class NotificationBuzzService {
 
     _markActuation(nowMs);
 
+    unawaited(_applyNotificationCommand(parsed));
+  }
+
+  Future<void> _applyNotificationCommand(NotificationCommand parsed) async {
+    final appRule = _policy.ruleForPackage(parsed.packageName);
+
     if (parsed.command == 'zap') {
+      final hasPavlok = await BleChannel.pavlokIsConnectedNative();
+      if (!hasPavlok) {
+        developer.log(
+          'notification-command zap ignored (no Pavlok connected): ${parsed.raw}',
+          name: 'NotificationBuzzService',
+        );
+        return;
+      }
       final scaledStrength =
           (parsed.strength * (appRule?.strengthScale ?? 1.0)).round();
       final strength = scaledStrength.clamp(1, _policy.zapMaxStrength);
       final intensity = ((strength / 100) * 255).round().clamp(1, 255);
       final durationMs =
           parsed.durationMs.clamp(_policy.minDurationMs, _policy.maxDurationMs);
-      unawaited(
-          BleChannel.pavlokZap(intensity: intensity, durationMs: durationMs));
+      await BleChannel.pavlokZap(intensity: intensity, durationMs: durationMs);
       return;
     }
 
-    final loopMultiplier = parsed.loop ? _policy.buzzLoopMultiplier : 1;
-    final effectiveCount =
-        (parsed.count * loopMultiplier).clamp(1, _policy.buzzMaxQueueAdd);
+    final hasLovense = await BleChannel.lovenseIsConnectedNative();
+    if (!hasLovense) {
+      developer.log(
+        'notification-command buzz ignored (no Lovense connected): ${parsed.raw}',
+        name: 'NotificationBuzzService',
+      );
+      return;
+    }
+
+    final effectiveCount = parsed.loop
+        ? parsed.count.clamp(1, _policy.buzzMaxQueueAdd)
+        : 1;
     final durationMs =
         parsed.durationMs.clamp(_policy.minDurationMs, _policy.maxDurationMs);
     for (var i = 0; i < effectiveCount; i++) {
@@ -215,17 +208,23 @@ class NotificationBuzzService {
         ? (event['duration_ms'] as num).toInt()
         : _policy.defaultDurationMs;
 
-    final count = parsedFromRaw?.count ??
+    final count = command == 'buzz'
+      ? (parsedFromRaw?.count ??
         (event['count'] is num
-            ? (event['count'] as num).toInt().clamp(1, 20)
-            : 1);
-    final loop = parsedFromRaw?.loop ?? (event['loop'] == true);
+          ? (event['count'] as num).toInt().clamp(1, 20)
+          : 1))
+      : 1;
+    final loop = command == 'buzz'
+      ? (parsedFromRaw?.loop ?? (event['loop'] == true))
+      : false;
     final strength = parsedFromRaw?.strength ??
         (event['strength'] is num
             ? (event['strength'] as num).toInt().clamp(1, 100)
             : _policy.zapDefaultStrength);
-    final durationMs = (parsedFromRaw?.durationMs ?? fallbackDuration)
-        .clamp(_policy.minDurationMs, _policy.maxDurationMs);
+    final durationMs = (command == 'zap'
+        ? _policy.defaultDurationMs
+        : (parsedFromRaw?.durationMs ?? fallbackDuration))
+      .clamp(_policy.minDurationMs, _policy.maxDurationMs);
 
     final baseConfidence = event['confidence'] is num
         ? (event['confidence'] as num).toDouble()
@@ -257,15 +256,18 @@ class NotificationBuzzService {
 
     final buzzIndex = tokens.indexOf('buzz');
     if (buzzIndex >= 0) {
-      final count = _extractCount(tokens, buzzIndex) ?? 1;
+      final seconds = _extractBuzzSeconds(tokens, buzzIndex);
       final loop = tokens.contains('loop');
-      final durationMs = _extractDurationMs(tokens, buzzIndex);
+      final parsedDurationMs = _extractDurationMs(tokens, buzzIndex);
+      final durationMs = seconds != null
+          ? seconds * 1000
+          : parsedDurationMs;
       return _ParsedRawCommand(
         command: 'buzz',
-        count: count,
+        count: loop ? (seconds ?? 1) : 1,
         loop: loop,
         durationMs: durationMs,
-        hadStructuredArgs: loop || count > 1 || durationMs != null,
+        hadStructuredArgs: loop || seconds != null || durationMs != null,
       );
     }
 
@@ -273,13 +275,10 @@ class NotificationBuzzService {
     if (zapIndex >= 0) {
       final strength =
           _extractStrength(tokens, zapIndex) ?? _policy.zapDefaultStrength;
-      final durationMs = _extractDurationMs(tokens, zapIndex);
       return _ParsedRawCommand(
         command: 'zap',
         strength: strength,
-        durationMs: durationMs,
-        hadStructuredArgs:
-            strength != _policy.zapDefaultStrength || durationMs != null,
+        hadStructuredArgs: strength != _policy.zapDefaultStrength,
       );
     }
 
@@ -302,6 +301,24 @@ class NotificationBuzzService {
       }
       if (RegExp(r'^\d{1,2}x$').hasMatch(token)) {
         return int.parse(token.substring(0, token.length - 1)).clamp(1, 20);
+      }
+    }
+    return null;
+  }
+
+  int? _extractBuzzSeconds(List<String> tokens, int commandIndex) {
+    final candidates = <String?>[
+      if (commandIndex + 1 < tokens.length) tokens[commandIndex + 1],
+      if (commandIndex + 2 < tokens.length) tokens[commandIndex + 2],
+      if (commandIndex - 1 >= 0) tokens[commandIndex - 1],
+    ];
+    for (final token in candidates) {
+      if (token == null) continue;
+      if (RegExp(r'^\d{1,3}$').hasMatch(token)) {
+        return int.parse(token).clamp(1, 300);
+      }
+      if (RegExp(r'^\d{1,3}s$').hasMatch(token)) {
+        return int.parse(token.substring(0, token.length - 1)).clamp(1, 300);
       }
     }
     return null;

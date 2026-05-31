@@ -4,8 +4,10 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
+import android.net.Uri
 import android.location.LocationManager
 import android.os.BatteryManager
+import android.provider.Settings
 import android.util.ArrayMap
 import android.util.Log
 import com.tpeapp.apps.AppInventoryManager
@@ -56,9 +58,84 @@ object DeviceCommandChannel {
 
     private const val TAG = "DeviceCommandChannel"
     private const val CHANNEL = "com.hound.controller/device_commands"
+    @Volatile
+    private var pendingSharePayload: Map<String, Any?>? = null
+
+    fun captureIncomingShareIntent(intent: Intent?) {
+        if (intent == null) return
+        val action = intent.action ?: return
+        if (action != Intent.ACTION_SEND && action != Intent.ACTION_SEND_MULTIPLE) {
+            return
+        }
+
+        val type = intent.type?.trim().orEmpty()
+        val subject = intent.getStringExtra(Intent.EXTRA_SUBJECT)?.trim().orEmpty()
+        val packageName = intent.getStringExtra(Intent.EXTRA_PACKAGE_NAME)?.trim().orEmpty()
+        val textParts = mutableListOf<String>()
+        val streamUris = mutableListOf<String>()
+
+        val directText = intent.getStringExtra(Intent.EXTRA_TEXT)?.trim().orEmpty()
+        if (directText.isNotEmpty()) {
+            textParts += directText
+        }
+
+        val clip = intent.clipData
+        if (clip != null) {
+            for (index in 0 until clip.itemCount) {
+                val item = clip.getItemAt(index)
+                val itemText = item.text?.toString()?.trim().orEmpty()
+                if (itemText.isNotEmpty()) {
+                    textParts += itemText
+                }
+                val itemUri = item.uri?.toString()?.trim().orEmpty()
+                if (itemUri.isNotEmpty()) {
+                    streamUris += itemUri
+                }
+            }
+        }
+
+        val stream = intent.getParcelableExtra<Uri>(Intent.EXTRA_STREAM)
+        if (stream != null) {
+            streamUris += stream.toString()
+        }
+
+        val streams = intent.getParcelableArrayListExtra<Uri>(Intent.EXTRA_STREAM)
+        if (streams != null) {
+            for (uri in streams) {
+                if (uri != null) {
+                    streamUris += uri.toString()
+                }
+            }
+        }
+
+        val mergedText = textParts
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
+            .distinct()
+            .joinToString("\n")
+
+        if (mergedText.isBlank() && subject.isBlank() && streamUris.isEmpty()) {
+            return
+        }
+
+        pendingSharePayload = mapOf(
+            "action" to action,
+            "mime_type" to type,
+            "subject" to subject,
+            "text" to mergedText,
+            "source_package" to packageName,
+            "stream_uris" to streamUris,
+        )
+    }
+
+    private fun consumePendingSharePayload(): Map<String, Any?>? {
+        val payload = pendingSharePayload
+        pendingSharePayload = null
+        return payload
+    }
 
     fun register(messenger: BinaryMessenger, context: Context) {
-        val ctx = context.applicationContext
+        val ctx = context
 
         MethodChannel(messenger, CHANNEL).setMethodCallHandler { call, result ->
             try {
@@ -149,6 +226,20 @@ object DeviceCommandChannel {
                         }
 
                         result.success(payload)
+                    }
+                    "getStableDeviceId" -> {
+                        val androidId = runCatching {
+                            Settings.Secure.getString(ctx.contentResolver, Settings.Secure.ANDROID_ID)
+                        }.getOrNull()?.trim().orEmpty()
+
+                        if (androidId.isNotBlank()) {
+                            result.success("android-$androidId")
+                        } else {
+                            result.error("UNAVAILABLE", "stable device id unavailable", null)
+                        }
+                    }
+                    "consumePendingSharePayload" -> {
+                        result.success(consumePendingSharePayload())
                     }
                     "sendNotification" -> {
                         val title     = call.argument<String>("title")     ?: ""

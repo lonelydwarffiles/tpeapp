@@ -80,6 +80,20 @@ class DeviceCommandChannel {
         return null;
     }
 
+        static Future<String?> getStableDeviceId() async {
+            final raw = await _channel.invokeMethod<dynamic>('getStableDeviceId');
+            final value = raw?.toString().trim() ?? '';
+            return value.isEmpty ? null : value;
+        }
+
+        static Future<Map<String, dynamic>?> consumePendingSharePayload() async {
+            final raw = await _channel.invokeMethod<dynamic>('consumePendingSharePayload');
+            if (raw is Map) {
+                return raw.map((key, value) => MapEntry(key.toString(), value));
+            }
+            return null;
+        }
+
   static Future<void> sendNotification({
     required String title,
     required String body,

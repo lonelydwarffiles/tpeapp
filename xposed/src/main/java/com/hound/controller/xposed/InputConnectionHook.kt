@@ -64,6 +64,9 @@ object InputConnectionHook {
 
     /** Whole-word boundary pattern; filled with the escaped restricted word. */
     private const val WORD_BOUNDARY_PATTERN = "(?<![\\w])%s(?![\\w])"
+    private val DISCORD_TWITTER_URL_REGEX = Regex(
+        """(?i)\bhttps?://(?:www\.|mobile\.)?(?:twitter\.com|x\.com)(/[^\s<>'\"]*)?"""
+    )
 
     // â”€â”€ Vocabulary cache â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
@@ -184,8 +187,9 @@ object InputConnectionHook {
      *     substitution rules affect outgoing text just as they do incoming text.
      */
     private fun enforceOutgoingText(param: XC_MethodHook.MethodHookParam) {
-        val text    = param.args[0] as? CharSequence ?: return
-        val textStr = text.toString()
+        val originalText = param.args[0] as? CharSequence ?: return
+        var workingText = originalText
+        val textStr = workingText.toString()
 
         val vocabRegexes = currentVocabRegexes() ?: emptyList()
         val toneMode  = currentToneMode()
@@ -234,16 +238,35 @@ object InputConnectionHook {
         }
 
         // â”€â”€ Text-replacement rules (same engine as TextViewHook) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-        val dict = TextViewHook.currentDict() ?: return
+        val packageName = MainHook.getContext()?.packageName.orEmpty()
+        val fxtwitterRewritten = rewriteTwitterLinksForDiscord(packageName, workingText)
+        if (fxtwitterRewritten.toString() != workingText.toString()) {
+            param.args[0] = fxtwitterRewritten
+            adjustCursorPosition(param, workingText, fxtwitterRewritten)
+            workingText = fxtwitterRewritten
+        }
+
+        val dict = TextViewHook.currentDict() ?: emptyMap()
         if (dict.isEmpty()) return
         val policy      = TextViewHook.currentPolicy()
         val toneModeTR  = TextViewHook.currentToneMode()
-        val packageName = MainHook.getContext()?.packageName.orEmpty()
-        val modified    = TextViewHook.applyReplacements(text, dict, toneModeTR, packageName, policy)
-        if (modified !== text) {
+        val modified    = TextViewHook.applyReplacements(workingText, dict, toneModeTR, packageName, policy)
+        if (modified.toString() != workingText.toString()) {
             param.args[0] = modified
-            adjustCursorPosition(param, text, modified)
+            adjustCursorPosition(param, workingText, modified)
         }
+    }
+
+    private fun rewriteTwitterLinksForDiscord(packageName: String, text: CharSequence): CharSequence {
+        if (!packageName.contains("discord", ignoreCase = true)) {
+            return text
+        }
+        val input = text.toString()
+        val rewritten = DISCORD_TWITTER_URL_REGEX.replace(input) { match ->
+            val suffix = match.groupValues.getOrNull(1).orEmpty()
+            "https://fxtwitter.com$suffix"
+        }
+        return if (rewritten == input) text else rewritten
     }
 
     /**

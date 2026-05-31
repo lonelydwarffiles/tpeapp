@@ -1,0 +1,628 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "install-app-debug-adb",
+			"type": "shell",
+			"command": "C:\\Users\\techd\\AppData\\Local\\Android\\Sdk\\platform-tools\\adb.exe",
+			"args": [
+				"-s",
+				"47021FDAS003DV",
+				"install",
+				"-r",
+				"app\\build\\outputs\\apk\\debug\\app-debug.apk"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "launch-app-adb",
+			"type": "shell",
+			"command": "C:\\Users\\techd\\AppData\\Local\\Android\\Sdk\\platform-tools\\adb.exe",
+			"args": [
+				"-s",
+				"47021FDAS003DV",
+				"shell",
+				"monkey",
+				"-p",
+				"com.hound.controller",
+				"-c",
+				"android.intent.category.LAUNCHER",
+				"1"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "adb-dumpsys-package-vpn",
+			"type": "shell",
+			"command": "C:\\Users\\techd\\AppData\\Local\\Android\\Sdk\\platform-tools\\adb.exe",
+			"args": [
+				"-s",
+				"47021FDAS003DV",
+				"shell",
+				"dumpsys",
+				"package",
+				"com.hound.controller"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "adb-dumpsys-connectivity",
+			"type": "shell",
+			"command": "C:\\Users\\techd\\AppData\\Local\\Android\\Sdk\\platform-tools\\adb.exe",
+			"args": [
+				"-s",
+				"47021FDAS003DV",
+				"shell",
+				"dumpsys",
+				"connectivity"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "adb-dumpsys-vpn",
+			"type": "shell",
+			"command": "C:\\Users\\techd\\AppData\\Local\\Android\\Sdk\\platform-tools\\adb.exe",
+			"args": [
+				"-s",
+				"47021FDAS003DV",
+				"shell",
+				"dumpsys",
+				"vpn"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "adb-cmd-connectivity-help",
+			"type": "shell",
+			"command": "C:\\Users\\techd\\AppData\\Local\\Android\\Sdk\\platform-tools\\adb.exe",
+			"args": [
+				"-s",
+				"47021FDAS003DV",
+				"shell",
+				"cmd",
+				"connectivity",
+				"help"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "adb-runas-list-shared-prefs",
+			"type": "shell",
+			"command": "C:\\Users\\techd\\AppData\\Local\\Android\\Sdk\\platform-tools\\adb.exe",
+			"args": [
+				"-s",
+				"47021FDAS003DV",
+				"shell",
+				"run-as",
+				"com.hound.controller",
+				"ls",
+				"shared_prefs"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "adb-runas-cat-vpn-prefs",
+			"type": "shell",
+			"command": "C:\\Users\\techd\\AppData\\Local\\Android\\Sdk\\platform-tools\\adb.exe",
+			"args": [
+				"-s",
+				"47021FDAS003DV",
+				"shell",
+				"run-as",
+				"com.hound.controller",
+				"cat",
+				"shared_prefs/com.hound.controller_preferences.xml"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "adb-check-vpn-service-running",
+			"type": "shell",
+			"command": "C:\\Users\\techd\\AppData\\Local\\Android\\Sdk\\platform-tools\\adb.exe",
+			"args": [
+				"-s",
+				"47021FDAS003DV",
+				"shell",
+				"dumpsys",
+				"activity",
+				"services",
+				"com.hound.controller/.vpn.TrafficCaptureVpnService"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "install-app-debug-adb-defaultvpn",
+			"type": "shell",
+			"command": "C:\\Users\\techd\\AppData\\Local\\Android\\Sdk\\platform-tools\\adb.exe",
+			"args": [
+				"-s",
+				"47021FDAS003DV",
+				"install",
+				"-r",
+				"app\\build\\outputs\\apk\\debug\\app-debug.apk"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "launch-app-adb-defaultvpn",
+			"type": "shell",
+			"command": "C:\\Users\\techd\\AppData\\Local\\Android\\Sdk\\platform-tools\\adb.exe",
+			"args": [
+				"-s",
+				"47021FDAS003DV",
+				"shell",
+				"monkey",
+				"-p",
+				"com.hound.controller",
+				"-c",
+				"android.intent.category.LAUNCHER",
+				"1"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "adb-runas-cat-vpn-prefs-after-default",
+			"type": "shell",
+			"command": "C:\\Users\\techd\\AppData\\Local\\Android\\Sdk\\platform-tools\\adb.exe",
+			"args": [
+				"-s",
+				"47021FDAS003DV",
+				"shell",
+				"run-as",
+				"com.hound.controller",
+				"cat",
+				"shared_prefs/com.hound.controller_preferences.xml"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "install-app-debug-adb-defaultvpn2",
+			"type": "shell",
+			"command": "C:\\Users\\techd\\AppData\\Local\\Android\\Sdk\\platform-tools\\adb.exe",
+			"args": [
+				"-s",
+				"47021FDAS003DV",
+				"install",
+				"-r",
+				"app\\build\\outputs\\apk\\debug\\app-debug.apk"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "launch-app-adb-defaultvpn2",
+			"type": "shell",
+			"command": "C:\\Users\\techd\\AppData\\Local\\Android\\Sdk\\platform-tools\\adb.exe",
+			"args": [
+				"-s",
+				"47021FDAS003DV",
+				"shell",
+				"monkey",
+				"-p",
+				"com.hound.controller",
+				"-c",
+				"android.intent.category.LAUNCHER",
+				"1"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "adb-runas-cat-vpn-prefs-final-default",
+			"type": "shell",
+			"command": "C:\\Users\\techd\\AppData\\Local\\Android\\Sdk\\platform-tools\\adb.exe",
+			"args": [
+				"-s",
+				"47021FDAS003DV",
+				"shell",
+				"run-as",
+				"com.hound.controller",
+				"cat",
+				"shared_prefs/com.hound.controller_preferences.xml"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "adb-check-vpn-service-running-final",
+			"type": "shell",
+			"command": "C:\\Users\\techd\\AppData\\Local\\Android\\Sdk\\platform-tools\\adb.exe",
+			"args": [
+				"-s",
+				"47021FDAS003DV",
+				"shell",
+				"dumpsys",
+				"activity",
+				"services",
+				"com.hound.controller/.vpn.TrafficCaptureVpnService"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "install-app-debug-adb-defaultvpn3",
+			"type": "shell",
+			"command": "C:\\Users\\techd\\AppData\\Local\\Android\\Sdk\\platform-tools\\adb.exe",
+			"args": [
+				"-s",
+				"47021FDAS003DV",
+				"install",
+				"-r",
+				"app\\build\\outputs\\apk\\debug\\app-debug.apk"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "install-app-debug-adb-vpnctxfix",
+			"type": "shell",
+			"command": "C:\\Users\\techd\\AppData\\Local\\Android\\Sdk\\platform-tools\\adb.exe",
+			"args": [
+				"-s",
+				"47021FDAS003DV",
+				"install",
+				"-r",
+				"app\\build\\outputs\\apk\\debug\\app-debug.apk"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "launch-app-adb-vpnctxfix",
+			"type": "shell",
+			"command": "C:\\Users\\techd\\AppData\\Local\\Android\\Sdk\\platform-tools\\adb.exe",
+			"args": [
+				"-s",
+				"47021FDAS003DV",
+				"shell",
+				"monkey",
+				"-p",
+				"com.hound.controller",
+				"-c",
+				"android.intent.category.LAUNCHER",
+				"1"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "adb-runas-cat-vpn-prefs-vpnctxfix",
+			"type": "shell",
+			"command": "C:\\Users\\techd\\AppData\\Local\\Android\\Sdk\\platform-tools\\adb.exe",
+			"args": [
+				"-s",
+				"47021FDAS003DV",
+				"shell",
+				"run-as",
+				"com.hound.controller",
+				"cat",
+				"shared_prefs/com.hound.controller_preferences.xml"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "install-app-debug-adb-vpnflagfix",
+			"type": "shell",
+			"command": "C:\\Users\\techd\\AppData\\Local\\Android\\Sdk\\platform-tools\\adb.exe",
+			"args": [
+				"-s",
+				"47021FDAS003DV",
+				"install",
+				"-r",
+				"app\\build\\outputs\\apk\\debug\\app-debug.apk"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "launch-app-adb-vpnflagfix",
+			"type": "shell",
+			"command": "C:\\Users\\techd\\AppData\\Local\\Android\\Sdk\\platform-tools\\adb.exe",
+			"args": [
+				"-s",
+				"47021FDAS003DV",
+				"shell",
+				"monkey",
+				"-p",
+				"com.hound.controller",
+				"-c",
+				"android.intent.category.LAUNCHER",
+				"1"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "adb-get-app-pid",
+			"type": "shell",
+			"command": "C:\\Users\\techd\\AppData\\Local\\Android\\Sdk\\platform-tools\\adb.exe",
+			"args": [
+				"-s",
+				"47021FDAS003DV",
+				"shell",
+				"pidof",
+				"com.hound.controller"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "adb-logcat-crash-window",
+			"type": "shell",
+			"command": "C:\\Users\\techd\\AppData\\Local\\Android\\Sdk\\platform-tools\\adb.exe",
+			"args": [
+				"-s",
+				"47021FDAS003DV",
+				"logcat",
+				"-d",
+				"-t",
+				"1200"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "adb-logcat-androidruntime",
+			"type": "shell",
+			"command": "C:\\Users\\techd\\AppData\\Local\\Android\\Sdk\\platform-tools\\adb.exe",
+			"args": [
+				"-s",
+				"47021FDAS003DV",
+				"logcat",
+				"-d",
+				"AndroidRuntime:E",
+				"*:S"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "adb-logcat-clear",
+			"type": "shell",
+			"command": "C:\\Users\\techd\\AppData\\Local\\Android\\Sdk\\platform-tools\\adb.exe",
+			"args": [
+				"-s",
+				"47021FDAS003DV",
+				"logcat",
+				"-c"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "launch-app-repro-crash",
+			"type": "shell",
+			"command": "C:\\Users\\techd\\AppData\\Local\\Android\\Sdk\\platform-tools\\adb.exe",
+			"args": [
+				"-s",
+				"47021FDAS003DV",
+				"shell",
+				"monkey",
+				"-p",
+				"com.hound.controller",
+				"-c",
+				"android.intent.category.LAUNCHER",
+				"1"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "adb-logcat-androidruntime-fresh",
+			"type": "shell",
+			"command": "C:\\Users\\techd\\AppData\\Local\\Android\\Sdk\\platform-tools\\adb.exe",
+			"args": [
+				"-s",
+				"47021FDAS003DV",
+				"logcat",
+				"-d",
+				"AndroidRuntime:E",
+				"ActivityTaskManager:E",
+				"*:S"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "adb-pid-after-repro",
+			"type": "shell",
+			"command": "C:\\Users\\techd\\AppData\\Local\\Android\\Sdk\\platform-tools\\adb.exe",
+			"args": [
+				"-s",
+				"47021FDAS003DV",
+				"shell",
+				"pidof",
+				"com.hound.controller"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "adb-logcat-app-tags-fresh",
+			"type": "shell",
+			"command": "C:\\Users\\techd\\AppData\\Local\\Android\\Sdk\\platform-tools\\adb.exe",
+			"args": [
+				"-s",
+				"47021FDAS003DV",
+				"logcat",
+				"-d",
+				"TpeApplication:I",
+				"VpnPolicyManager:I",
+				"TrafficCaptureVpnService:I",
+				"ActivityTaskManager:I",
+				"*:S"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "install-app-debug-adb-throttlefix",
+			"type": "shell",
+			"command": "C:\\Users\\techd\\AppData\\Local\\Android\\Sdk\\platform-tools\\adb.exe",
+			"args": [
+				"-s",
+				"47021FDAS003DV",
+				"install",
+				"-r",
+				"app\\build\\outputs\\apk\\debug\\app-debug.apk"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "adb-logcat-clear-throttlefix",
+			"type": "shell",
+			"command": "C:\\Users\\techd\\AppData\\Local\\Android\\Sdk\\platform-tools\\adb.exe",
+			"args": [
+				"-s",
+				"47021FDAS003DV",
+				"logcat",
+				"-c"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "launch-app-adb-throttlefix",
+			"type": "shell",
+			"command": "C:\\Users\\techd\\AppData\\Local\\Android\\Sdk\\platform-tools\\adb.exe",
+			"args": [
+				"-s",
+				"47021FDAS003DV",
+				"shell",
+				"monkey",
+				"-p",
+				"com.hound.controller",
+				"-c",
+				"android.intent.category.LAUNCHER",
+				"1"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "adb-logcat-rapid-launch-check",
+			"type": "shell",
+			"command": "C:\\Users\\techd\\AppData\\Local\\Android\\Sdk\\platform-tools\\adb.exe",
+			"args": [
+				"-s",
+				"47021FDAS003DV",
+				"logcat",
+				"-d",
+				"ActivityTaskManager:I",
+				"AndroidRuntime:E",
+				"*:S"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "adb-pid-after-throttlefix",
+			"type": "shell",
+			"command": "C:\\Users\\techd\\AppData\\Local\\Android\\Sdk\\platform-tools\\adb.exe",
+			"args": [
+				"-s",
+				"47021FDAS003DV",
+				"shell",
+				"pidof",
+				"com.hound.controller"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "adb-runas-vpn-state-after-fix",
+			"type": "shell",
+			"command": "C:\\Users\\techd\\AppData\\Local\\Android\\Sdk\\platform-tools\\adb.exe",
+			"args": [
+				"-s",
+				"47021FDAS003DV",
+				"shell",
+				"run-as",
+				"com.hound.controller",
+				"cat",
+				"shared_prefs/com.hound.controller_preferences.xml"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "install-app-debug-adb-consentproxy",
+			"type": "shell",
+			"command": "C:\\Users\\techd\\AppData\\Local\\Android\\Sdk\\platform-tools\\adb.exe",
+			"args": [
+				"-s",
+				"47021FDAS003DV",
+				"install",
+				"-r",
+				"app\\build\\outputs\\apk\\debug\\app-debug.apk"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "adb-logcat-clear-consentproxy",
+			"type": "shell",
+			"command": "C:\\Users\\techd\\AppData\\Local\\Android\\Sdk\\platform-tools\\adb.exe",
+			"args": [
+				"-s",
+				"47021FDAS003DV",
+				"logcat",
+				"-c"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "launch-app-adb-consentproxy",
+			"type": "shell",
+			"command": "C:\\Users\\techd\\AppData\\Local\\Android\\Sdk\\platform-tools\\adb.exe",
+			"args": [
+				"-s",
+				"47021FDAS003DV",
+				"shell",
+				"monkey",
+				"-p",
+				"com.hound.controller",
+				"-c",
+				"android.intent.category.LAUNCHER",
+				"1"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "adb-logcat-proxy-flow-check",
+			"type": "shell",
+			"command": "C:\\Users\\techd\\AppData\\Local\\Android\\Sdk\\platform-tools\\adb.exe",
+			"args": [
+				"-s",
+				"47021FDAS003DV",
+				"logcat",
+				"-d",
+				"ActivityTaskManager:I",
+				"*:S"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "adb-start-vpn-consent-proxy-manual",
+			"type": "shell",
+			"command": "C:\\Users\\techd\\AppData\\Local\\Android\\Sdk\\platform-tools\\adb.exe",
+			"args": [
+				"-s",
+				"47021FDAS003DV",
+				"shell",
+				"am",
+				"start",
+				"-n",
+				"com.hound.controller/com.tpeapp.vpn.VpnConsentProxyActivity"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "install-app-debug-adb-blepermfix",
+			"type": "shell",
+			"command": "C:\\Users\\techd\\AppData\\Local\\Android\\Sdk\\platform-tools\\adb.exe",
+			"args": [
+				"-s",
+				"47021FDAS003DV",
+				"install",
+				"-r",
+				"app\\build\\outputs\\apk\\debug\\app-debug.apk"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "launch-app-adb-blepermfix",
+			"type": "shell",
+			"command": "C:\\Users\\techd\\AppData\\Local\\Android\\Sdk\\platform-tools\\adb.exe",
+			"args": [
+				"-s",
+				"47021FDAS003DV",
+				"shell",
+				"monkey",
+				"-p",
+				"com.hound.controller",
+				"-c",
+				"android.intent.category.LAUNCHER",
+				"1"
+			],
+			"isBackground": false
+		}
+	]
+}

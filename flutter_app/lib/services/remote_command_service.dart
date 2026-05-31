@@ -574,20 +574,24 @@ class RemoteCommandService {
         break;
       case 'VPN_CONNECT':
         await DeviceCommandChannel.vpnConnect();
-        _onMessage?.call('VPN connect intent stored.');
+        final status = await DeviceCommandChannel.getVpnStatus();
+        _onMessage?.call('VPN connect flow triggered.');
         _lastTelemetry = {
           'fallback_transport': 'ws_or_mqtt',
           'legacy_action': legacyAction,
           'desired_state': 'connected',
+          if (status != null) 'vpn_status': status,
         };
         break;
       case 'VPN_DISCONNECT':
         await DeviceCommandChannel.vpnDisconnect();
-        _onMessage?.call('VPN disconnect intent stored.');
+        final status = await DeviceCommandChannel.getVpnStatus();
+        _onMessage?.call('VPN disconnect flow triggered.');
         _lastTelemetry = {
           'fallback_transport': 'ws_or_mqtt',
           'legacy_action': legacyAction,
           'desired_state': 'disconnected',
+          if (status != null) 'vpn_status': status,
         };
         break;
       case 'VPN_STATUS_POLL':

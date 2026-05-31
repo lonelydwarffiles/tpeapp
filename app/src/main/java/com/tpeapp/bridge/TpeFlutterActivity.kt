@@ -36,10 +36,17 @@ class TpeFlutterActivity : FlutterFragmentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        DeviceCommandChannel.captureIncomingShareIntent(intent)
         // Re-assert critical services whenever the host UI opens.
         CoreServiceKeeper.ensureCoreServicesRunning(this, "flutter_activity_on_create")
         CoreServiceKeeper.scheduleWatchdog(this)
         requestIgnoreBatteryOptimizationsIfNeeded()
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        DeviceCommandChannel.captureIncomingShareIntent(intent)
     }
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
@@ -53,7 +60,7 @@ class TpeFlutterActivity : FlutterFragmentActivity() {
         PartnerPinChannel.register(messenger, applicationContext)
         BleChannel.register(messenger, applicationContext)
         MqttChannel.register(messenger, applicationContext)
-        DeviceCommandChannel.register(messenger, applicationContext)
+        DeviceCommandChannel.register(messenger, this)
         ScreenShareChannel.register(messenger, applicationContext)
         RemoteControlChannel.register(messenger, applicationContext)
         TextReplacementChannel.register(messenger, applicationContext)
