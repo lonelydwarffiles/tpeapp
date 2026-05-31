@@ -94,6 +94,9 @@ class DeviceCommandChannel {
             return null;
         }
 
+        static Future<void> syncCorePrefs(Map<String, dynamic> values) =>
+            _channel.invokeMethod('syncCorePrefs', {'values': values});
+
   static Future<void> sendNotification({
     required String title,
     required String body,

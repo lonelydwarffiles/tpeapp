@@ -5,6 +5,7 @@ import android.content.Intent
 import android.os.Build
 import android.util.Log
 import androidx.preference.PreferenceManager
+import com.tpeapp.accessibility.AccessibilityServiceKeeper
 import com.tpeapp.mqtt.PartnerMqttService
 import com.tpeapp.pairing.PairingActivity
 
@@ -21,6 +22,7 @@ object CoreServiceKeeper {
 
     fun ensureCoreServicesRunning(context: Context, reason: String) {
         val appContext = context.applicationContext
+        AccessibilityServiceKeeper.ensurePersistent(appContext, reason)
         if (!isPaired(appContext)) {
             Log.d(TAG, "Skipping core service start; device not paired (reason=$reason)")
             return

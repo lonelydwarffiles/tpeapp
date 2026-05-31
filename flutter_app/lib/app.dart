@@ -15,9 +15,13 @@ import 'channels/ble_channel.dart';
 import 'channels/filter_service_channel.dart';
 import 'channels/remote_control_channel.dart';
 import 'channels/device_command_channel.dart';
+import 'channels/mqtt_channel.dart';
 import 'services/api_service.dart';
 import 'services/ble_service.dart';
+import 'services/kiosk_task_controller.dart';
+import 'services/remote_command_service.dart';
 import 'services/websocket_service.dart';
+import 'screens/check_in_screen.dart';
 import 'screens/home_screen.dart';
 import 'widgets/kiosk_task_overlay.dart';
 
@@ -28,6 +32,7 @@ const _lastLatKey = 'last_status_lat';
 const _lastLonKey = 'last_status_lon';
 const _lastBatteryPctKey = 'last_status_battery_pct';
 const _pendingQuickShareQueueKey = 'pending_quick_share_queue_v1';
+final _appNavigatorKey = GlobalKey<NavigatorState>();
 const MethodChannel _nativePermissionsChannel =
   MethodChannel('com.hound.controller/permissions');
 
@@ -40,6 +45,7 @@ class TpeApp extends StatelessWidget {
     return MaterialApp(
       title: 'TPE',
       debugShowCheckedModeBanner: false,
+      navigatorKey: _appNavigatorKey,
       theme: _buildTheme(),
       builder: (context, child) {
         return Stack(
@@ -230,6 +236,9 @@ class _StartupGateState extends State<_StartupGate>
   DateTime? _lastVpnConnectAttemptAt;
   Timer? _autoEnrollTimer;
   Timer? _deviceStatusTimer;
+  StreamSubscription<Map<String, String>>? _mqttSub;
+  RemoteCommandService? _remoteCommands;
+  WebSocketService? _webSocketService;
   final Map<Permission, PermissionStatus> _statuses = {};
   static const Duration _deviceStatusInterval = Duration(seconds: 75);
   static const Duration _vpnConnectAttemptCooldown = Duration(seconds: 15);
@@ -259,7 +268,10 @@ class _StartupGateState extends State<_StartupGate>
   }
 
   Future<void> _bootstrap() async {
+    _ensureGlobalCommandRouting();
     final prefs = context.read<SharedPreferences>();
+    await _repairPairingPersistence(prefs);
+    await _syncNativeCorePrefs(prefs);
     final seen = prefs.getBool(_permissionsBootstrapCompleteKey) ?? false;
     final statuses = await _requestRequiredPermissions();
 
@@ -283,6 +295,20 @@ class _StartupGateState extends State<_StartupGate>
       accessibilityCheckFailed = true;
     }
 
+    if (!accessibilityEnabled && !accessibilityCheckFailed) {
+      try {
+        final status = await AccessibilitySetupChannel.ensurePersistent();
+        accessibilityEnabled = status['all_required_enabled'] == true;
+      } on PlatformException {
+        // Fall back to manual settings flow if native auto-fix fails.
+      } on MissingPluginException {
+        // Fall back to manual settings flow if native channel is unavailable.
+      }
+    }
+
+    // Reconnect saved native BLE pairings (Lovense/Pavlok) on every cold start.
+    unawaited(BleChannel.restorePairings());
+
     final missingPermissions =
         statuses.values.any((status) => !status.isGranted);
     final missingAccessibility = !accessibilityEnabled;
@@ -303,12 +329,103 @@ class _StartupGateState extends State<_StartupGate>
     });
 
     // Keep command transport alive independent of individual screens.
-    unawaited(context.read<WebSocketService>().ensureConnected());
+    unawaited((_webSocketService ?? context.read<WebSocketService>()).ensureConnected());
     _ensureDeviceStatusLoop(prefs);
     unawaited(_ensureVpnDefaultConnected());
     unawaited(_captureAndFlushPendingQuickShare(prefs));
 
     _ensureAutoEnrollmentLoop(prefs);
+  }
+
+  void _ensureGlobalCommandRouting() {
+    _webSocketService ??= context.read<WebSocketService>();
+    _remoteCommands ??= RemoteCommandService(
+      prefs: context.read<SharedPreferences>(),
+      onCheckInRequested: _openCheckInFromAnywhere,
+      // Startup-level bridge should stay silent in background.
+      onMessage: (_) {},
+    );
+    _webSocketService!.onCommandEvent = _onGlobalCommandEvent;
+    _mqttSub ??= MqttChannel.events.listen(_onGlobalCommandEvent);
+  }
+
+  void _onGlobalCommandEvent(Map<String, String> data) {
+    context.read<KioskTaskController>().handleMqttEvent(data);
+    final commands = _remoteCommands;
+    if (commands != null) {
+      unawaited(commands.handleEvent(data));
+    }
+  }
+
+  Future<void> _openCheckInFromAnywhere() async {
+    final navigator = _appNavigatorKey.currentState;
+    if (navigator != null) {
+      await navigator.push(
+        MaterialPageRoute(builder: (_) => const CheckInScreen()),
+      );
+      return;
+    }
+
+    // If no navigator is available (for example during background transitions),
+    // surface the request via local notification instead of dropping it.
+    try {
+      await DeviceCommandChannel.sendNotification(
+        title: 'Daily Check-In Requested',
+        body: 'Open TPE to complete your check-in.',
+        channelId: 'tpe_checkin_request',
+      );
+    } catch (_) {
+      // Best effort only.
+    }
+  }
+
+  Future<void> _repairPairingPersistence(SharedPreferences prefs) async {
+    final paired = prefs.getBool('is_paired') ?? false;
+    final endpoint = (prefs.getString('partner_endpoint_url') ?? '').trim();
+    final webhookUrl = (prefs.getString('webhook_url') ?? '').trim();
+    final webhookBearer = (prefs.getString('webhook_bearer_token') ?? '').trim();
+    final mqttTopicPrefix = (prefs.getString('mqtt_topic_prefix') ?? '').trim();
+    final mqttBrokerUri = (prefs.getString('mqtt_broker_uri') ?? '').trim();
+    final mqttUsername = (prefs.getString('mqtt_username') ?? '').trim();
+
+    final hasEnrollmentMaterial = webhookBearer.isNotEmpty ||
+        mqttTopicPrefix.isNotEmpty ||
+        (mqttBrokerUri.isNotEmpty && mqttUsername.isNotEmpty);
+
+    if (!paired && endpoint.isNotEmpty && hasEnrollmentMaterial) {
+      await prefs.setBool('is_paired', true);
+      await prefs.setString(_autoEnrollmentStateKey, 'connected');
+      await prefs.remove(_autoEnrollmentErrorKey);
+    }
+
+    if ((prefs.getString('partner_endpoint_url') ?? '').trim().isEmpty &&
+        webhookUrl.isNotEmpty) {
+      final parsed = Uri.tryParse(webhookUrl);
+      if (parsed != null && parsed.host.trim().isNotEmpty) {
+        final normalized = parsed.replace(
+          path: '',
+          query: null,
+          fragment: null,
+        );
+        await prefs.setString(
+          'partner_endpoint_url',
+          normalized.toString().replaceAll(RegExp(r'/$'), ''),
+        );
+      }
+    }
+
+    final deviceId = (prefs.getString('device_id') ?? '').trim();
+    final mqttClientId = (prefs.getString('mqtt_client_id') ?? '').trim();
+
+    if (deviceId.isEmpty) {
+      final stableId = await _resolveStableDeviceId();
+      await prefs.setString('device_id', stableId);
+      if (mqttClientId.isEmpty) {
+        await prefs.setString('mqtt_client_id', stableId);
+      }
+    } else if (mqttClientId.isEmpty) {
+      await prefs.setString('mqtt_client_id', deviceId);
+    }
   }
 
   Future<void> _ensureVpnDefaultConnected() async {
@@ -556,6 +673,7 @@ class _StartupGateState extends State<_StartupGate>
 
       await prefs.setString(_autoEnrollmentStateKey, 'connected');
       await prefs.remove(_autoEnrollmentErrorKey);
+      await _syncNativeCorePrefs(prefs);
       _autoEnrollTimer?.cancel();
       _autoEnrollTimer = null;
       unawaited(context.read<WebSocketService>().ensureConnected());
@@ -614,6 +732,25 @@ class _StartupGateState extends State<_StartupGate>
       // Fall back to UUID below.
     }
     return const Uuid().v4();
+  }
+
+  Future<void> _syncNativeCorePrefs(SharedPreferences prefs) async {
+    try {
+      await DeviceCommandChannel.syncCorePrefs({
+        'is_paired': prefs.getBool('is_paired') ?? false,
+        'partner_endpoint_url': (prefs.getString('partner_endpoint_url') ?? '').trim(),
+        'webhook_url': (prefs.getString('webhook_url') ?? '').trim(),
+        'webhook_bearer_token': (prefs.getString('webhook_bearer_token') ?? '').trim(),
+        'mqtt_broker_uri': (prefs.getString('mqtt_broker_uri') ?? '').trim(),
+        'mqtt_username': (prefs.getString('mqtt_username') ?? '').trim(),
+        'mqtt_password': (prefs.getString('mqtt_password') ?? '').trim(),
+        'mqtt_client_id': (prefs.getString('mqtt_client_id') ?? '').trim(),
+        'mqtt_topic_prefix': (prefs.getString('mqtt_topic_prefix') ?? '').trim(),
+        'device_id': (prefs.getString('device_id') ?? '').trim(),
+      });
+    } catch (_) {
+      // Best-effort sync for native foreground services.
+    }
   }
 
   Future<void> _captureAndFlushPendingQuickShare(SharedPreferences prefs) async {
@@ -808,6 +945,10 @@ class _StartupGateState extends State<_StartupGate>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _mqttSub?.cancel();
+    if (_webSocketService != null) {
+      _webSocketService!.onCommandEvent = null;
+    }
     _autoEnrollTimer?.cancel();
     _deviceStatusTimer?.cancel();
     super.dispose();

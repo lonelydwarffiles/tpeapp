@@ -22,6 +22,7 @@ paho-android-service = "1.1.1"
 paho-client          = "1.2.5"
 webrtc               = "1.0.45036"
 play-services-location = "21.3.0"
+localbroadcastmanager = "1.1.0"
 
 [libraries]
 # AndroidX
@@ -50,6 +51,7 @@ paho-android-service       = { group = "org.eclipse.paho", name = "org.eclipse.p
 paho-client                = { group = "org.eclipse.paho", name = "org.eclipse.paho.client.mqttv3", version.ref = "paho-client" }
 webrtc                     = { group = "com.infobip", name = "google-webrtc", version.ref = "webrtc" }
 play-services-location     = { group = "com.google.android.gms", name = "play-services-location", version.ref = "play-services-location" }
+androidx-localbroadcastmanager = { group = "androidx.localbroadcastmanager", name = "localbroadcastmanager", version.ref = "localbroadcastmanager" }
 
 # LSPosed / Xposed
 lsposed-api                = { group = "io.github.libxposed", name = "api", version.ref = "lsposed-api" }

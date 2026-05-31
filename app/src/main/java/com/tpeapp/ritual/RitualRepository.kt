@@ -14,6 +14,7 @@ object RitualRepository {
 
     private const val TAG = "RitualRepository"
     private const val PREF_RITUAL_STEPS = "ritual_steps"
+    private const val PREF_RITUAL_ENABLED = "ritual_enabled"
     private const val PREF_MORNING_TIME = "ritual_morning_time_minutes"
     private const val PREF_EVENING_TIME = "ritual_evening_time_minutes"
     private const val DEFAULT_MORNING_TIME = 480   // 8 AM
@@ -54,6 +55,20 @@ object RitualRepository {
             .apply()
     }
 
+    fun isEnabled(ctx: Context): Boolean =
+        PreferenceManager.getDefaultSharedPreferences(ctx)
+            .getBoolean(PREF_RITUAL_ENABLED, false)
+
+    fun setEnabled(ctx: Context, enabled: Boolean) {
+        PreferenceManager.getDefaultSharedPreferences(ctx).edit()
+            .putBoolean(PREF_RITUAL_ENABLED, enabled)
+            .apply()
+        if (!enabled) {
+            cancelMorningAlarm(ctx)
+            cancelEveningAlarm(ctx)
+        }
+    }
+
     fun getMorningTime(ctx: Context): Int =
         PreferenceManager.getDefaultSharedPreferences(ctx)
             .getInt(PREF_MORNING_TIME, DEFAULT_MORNING_TIME)
@@ -75,6 +90,10 @@ object RitualRepository {
     }
 
     fun scheduleMorningAlarm(ctx: Context) {
+        if (!isEnabled(ctx)) {
+            Log.i(TAG, "Skipping morning ritual scheduling because ritual is disabled")
+            return
+        }
         scheduleAlarm(
             ctx,
             getMorningTime(ctx),
@@ -84,6 +103,10 @@ object RitualRepository {
     }
 
     fun scheduleEveningAlarm(ctx: Context) {
+        if (!isEnabled(ctx)) {
+            Log.i(TAG, "Skipping evening ritual scheduling because ritual is disabled")
+            return
+        }
         scheduleAlarm(
             ctx,
             getEveningTime(ctx),
@@ -91,6 +114,12 @@ object RitualRepository {
             REQUEST_CODE_EVENING
         )
     }
+
+    fun cancelMorningAlarm(ctx: Context) =
+        cancelAlarm(ctx, RitualAlarmReceiver.ACTION_RITUAL_MORNING, REQUEST_CODE_MORNING)
+
+    fun cancelEveningAlarm(ctx: Context) =
+        cancelAlarm(ctx, RitualAlarmReceiver.ACTION_RITUAL_EVENING, REQUEST_CODE_EVENING)
 
     private fun scheduleAlarm(ctx: Context, timeMinutes: Int, action: String, requestCode: Int) {
         val am = ctx.getSystemService(AlarmManager::class.java)
@@ -112,6 +141,19 @@ object RitualRepository {
 
         am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, cal.timeInMillis, pending)
         Log.i(TAG, "Ritual alarm scheduled for $action at ${cal.time}")
+    }
+
+    private fun cancelAlarm(ctx: Context, action: String, requestCode: Int) {
+        val am = ctx.getSystemService(AlarmManager::class.java)
+        val intent = Intent(ctx, RitualAlarmReceiver::class.java).apply { this.action = action }
+        val pending = PendingIntent.getBroadcast(
+            ctx,
+            requestCode,
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+        am.cancel(pending)
+        Log.i(TAG, "Ritual alarm canceled for $action")
     }
 
     private const val REQUEST_CODE_MORNING = 0x7701

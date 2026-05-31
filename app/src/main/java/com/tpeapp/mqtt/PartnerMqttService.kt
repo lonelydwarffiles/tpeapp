@@ -57,15 +57,17 @@ import com.tpeapp.tasks.TaskStatus
 import com.tpeapp.vpn.VpnPolicyManager
 import com.tpeapp.vault.PasswordVaultManager
 import com.tpeapp.webhook.WebhookManager
-import org.eclipse.paho.android.service.MqttAndroidClient
 import org.eclipse.paho.client.mqttv3.IMqttActionListener
 import org.eclipse.paho.client.mqttv3.IMqttDeliveryToken
+import org.eclipse.paho.client.mqttv3.MqttAsyncClient
 import org.eclipse.paho.client.mqttv3.MqttCallbackExtended
 import org.eclipse.paho.client.mqttv3.MqttConnectOptions
 import org.eclipse.paho.client.mqttv3.MqttException
 import org.eclipse.paho.client.mqttv3.MqttMessage
+import org.eclipse.paho.client.mqttv3.persist.MemoryPersistence
 import org.json.JSONArray
 import org.json.JSONObject
+import java.net.URI
 import java.util.UUID
 import kotlin.random.Random
 
@@ -147,8 +149,11 @@ class PartnerMqttService : Service() {
 
     private val reconnectHandler = Handler(Looper.getMainLooper())
     private var reconnectRunnable: Runnable? = null
-    private var mqttClient: MqttAndroidClient? = null
+    private var mqttClient: MqttAsyncClient? = null
     private var networkCallback: ConnectivityManager.NetworkCallback? = null
+    @Volatile
+    private var mqttConnectInFlight: Boolean = false
+    private var mqttClientBrokerUri: String? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -186,7 +191,6 @@ class PartnerMqttService : Service() {
             }
         }
         networkCallback = null
-        runCatching { mqttClient?.unregisterResources() }
         runCatching { mqttClient?.disconnect() }
         runCatching { mqttClient?.close() }
         mqttClient = null
@@ -226,15 +230,46 @@ class PartnerMqttService : Service() {
     }
 
     private fun connectMqtt(force: Boolean) {
-        val brokerUri = prefs().getString(PREF_MQTT_BROKER_URI, null)?.trim().orEmpty()
+        val rawBrokerUri = prefs().getString(PREF_MQTT_BROKER_URI, null)?.trim().orEmpty()
+        val brokerUri = normalizeBrokerUri(rawBrokerUri)
         if (brokerUri.isBlank()) {
             Log.w(TAG, "MQTT broker URI missing; set $PREF_MQTT_BROKER_URI in preferences")
             scheduleReconnect()
             return
         }
 
-        val client = mqttClient ?: createClient(brokerUri).also { mqttClient = it }
-        if (!force && client.isConnected) return
+        val brokerHost = parseBrokerHost(brokerUri)
+        if (brokerHost.isNullOrBlank()) {
+            Log.w(TAG, "MQTT broker URI has no valid host: $brokerUri")
+            scheduleReconnect()
+            return
+        }
+
+        if (rawBrokerUri != brokerUri) {
+            Log.i(TAG, "Normalized MQTT broker URI: $rawBrokerUri -> $brokerUri")
+        }
+
+        if (mqttConnectInFlight) {
+            Log.i(TAG, "MQTT connect skipped; another connect is already in flight")
+            return
+        }
+
+        val existingClient = mqttClient
+        val client = if (existingClient != null && mqttClientBrokerUri == brokerUri) {
+            existingClient
+        } else {
+            runCatching { existingClient?.close() }
+            createClient(brokerUri).also {
+                mqttClient = it
+                mqttClientBrokerUri = brokerUri
+            }
+        }
+        if (client.isConnected) {
+            if (force) {
+                Log.d(TAG, "MQTT connect skipped; client already connected")
+            }
+            return
+        }
 
         val options = MqttConnectOptions().apply {
             isAutomaticReconnect = true
@@ -246,30 +281,67 @@ class PartnerMqttService : Service() {
             prefs().getString(PREF_MQTT_PASSWORD, null)?.let { password = it.toCharArray() }
         }
 
+        mqttConnectInFlight = true
         runCatching {
             client.connect(options, null, object : IMqttActionListener {
                 override fun onSuccess(asyncActionToken: org.eclipse.paho.client.mqttv3.IMqttToken?) {
+                    mqttConnectInFlight = false
                     Log.i(TAG, "MQTT connected")
-                    subscribeToCommandTopic(client)
                 }
 
                 override fun onFailure(
                     asyncActionToken: org.eclipse.paho.client.mqttv3.IMqttToken?,
                     exception: Throwable?
                 ) {
-                    Log.w(TAG, "MQTT connect failed", exception)
+                    mqttConnectInFlight = false
+                    logMqttConnectFailure(brokerUri, exception, asyncActionToken?.exception)
                     scheduleReconnect()
                 }
             })
         }.onFailure {
+            mqttConnectInFlight = false
             Log.w(TAG, "MQTT connect threw", it)
             scheduleReconnect()
         }
     }
 
-    private fun createClient(brokerUri: String): MqttAndroidClient {
+    private fun parseBrokerHost(uri: String): String? = runCatching {
+        URI(uri).host
+    }.getOrNull()
+
+    private fun logMqttConnectFailure(
+        brokerUri: String,
+        callbackError: Throwable?,
+        tokenError: Throwable?
+    ) {
+        val error = callbackError ?: tokenError
+        val rootCause = generateSequence(error) { it.cause }.lastOrNull()
+        val rootCauseSummary = rootCause
+            ?.let { " rootCause=${it::class.java.simpleName}: ${it.message}" }
+            .orEmpty()
+        val reason = when (error) {
+            is MqttException -> "reasonCode=${error.reasonCode} message=${error.message}"
+            null -> "unknown reason (no exception provided)"
+            else -> "${error::class.java.simpleName}: ${error.message}"
+        }
+        Log.w(TAG, "MQTT connect failed uri=$brokerUri $reason$rootCauseSummary", error)
+    }
+
+    private fun normalizeBrokerUri(uri: String): String {
+        val trimmed = uri.trim()
+        if (trimmed.isBlank()) return trimmed
+        return when {
+            trimmed.startsWith("mqtt://", ignoreCase = true) ->
+                "tcp://${trimmed.substringAfter("://")}".trim()
+            trimmed.startsWith("mqtts://", ignoreCase = true) ->
+                "ssl://${trimmed.substringAfter("://")}".trim()
+            else -> trimmed
+        }
+    }
+
+    private fun createClient(brokerUri: String): MqttAsyncClient {
         val clientId = ensureClientId()
-        return MqttAndroidClient(applicationContext, brokerUri, clientId).apply {
+        return MqttAsyncClient(brokerUri, clientId, MemoryPersistence()).apply {
             setCallback(object : MqttCallbackExtended {
                 override fun connectComplete(reconnect: Boolean, serverURI: String?) {
                     Log.i(TAG, "MQTT connectComplete reconnect=$reconnect uri=$serverURI")
@@ -277,6 +349,7 @@ class PartnerMqttService : Service() {
                 }
 
                 override fun connectionLost(cause: Throwable?) {
+                    mqttConnectInFlight = false
                     Log.w(TAG, "MQTT connection lost", cause)
                     scheduleReconnect()
                 }
@@ -303,36 +376,38 @@ class PartnerMqttService : Service() {
         }
     }
 
-    private fun subscribeToCommandTopic(client: MqttAndroidClient) {
-        val deviceId = prefs().getString("device_id", null)?.takeIf { it.isNotBlank() } ?: ensureClientId()
-        val topicPrefix = prefs().getString(PREF_MQTT_TOPIC_PREFIX, null)?.takeIf { it.isNotBlank() }
-            ?: "tpeapp/device"
-        val topic = "$topicPrefix/$deviceId/commands"
+    private fun subscribeToCommandTopic(client: MqttAsyncClient) {
+        val prefix = prefs().getString(PREF_MQTT_TOPIC_PREFIX, null)?.trim().orEmpty()
+        if (prefix.isBlank()) {
+            Log.w(TAG, "MQTT topic prefix missing; set $PREF_MQTT_TOPIC_PREFIX in preferences")
+            return
+        }
+        val topic = "$prefix/$MQTT_ALERTS_TOPIC_SUFFIX"
         runCatching {
             client.subscribe(topic, MQTT_QOS, null, object : IMqttActionListener {
                 override fun onSuccess(asyncActionToken: org.eclipse.paho.client.mqttv3.IMqttToken?) {
-                    Log.i(TAG, "MQTT subscribed: $topic")
+                    Log.i(TAG, "Subscribed to MQTT topic $topic")
                 }
 
                 override fun onFailure(
                     asyncActionToken: org.eclipse.paho.client.mqttv3.IMqttToken?,
                     exception: Throwable?
                 ) {
-                    Log.w(TAG, "MQTT subscribe failed: $topic", exception)
+                    Log.w(TAG, "Failed to subscribe to MQTT topic $topic", exception)
                     scheduleReconnect()
                 }
             })
-        }.onFailure { e ->
-            Log.w(TAG, "MQTT subscribe exception", e)
+        }.onFailure {
+            Log.w(TAG, "subscribe() threw for topic $topic", it)
             scheduleReconnect()
         }
     }
 
     private fun ensureClientId(): String {
-        val stored = prefs().getString(PREF_MQTT_CLIENT_ID, null)?.takeIf { it.isNotBlank() }
-        if (stored != null) return stored
-        val fallback = prefs().getString("device_id", null)?.takeIf { it.isNotBlank() }
-            ?: "tpe-${UUID.randomUUID()}"
+        val existing = prefs().getString(PREF_MQTT_CLIENT_ID, null)?.trim().orEmpty()
+        if (existing.isNotBlank()) return existing
+
+        val fallback = "tpe-${UUID.randomUUID().toString().replace("-", "").take(20)}"
         prefs().edit().putString(PREF_MQTT_CLIENT_ID, fallback).apply()
         return fallback
     }
@@ -345,123 +420,155 @@ class PartnerMqttService : Service() {
     }
 
     private fun handleIncomingData(data: Map<String, String>) {
-        Log.i(TAG, "Partner command data received: $data")
-        val commandId = data["command_id"]?.trim()?.takeIf { it.isNotBlank() }
+        val normalizedData = normalizeIncomingData(data)
+        Log.i(TAG, "Partner command data received: $normalizedData")
+        val commandId = (normalizedData["command_id"] ?: normalizedData["id"])
+            ?.trim()
+            ?.takeIf { it.isNotBlank() }
+        val action = normalizedData["action"]
+            ?.trim()
+            ?.uppercase()
+            ?.replace(Regex("[\\s\\-.]+"), "_")
 
-        when (data["action"]) {
-            "ble_trigger"                  -> handleBleTrigger(data)
-            "ban_word"                     -> handleBanWord(data)
-            "UPDATE_SETTINGS"              -> handleUpdateSettings(data)
-            "UPDATE_NOTIFICATION_BLOCKLIST" -> handleUpdateNotificationBlocklist(data)
-            "UPDATE_RESTRICTED_VOCABULARY"  -> handleUpdateRestrictedVocabulary(data)
-            "UPDATE_TONE_COMPLIANCE"        -> handleUpdateToneCompliance(data)
-            "UPDATE_TEXT_REPLACEMENT_DICT"  -> handleUpdateTextReplacementDict(data)
-            "UPDATE_TEXT_REPLACEMENT_POLICY" -> handleUpdateTextReplacementPolicy(data)
-            "LOVENSE_COMMAND"               -> handleLovenseCommand(data)
-            "PAVLOK_COMMAND"                -> handlePavlokCommand(data)
-            "TASK_ASSIGNED"                 -> handleTaskAssigned(data)
-            "NEW_QUESTION"                  -> handleNewQuestion(data)
-            "START_REVIEW"                  -> handleStartReview(data)
+        when (action) {
+            "BLE_TRIGGER"                  -> handleBleTrigger(normalizedData)
+            "BAN_WORD"                     -> handleBanWord(normalizedData)
+            "UPDATE_SETTINGS"              -> handleUpdateSettings(normalizedData)
+            "UPDATE_NOTIFICATION_BLOCKLIST" -> handleUpdateNotificationBlocklist(normalizedData)
+            "UPDATE_RESTRICTED_VOCABULARY"  -> handleUpdateRestrictedVocabulary(normalizedData)
+            "UPDATE_TONE_COMPLIANCE"        -> handleUpdateToneCompliance(normalizedData)
+            "UPDATE_TEXT_REPLACEMENT_DICT"  -> handleUpdateTextReplacementDict(normalizedData)
+            "UPDATE_TEXT_REPLACEMENT_POLICY" -> handleUpdateTextReplacementPolicy(normalizedData)
+            "LOVENSE_COMMAND"               -> handleLovenseCommand(normalizedData)
+            "PAVLOK_COMMAND"                -> handlePavlokCommand(normalizedData)
+            "TASK_ASSIGNED"                 -> handleTaskAssigned(normalizedData)
+            "NEW_QUESTION"                  -> handleNewQuestion(normalizedData)
+            "START_REVIEW"                  -> handleStartReview(normalizedData)
             "REQUEST_CHECKIN"               -> handleRequestCheckin()
-            "RULE_REMINDER"                 -> handleRuleReminder(data)
-            "OPEN_APP"                      -> handleOpenApp(data, commandId)
-            "FORCE_STOP_APP"                -> handleForceStopApp(data, commandId)
-            "DISABLE_APP"                   -> handleDisableApp(data, commandId)
-            "ENABLE_APP"                    -> handleEnableApp(data, commandId)
-            "CLEAR_APP_CACHE"               -> handleClearAppCache(data, commandId)
-            "UNINSTALL_APP"                 -> handleUninstallApp(data, commandId)
-            "APP_LIST_POLL"                 -> handleAppListPoll(data, commandId)
-            "APP_LIST_PUSH"                 -> handleAppListPush(data, commandId)
-            "SET_VPN_POLICY"                -> handleSetVpnPolicy(data, commandId)
-            "SET_VPN_PROVIDER_PROFILE"      -> handleSetVpnProviderProfile(data, commandId)
+            "RULE_REMINDER"                 -> handleRuleReminder(normalizedData)
+            "OPEN_APP"                      -> handleOpenApp(normalizedData, commandId)
+            "FORCE_STOP_APP"                -> handleForceStopApp(normalizedData, commandId)
+            "DISABLE_APP"                   -> handleDisableApp(normalizedData, commandId)
+            "ENABLE_APP"                    -> handleEnableApp(normalizedData, commandId)
+            "CLEAR_APP_CACHE"               -> handleClearAppCache(normalizedData, commandId)
+            "UNINSTALL_APP"                 -> handleUninstallApp(normalizedData, commandId)
+            "APP_LIST_POLL"                 -> handleAppListPoll(normalizedData, commandId)
+            "APP_LIST_PUSH"                 -> handleAppListPush(normalizedData, commandId)
+            "SET_VPN_POLICY"                -> handleSetVpnPolicy(normalizedData, commandId)
+            "SET_VPN_PROVIDER_PROFILE"      -> handleSetVpnProviderProfile(normalizedData, commandId)
             "VPN_CONNECT"                   -> handleVpnConnect(commandId)
             "VPN_DISCONNECT"                -> handleVpnDisconnect(commandId)
             "VPN_STATUS_POLL"               -> handleVpnStatusPoll(commandId)
-            // Screen & display
-            "OPEN_URL"                      -> handleOpenUrl(data, commandId)
-            "SET_BRIGHTNESS"                -> handleSetBrightness(data, commandId)
+            "OPEN_URL"                      -> handleOpenUrl(normalizedData, commandId)
+            "SET_BRIGHTNESS"                -> handleSetBrightness(normalizedData, commandId)
             "SCREEN_ON"                     -> handleScreenOn(commandId)
             "SCREEN_OFF"                    -> handleScreenOff(commandId)
-            "SET_SCREEN_TIMEOUT"            -> handleSetScreenTimeout(data, commandId)
-            "SHOW_OVERLAY"                  -> handleShowOverlay(data)
-            "SET_ORIENTATION"               -> handleSetOrientation(data)
-            "SET_ROTATION"                  -> handleSetRotation(data, commandId)
-            // Audio & sound
-            "SET_VOLUME"                    -> handleSetVolume(data)
-            "SET_RINGER_MODE"               -> handleSetRingerMode(data)
-            "PLAY_AUDIO"                    -> handlePlayAudio(data)
+            "SET_SCREEN_TIMEOUT"            -> handleSetScreenTimeout(normalizedData, commandId)
+            "SHOW_OVERLAY"                  -> handleShowOverlay(normalizedData)
+            "SET_ORIENTATION"               -> handleSetOrientation(normalizedData)
+            "SET_ROTATION"                  -> handleSetRotation(normalizedData, commandId)
+            "SET_VOLUME"                    -> handleSetVolume(normalizedData)
+            "SET_RINGER_MODE"               -> handleSetRingerMode(normalizedData)
+            "PLAY_AUDIO"                    -> handlePlayAudio(normalizedData)
             "STOP_AUDIO"                    -> handleStopAudio()
-            "SPEAK_TEXT"                    -> handleSpeakText(data, commandId)
-            "SET_CLIPBOARD"                 -> handleSetClipboard(data, commandId)
-            // Lock screen & access
+            "SPEAK_TEXT"                    -> handleSpeakText(normalizedData, commandId)
+            "TTS_COMMAND"                   -> handleSpeakText(normalizedData, commandId)
+            "TTS"                           -> handleSpeakText(normalizedData, commandId)
+            "SET_CLIPBOARD"                 -> handleSetClipboard(normalizedData, commandId)
             "LOCK_DEVICE"                   -> handleLockDevice(commandId)
             "DISMISS_KEYGUARD"              -> handleDismissKeyguard(commandId)
-            // Network & connectivity
-            "SET_WIFI"                      -> handleSetWifi(data)
-            "SET_MOBILE_DATA"               -> handleSetMobileData(data)
-            "SET_AIRPLANE_MODE"             -> handleSetAirplaneMode(data)
-            "SET_BLUETOOTH"                 -> handleSetBluetooth(data)
-            "CONNECT_WIFI"                  -> handleConnectWifi(data)
-            // Camera & sensors
+            "SET_WIFI"                      -> handleSetWifi(normalizedData)
+            "SET_MOBILE_DATA"               -> handleSetMobileData(normalizedData)
+            "SET_AIRPLANE_MODE"             -> handleSetAirplaneMode(normalizedData)
+            "SET_BLUETOOTH"                 -> handleSetBluetooth(normalizedData)
+            "CONNECT_WIFI"                  -> handleConnectWifi(normalizedData)
             "TAKE_SCREENSHOT"               -> handleTakeScreenshot()
-            "RECORD_SCREEN"                 -> handleRecordScreen(data)
-            "SET_FLASHLIGHT"                -> handleSetFlashlight(data)
+            "RECORD_SCREEN"                 -> handleRecordScreen(normalizedData)
+            "SET_FLASHLIGHT"                -> handleSetFlashlight(normalizedData)
             "GET_LOCATION"                  -> handleGetLocation()
-            // Notifications & interruptions
-            "SEND_NOTIFICATION"             -> handleSendNotification(data, commandId)
+            "SEND_NOTIFICATION"             -> handleSendNotification(normalizedData, commandId)
             "CLEAR_NOTIFICATIONS"           -> handleClearNotifications(commandId)
-            "SET_DND"                       -> handleSetDnd(data)
-            "SET_ALARM"                     -> handleSetAlarm(data)
-            // Device settings
-            "SET_WALLPAPER"                 -> handleSetWallpaper(data)
-            "SET_AUTO_ROTATE"               -> handleSetAutoRotate(data)
-            "SET_NFC"                       -> handleSetNfc(data)
-            "SET_FONT_SIZE"                 -> handleSetFontSize(data)
-            // App suspend / unsuspend
-            "SUSPEND_APP"                   -> handleSuspendApp(data, commandId)
-            "UNSUSPEND_APP"                 -> handleUnsuspendApp(data, commandId)
-            // New submission-deepening features
-            "SET_RITUALS"                   -> handleSetRituals(data)
-            "SET_RITUAL_TIMES"              -> handleSetRitualTimes(data)
-            "SET_HONORIFIC"                 -> handleSetHonorific(data)
-            "SET_HONORIFIC_ENABLED"         -> handleSetHonorificEnabled(data)
-            "SET_DISCORD_QL_HONORIFIC"      -> handleSetDiscordQlHonorific(data)
-            "SET_DISCORD_QL_HONORIFIC_ENABLED" -> handleSetDiscordQlHonorificEnabled(data)
-            "SET_DISCORD_HONORIFIC_USERS"   -> handleSetDiscordHonorificUsers(data)
-            "ADD_DISCORD_HONORIFIC_USER"    -> handleAddDiscordHonorificUser(data)
-            "REMOVE_DISCORD_HONORIFIC_USER" -> handleRemoveDiscordHonorificUser(data)
-            "SET_PTS_ENABLED"               -> handleSetPtsEnabled(data)
-            "SET_PTS_APPROVED"              -> handleSetPtsApproved(data)
-            "APP_PERMISSION_RESPONSE"       -> handleAppPermissionResponse(data)
-            "START_CORNER_TIME"             -> handleStartCornerTime(data)
+            "SET_DND"                       -> handleSetDnd(normalizedData)
+            "SET_ALARM"                     -> handleSetAlarm(normalizedData)
+            "SET_WALLPAPER"                 -> handleSetWallpaper(normalizedData)
+            "SET_AUTO_ROTATE"               -> handleSetAutoRotate(normalizedData)
+            "SET_NFC"                       -> handleSetNfc(normalizedData)
+            "SET_FONT_SIZE"                 -> handleSetFontSize(normalizedData)
+            "SUSPEND_APP"                   -> handleSuspendApp(normalizedData, commandId)
+            "UNSUSPEND_APP"                 -> handleUnsuspendApp(normalizedData, commandId)
+            "SET_RITUALS"                   -> handleSetRituals(normalizedData)
+            "SET_RITUAL_TIMES"              -> handleSetRitualTimes(normalizedData)
+            "SET_HONORIFIC"                 -> handleSetHonorific(normalizedData)
+            "SET_HONORIFIC_ENABLED"         -> handleSetHonorificEnabled(normalizedData)
+            "SET_DISCORD_QL_HONORIFIC"      -> handleSetDiscordQlHonorific(normalizedData)
+            "SET_DISCORD_QL_HONORIFIC_ENABLED" -> handleSetDiscordQlHonorificEnabled(normalizedData)
+            "SET_DISCORD_HONORIFIC_USERS"   -> handleSetDiscordHonorificUsers(normalizedData)
+            "ADD_DISCORD_HONORIFIC_USER"    -> handleAddDiscordHonorificUser(normalizedData)
+            "REMOVE_DISCORD_HONORIFIC_USER" -> handleRemoveDiscordHonorificUser(normalizedData)
+            "SET_PTS_ENABLED"               -> handleSetPtsEnabled(normalizedData)
+            "SET_PTS_APPROVED"              -> handleSetPtsApproved(normalizedData)
+            "APP_PERMISSION_RESPONSE"       -> handleAppPermissionResponse(normalizedData)
+            "START_CORNER_TIME"             -> handleStartCornerTime(normalizedData)
             "CANCEL_ESCALATION"             -> handleCancelEscalation()
-            "SET_AFFIRMATIONS"              -> handleSetAffirmations(data)
-            "SHOW_AFFIRMATION"              -> handleShowAffirmation(data)
-            "SET_MANTRA_ENABLED"            -> handleSetMantraEnabled(data)
-            "SET_MANTRA_INTERVAL"           -> handleSetMantraInterval(data)
-            "SET_GATING_ENABLED"            -> handleSetGatingEnabled(data)
-            "SET_GATING_APPROVED"           -> handleSetGatingApproved(data)
-            "SET_GEOFENCES"                 -> handleSetGeofences(data)
-            "SET_GEOFENCE_ENABLED"          -> handleSetGeofenceEnabled(data)
-            "SET_LOVENSE_SCHEDULES"         -> handleSetLovenseSchedules(data)
-            "SET_SUB_STATUS"                -> handleSetSubStatus(data)
-            "SET_HANDLER_SYSTEM_PROMPT"     -> handleSetHandlerSystemPrompt(data)
-            "SET_HANDLER_API_KEY"           -> handleSetHandlerApiKey(data)
-            "SET_HANDLER_ENDPOINT"          -> handleSetHandlerEndpoint(data)
-            "SET_HANDLER_MODEL"             -> handleSetHandlerModel(data)
-            "INCOMING_PROXY_SMS"            -> handleIncomingProxySms(data)
+            "SET_AFFIRMATIONS"              -> handleSetAffirmations(normalizedData)
+            "SHOW_AFFIRMATION"              -> handleShowAffirmation(normalizedData)
+            "SET_MANTRA_ENABLED"            -> handleSetMantraEnabled(normalizedData)
+            "SET_MANTRA_INTERVAL"           -> handleSetMantraInterval(normalizedData)
+            "SET_GATING_ENABLED"            -> handleSetGatingEnabled(normalizedData)
+            "SET_GATING_APPROVED"           -> handleSetGatingApproved(normalizedData)
+            "SET_GEOFENCES"                 -> handleSetGeofences(normalizedData)
+            "SET_GEOFENCE_ENABLED"          -> handleSetGeofenceEnabled(normalizedData)
+            "SET_LOVENSE_SCHEDULES"         -> handleSetLovenseSchedules(normalizedData)
+            "SET_SUB_STATUS"                -> handleSetSubStatus(normalizedData)
+            "SET_HANDLER_SYSTEM_PROMPT"     -> handleSetHandlerSystemPrompt(normalizedData)
+            "SET_HANDLER_API_KEY"           -> handleSetHandlerApiKey(normalizedData)
+            "SET_HANDLER_ENDPOINT"          -> handleSetHandlerEndpoint(normalizedData)
+            "SET_HANDLER_MODEL"             -> handleSetHandlerModel(normalizedData)
+            "INCOMING_PROXY_SMS"            -> handleIncomingProxySms(normalizedData)
             "SET_PROXY_SMS_CAN_REPLY",
             "SET_SMS_THREAD_CAN_REPLY",
-            "TOGGLE_THREAD_CAN_REPLY"       -> handleProxySmsCanReplyUpdate(data)
-            // Password vault
-            "VAULT_ADD_ENTRY"               -> handleVaultAddEntry(data)
-            "VAULT_UPDATE_ENTRY"            -> handleVaultUpdateEntry(data)
-            "VAULT_DELETE_ENTRY"            -> handleVaultDeleteEntry(data)
-            "VAULT_LOCK_ENTRY"              -> handleVaultLockEntry(data)
-            "VAULT_LOCK_ALL"                -> handleVaultLockAll(data)
-            "VAULT_SET_CHANGE_BLOCK"        -> handleVaultSetChangeBlock(data)
-            else                           -> Log.w(TAG, "Unknown MQTT action: ${data["action"]}")
+            "TOGGLE_THREAD_CAN_REPLY"       -> handleProxySmsCanReplyUpdate(normalizedData)
+            "VAULT_ADD_ENTRY"               -> handleVaultAddEntry(normalizedData)
+            "VAULT_UPDATE_ENTRY"            -> handleVaultUpdateEntry(normalizedData)
+            "VAULT_DELETE_ENTRY"            -> handleVaultDeleteEntry(normalizedData)
+            "VAULT_LOCK_ENTRY"              -> handleVaultLockEntry(normalizedData)
+            "VAULT_LOCK_ALL"                -> handleVaultLockAll(normalizedData)
+            "VAULT_SET_CHANGE_BLOCK"        -> handleVaultSetChangeBlock(normalizedData)
+            else                              -> Log.w(
+                TAG,
+                "Unknown MQTT action: ${normalizedData["action"] ?: normalizedData["command"]}"
+            )
         }
+    }
+
+    private fun normalizeIncomingData(data: Map<String, String>): Map<String, String> {
+        val normalized = data.toMutableMap()
+        val action = normalized["action"]?.trim().orEmpty()
+        val command = normalized["command"]?.trim().orEmpty()
+        if (action.isBlank() && command.isNotBlank()) {
+            normalized["action"] = command
+        }
+
+        val paramsRaw = normalized["params"]?.trim().orEmpty()
+        if (paramsRaw.isNotEmpty()) {
+            runCatching {
+                val obj = JSONObject(paramsRaw)
+                val keys = obj.keys()
+                while (keys.hasNext()) {
+                    val key = keys.next()
+                    if (!normalized.containsKey(key)) {
+                        val value = obj.opt(key)
+                        normalized[key] = when (value) {
+                            null -> ""
+                            is JSONObject, is JSONArray -> value.toString()
+                            else -> value.toString()
+                        }
+                    }
+                }
+            }
+        }
+
+        return normalized
     }
 
     // ------------------------------------------------------------------
@@ -1351,7 +1458,11 @@ class PartnerMqttService : Service() {
 
     /** `{ "action": "SPEAK_TEXT", "text": "Hello" }` */
     private fun handleSpeakText(data: Map<String, String>, commandId: String? = null) {
-        val text = data["text"]?.takeIf { it.isNotBlank() } ?: run {
+        val text = data["text"]
+            ?.takeIf { it.isNotBlank() }
+            ?: data["message"]?.takeIf { it.isNotBlank() }
+            ?: data["content"]?.takeIf { it.isNotBlank() }
+            ?: run {
             Log.w(TAG, "SPEAK_TEXT missing text"); return
         }
         DeviceCommandManager.speakText(applicationContext, text)
@@ -1846,6 +1957,7 @@ class PartnerMqttService : Service() {
                 )
             }
             RitualRepository.setSteps(applicationContext, steps)
+            RitualRepository.setEnabled(applicationContext, true)
             RitualRepository.scheduleMorningAlarm(applicationContext)
             RitualRepository.scheduleEveningAlarm(applicationContext)
             Log.i(TAG, "SET_RITUALS: ${steps.size} steps saved")
@@ -1855,6 +1967,7 @@ class PartnerMqttService : Service() {
     private fun handleSetRitualTimes(data: Map<String, String>) {
         data["morning_minutes"]?.toIntOrNull()?.let { RitualRepository.setMorningTime(applicationContext, it) }
         data["evening_minutes"]?.toIntOrNull()?.let { RitualRepository.setEveningTime(applicationContext, it) }
+        RitualRepository.setEnabled(applicationContext, true)
         RitualRepository.scheduleMorningAlarm(applicationContext)
         RitualRepository.scheduleEveningAlarm(applicationContext)
         Log.i(TAG, "SET_RITUAL_TIMES updated")

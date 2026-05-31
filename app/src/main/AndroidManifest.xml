@@ -280,6 +280,11 @@
             android:foregroundServiceType="dataSync"
             android:stopWithTask="false" />
 
+        <!-- Paho MQTT internal Android service used by MqttAndroidClient -->
+        <service
+            android:name="org.eclipse.paho.android.service.MqttService"
+            android:exported="false" />
+
         <!-- ============================================================
              Local VPN tunnel for handler-driven network restriction/capture
         ============================================================ -->

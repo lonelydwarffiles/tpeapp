@@ -383,6 +383,16 @@ class BleManager(
     /** True when GATT characteristic is ready for write commands. */
     fun isReady(): Boolean = targetCharacteristic != null
 
+    /**
+     * Attempts to reconnect to the last saved BLE address immediately.
+     * This is intended for startup pairing persistence.
+     */
+    fun restoreLastConnection() {
+        autoReconnectEnabled = true
+        cancelReconnect()
+        reconnectToLastKnownDevice(reason = "startup_restore")
+    }
+
     /** Reads battery percentage from the standard Battery Service (0x180F/0x2A19). */
     fun readBatteryLevel() {
         if (!hasPermission(Manifest.permission.BLUETOOTH_CONNECT)) {

@@ -634,6 +634,52 @@
 				"--no-daemon"
 			],
 			"isBackground": false
+		},
+		{
+			"label": "adb-devices-check",
+			"type": "shell",
+			"command": "adb",
+			"args": [
+				"devices"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "adb-crash-logcat",
+			"type": "shell",
+			"command": "adb",
+			"args": [
+				"logcat",
+				"-d",
+				"-v",
+				"time",
+				"AndroidRuntime:E",
+				"*:S"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "adb-devices-abs",
+			"type": "shell",
+			"command": "C:\\Users\\techd\\AppData\\Local\\Android\\Sdk\\platform-tools\\adb.exe",
+			"args": [
+				"devices"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "adb-crash-logcat-abs",
+			"type": "shell",
+			"command": "C:\\Users\\techd\\AppData\\Local\\Android\\Sdk\\platform-tools\\adb.exe",
+			"args": [
+				"logcat",
+				"-d",
+				"-v",
+				"time",
+				"AndroidRuntime:E",
+				"*:S"
+			],
+			"isBackground": false
 		}
 	]
 }

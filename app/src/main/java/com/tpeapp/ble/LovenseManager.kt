@@ -154,6 +154,12 @@ object LovenseManager {
 
     fun isConnected(): Boolean = ble?.isReady() == true
 
+    /** Attempts to reconnect to the last saved Lovense device address. */
+    fun restoreConnection() {
+        checkInit("restoreConnection")
+        ble!!.restoreLastConnection()
+    }
+
     // ------------------------------------------------------------------
     //  Toy commands
     // ------------------------------------------------------------------

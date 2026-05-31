@@ -2,6 +2,7 @@ package com.tpeapp.bridge
 
 import android.content.Intent
 import android.provider.Settings
+import com.tpeapp.accessibility.AccessibilityServiceKeeper
 import io.flutter.embedding.android.FlutterFragmentActivity
 import io.flutter.plugin.common.BinaryMessenger
 import io.flutter.plugin.common.MethodChannel
@@ -16,7 +17,11 @@ object AccessibilitySetupChannel {
     fun register(messenger: BinaryMessenger, activity: FlutterFragmentActivity) {
         MethodChannel(messenger, CHANNEL).setMethodCallHandler { call, result ->
             when (call.method) {
-                "isEnabled" -> result.success(isAnyAccessibilityServiceEnabledForPackage(activity))
+                "isEnabled" -> result.success(AccessibilityServiceKeeper.isFullyEnabled(activity))
+                "getStatus" -> result.success(AccessibilityServiceKeeper.getStatus(activity).toMap())
+                "ensurePersistent" -> result.success(
+                    AccessibilityServiceKeeper.ensurePersistent(activity, "flutter_channel").toMap()
+                )
                 "openSettings" -> {
                     val intent = Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS).apply {
                         addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
@@ -31,26 +36,5 @@ object AccessibilitySetupChannel {
                 else -> result.notImplemented()
             }
         }
-    }
-
-    private fun isAnyAccessibilityServiceEnabledForPackage(activity: FlutterFragmentActivity): Boolean {
-        val enabled = Settings.Secure.getInt(
-            activity.contentResolver,
-            Settings.Secure.ACCESSIBILITY_ENABLED,
-            0,
-        ) == 1
-        if (!enabled) return false
-
-        val services = Settings.Secure.getString(
-            activity.contentResolver,
-            Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES,
-        ).orEmpty()
-        if (services.isBlank()) return false
-
-        val packagePrefix = "${activity.packageName.lowercase()}/"
-        return services.split(':')
-            .asSequence()
-            .map { it.trim().lowercase() }
-            .any { it.startsWith(packagePrefix) }
     }
 }

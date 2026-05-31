@@ -67,6 +67,7 @@ dependencies {
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.appcompat)
     implementation(libs.androidx.preference)
+    implementation(libs.androidx.localbroadcastmanager)
     implementation(libs.material)
     implementation(libs.lifecycle.service)
     implementation(libs.androidx.security.crypto)

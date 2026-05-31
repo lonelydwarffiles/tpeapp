@@ -166,6 +166,28 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
   }
 
+  Future<void> _ensureAccessibilityPersistent() async {
+    try {
+      final status = await AccessibilitySetupChannel.ensurePersistent();
+      final enabled = status['all_required_enabled'] == true;
+      if (!mounted) return;
+      setState(() => _accessibilityEnabled = enabled);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            enabled
+                ? 'Accessibility services are now enabled.'
+                : 'Auto-fix could not fully enable accessibility. Open system settings to finish.',
+          ),
+        ),
+      );
+    } catch (error) {
+      _showActionError('auto-fix accessibility', error);
+    } finally {
+      await _refreshAccessibility();
+    }
+  }
+
   Future<void> _activateAdmin() async {
     try {
       final ready = await _ensureAdminPinSet();
@@ -621,11 +643,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       onPressed: _openAccessibilitySettings,
                       child: const Text('Open Settings'),
                     )
-                  else
+                  else ...[
+                    OutlinedButton(
+                      onPressed: _ensureAccessibilityPersistent,
+                      child: const Text('Auto-Fix'),
+                    ),
+                    const SizedBox(width: 8),
                     FilledButton(
                       onPressed: _openAccessibilitySettings,
                       child: const Text('Enable'),
                     ),
+                  ],
                 ]),
 
           const Divider(height: 32),

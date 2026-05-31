@@ -150,7 +150,17 @@ class WebSocketService {
             const ['force_speaker', 'forceSpeaker'],
             defaultValue: false,
           );
-          _tts.handleCommand(text: text, forceSpeaker: forceSpeaker);
+          unawaited(
+            _tts
+                .handleCommand(text: text, forceSpeaker: forceSpeaker)
+                .catchError((error, stack) {
+              developer.log(
+                'TTS command failed: $error',
+                name: 'WebSocketService',
+                stackTrace: stack,
+              );
+            }),
+          );
         }
       default:
         final event = _toCommandEvent(payload);

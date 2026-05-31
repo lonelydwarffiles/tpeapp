@@ -1,53 +1,42 @@
-import 'package:audio_session/audio_session.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter_tts/flutter_tts.dart';
+
+import '../channels/device_command_channel.dart';
 
 /// Handles conditional Text-to-Speech driven by `TTS_COMMAND` WebSocket payloads.
 ///
-/// Behaviour:
-/// - If a Bluetooth or wired headset is connected, always speaks [text].
-/// - If no headset is connected and [forceSpeaker] is `true`, speaks through
-///   the device speaker.
-/// - If no headset is connected and [forceSpeaker] is `false`, skips speaking
-///   and fires a light haptic vibration to silently alert the user.
+/// Uses native speech unconditionally so TTS works in background and in
+/// hybrid-host states where optional Flutter audio plugins are unavailable.
 class TtsService {
   TtsService();
 
-  final FlutterTts _tts = FlutterTts();
-  bool _ttsInitialised = false;
+  // Native speech is the default path because it is available in background
+  // service flows and does not depend on Flutter plugin registration.
+  bool _useNativePath = true;
 
   // ── Initialisation ──────────────────────────────────────────────────────
 
   Future<void> _ensureInitialised() async {
-    if (_ttsInitialised) return;
-    await _tts.setLanguage('en-US');
-    await _tts.setSpeechRate(0.5);
-    await _tts.setVolume(1.0);
-    _ttsInitialised = true;
+    if (_useNativePath) return;
   }
 
-  // ── Audio-route helpers ─────────────────────────────────────────────────
+  Future<void> _speakViaBestPath(String text) async {
+    final trimmed = text.trim();
+    if (trimmed.isEmpty) return;
 
-  /// Returns `true` when a Bluetooth or wired headset is currently routed as
-  /// the active audio output.
-  Future<bool> _headsetConnected() async {
-    final session = await AudioSession.instance;
-    final devices = await session.getDevices(includeInputs: false);
-    for (final device in devices) {
-      final t = device.type;
-      if (t == AudioDeviceType.bluetoothA2dp ||
-          t == AudioDeviceType.bluetoothLe ||
-          t == AudioDeviceType.bluetoothSco ||
-          t == AudioDeviceType.wiredHeadset ||
-          t == AudioDeviceType.wiredHeadphones ||
-          // USB audio covers USB-C headphones and DAC adapters.  A USB
-          // speaker would also match, but routing to an external device is
-          // intentional in either case.
-          t == AudioDeviceType.usbAudio) {
-        return true;
-      }
+    if (_useNativePath) {
+      await DeviceCommandChannel.speakText(trimmed);
+      return;
     }
-    return false;
+
+    try {
+      await DeviceCommandChannel.speakText(trimmed);
+    } on MissingPluginException {
+      _useNativePath = true;
+      await DeviceCommandChannel.speakText(trimmed);
+    } on PlatformException {
+      _useNativePath = true;
+      await DeviceCommandChannel.speakText(trimmed);
+    }
   }
 
   // ── Public API ──────────────────────────────────────────────────────────
@@ -64,18 +53,10 @@ class TtsService {
     required bool forceSpeaker,
   }) async {
     await _ensureInitialised();
-
-    final headset = await _headsetConnected();
-
-    if (headset || forceSpeaker) {
-      await _tts.speak(text);
-    } else {
-      // No headset and force_speaker is false — emit a silent haptic pulse.
-      await HapticFeedback.lightImpact();
-    }
+    await _speakViaBestPath(text);
   }
 
   Future<void> dispose() async {
-    await _tts.stop();
+    // Native path does not hold a Flutter TTS engine instance.
   }
 }

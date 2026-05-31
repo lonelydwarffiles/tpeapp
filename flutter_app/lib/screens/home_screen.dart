@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:developer' as developer;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -9,11 +8,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../channels/ble_channel.dart';
 import '../channels/device_command_channel.dart';
 import '../channels/filter_service_channel.dart';
-import '../channels/mqtt_channel.dart';
 import '../services/api_service.dart';
 import '../services/ble_service.dart';
-import '../services/kiosk_task_controller.dart';
-import '../services/remote_command_service.dart';
 import '../services/websocket_service.dart';
 import 'check_in_screen.dart';
 import 'chat_screen.dart';
@@ -38,11 +34,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   String _enrollmentState = 'enrolling';
   String _enrollmentError = '';
 
-  StreamSubscription<Map<String, String>>? _mqttSub;
   StreamSubscription<dynamic>? _nativeBleSub;
   Timer? _enrollmentStatusTimer;
   Timer? _toyStatusTimer;
-  RemoteCommandService? _remoteCommands;
   ApiService? _api;
   WebSocketService? _webSocketService;
   bool _homeOpenedTracked = false;
@@ -57,12 +51,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     super.didChangeDependencies();
     _api ??= ApiService(context.read<SharedPreferences>());
     _webSocketService ??= context.read<WebSocketService>();
-    _remoteCommands ??= RemoteCommandService(
-      prefs: context.read<SharedPreferences>(),
-      onCheckInRequested: _openCheckIn,
-      onMessage: _showCommandMessage,
-    );
-    _webSocketService?.onCommandEvent = _onMqttEvent;
     final currentEndpoint =
         (context.read<SharedPreferences>().getString('partner_endpoint_url') ?? '')
             .trim();
@@ -84,7 +72,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    _mqttSub = MqttChannel.events.listen(_onMqttEvent);
     _nativeBleSub = _nativeBleEvents.receiveBroadcastStream().listen(
       _onNativeBleEvent,
       onError: (_) {
@@ -106,11 +93,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
-    _mqttSub?.cancel();
     _nativeBleSub?.cancel();
-    if (_webSocketService != null) {
-      _webSocketService!.onCommandEvent = null;
-    }
     _enrollmentStatusTimer?.cancel();
     _toyStatusTimer?.cancel();
     super.dispose();
@@ -174,28 +157,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         return Colors.orangeAccent.shade200;
       default:
         return cs.primary;
-    }
-  }
-
-  void _onMqttEvent(Map<String, String> data) {
-    developer.log('MQTT raw payload: $data', name: 'HomeScreen');
-    context.read<KioskTaskController>().handleMqttEvent(data);
-    final action = (data['action'] ?? data['command'] ?? '').trim();
-    if (action.isNotEmpty) {
-      unawaited(
-        _trackBehavior(
-          'mqtt_event_received',
-          reason: action,
-          payload: {
-            if (data['session_id'] != null && data['session_id']!.trim().isNotEmpty)
-              'session_id': data['session_id']!.trim(),
-          },
-        ),
-      );
-    }
-    final commands = _remoteCommands;
-    if (commands != null) {
-      unawaited(commands.handleEvent(data));
     }
   }
 
@@ -389,13 +350,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       endpointCtrl.dispose();
       keyCtrl.dispose();
     }
-  }
-
-  void _showCommandMessage(String message) {
-    if (!mounted || message.trim().isEmpty) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message)),
-    );
   }
 
   Future<void> _navigateAndTrack(Widget screen) async {

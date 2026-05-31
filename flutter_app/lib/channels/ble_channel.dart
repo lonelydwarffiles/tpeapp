@@ -40,6 +40,19 @@ class BleChannel {
     _useNativePavlok = useNative;
   }
 
+  /// Triggers native restore of saved Lovense/Pavlok pairings.
+  static Future<void> restorePairings() async {
+    if (_useNativeLovense || _useNativePavlok) {
+      try {
+        await _native.invokeMethod<void>('restorePairings');
+      } on PlatformException {
+        // Keep startup resilient if native restore is unavailable.
+      } on MissingPluginException {
+        // Keep startup resilient during channel rollout mismatches.
+      }
+    }
+  }
+
   // â”€â”€ Lovense â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   /// Starts a BLE scan for the first Lovense toy in range.

@@ -5,6 +5,7 @@ import android.net.Uri
 import android.os.Bundle
 import android.os.PowerManager
 import android.provider.Settings
+import android.util.Log
 import com.tpeapp.service.CoreServiceKeeper
 import io.flutter.embedding.android.FlutterFragmentActivity
 import io.flutter.embedding.engine.FlutterEngine
@@ -33,10 +34,29 @@ import io.flutter.embedding.engine.FlutterEngine
  * and all background workers remain purely native and are NOT changed.
  */
 class TpeFlutterActivity : FlutterFragmentActivity() {
+    companion object {
+        private const val TAG = "TpeFlutterActivity"
+    }
+
+    private fun isShareIntent(intent: Intent?): Boolean {
+        val action = intent?.action ?: return false
+        return action == Intent.ACTION_SEND || action == Intent.ACTION_SEND_MULTIPLE
+    }
+
+    private fun captureShareAndReturnToSource(intent: Intent?): Boolean {
+        if (!isShareIntent(intent)) return false
+        DeviceCommandChannel.captureIncomingShareIntent(intent)
+        // For quick-share launches, avoid keeping the host UI in the foreground.
+        moveTaskToBack(true)
+        finish()
+        return true
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        DeviceCommandChannel.captureIncomingShareIntent(intent)
+        if (captureShareAndReturnToSource(intent)) {
+            return
+        }
         // Re-assert critical services whenever the host UI opens.
         CoreServiceKeeper.ensureCoreServicesRunning(this, "flutter_activity_on_create")
         CoreServiceKeeper.scheduleWatchdog(this)
@@ -46,11 +66,19 @@ class TpeFlutterActivity : FlutterFragmentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
-        DeviceCommandChannel.captureIncomingShareIntent(intent)
+        captureShareAndReturnToSource(intent)
     }
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        runCatching {
+            val registrant = Class.forName("io.flutter.plugins.GeneratedPluginRegistrant")
+            val registerWith = registrant.getDeclaredMethod("registerWith", FlutterEngine::class.java)
+            registerWith.invoke(null, flutterEngine)
+        }.onFailure { err ->
+            Log.w(TAG, "GeneratedPluginRegistrant registration unavailable", err)
+        }
+
         val messenger = flutterEngine.dartExecutor.binaryMessenger
 
         PermissionsChannel.register(messenger, this)

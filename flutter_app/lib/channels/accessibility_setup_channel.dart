@@ -17,6 +17,29 @@ class AccessibilitySetupChannel {
     }
   }
 
+  static Future<Map<String, dynamic>> getStatus() async {
+    try {
+      final raw = await _channel.invokeMapMethod<String, dynamic>('getStatus');
+      return raw == null ? const {} : Map<String, dynamic>.from(raw);
+    } on PlatformException {
+      return const {};
+    } on MissingPluginException {
+      return const {};
+    }
+  }
+
+  static Future<Map<String, dynamic>> ensurePersistent() async {
+    try {
+      final raw =
+          await _channel.invokeMapMethod<String, dynamic>('ensurePersistent');
+      return raw == null ? const {} : Map<String, dynamic>.from(raw);
+    } on PlatformException {
+      return const {};
+    } on MissingPluginException {
+      return const {};
+    }
+  }
+
   static Future<void> openSettings() async {
     try {
       await _channel.invokeMethod<void>('openSettings');

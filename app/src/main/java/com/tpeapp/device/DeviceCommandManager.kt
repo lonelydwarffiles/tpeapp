@@ -14,6 +14,8 @@ import android.location.LocationManager
 import android.media.AudioManager
 import android.media.MediaPlayer
 import android.net.Uri
+import android.os.Handler
+import android.os.Looper
 import android.provider.AlarmClock
 import android.speech.tts.TextToSpeech
 import android.util.Log
@@ -148,15 +150,14 @@ object DeviceCommandManager {
     }
 
     /**
-     * Forces the device into portrait or landscape via the root accelerometer override.
+     * Sets the preferred orientation without changing the auto-rotate toggle.
      * @param landscape `true` → landscape, `false` → portrait.
      */
     fun setOrientation(landscape: Boolean) {
         // 0 = portrait, 1 = landscape
         val value = if (landscape) 1 else 0
         execRoot("settings put system user_rotation $value")
-        execRoot("settings put system accelerometer_rotation 0")
-        Log.i(TAG, "setOrientation: landscape=$landscape")
+        Log.i(TAG, "setOrientation: landscape=$landscape (auto-rotate unchanged)")
     }
 
     /**
@@ -266,22 +267,148 @@ object DeviceCommandManager {
     /** Speaks [text] aloud using the device's text-to-speech engine. */
     @Volatile private var tts: TextToSpeech? = null
     @Volatile private var ttsReady = false
+    @Volatile private var ttsInitInProgress = false
+    @Volatile private var pendingTtsText: String? = null
+    private val ttsLock = Any()
+    private val mainHandler = Handler(Looper.getMainLooper())
 
     fun speakText(context: Context, text: String) {
-        if (tts != null && ttsReady) {
-            tts!!.speak(text, TextToSpeech.QUEUE_FLUSH, null, "tpe_tts")
-            Log.i(TAG, "speakText: '$text'")
+        val trimmed = text.trim()
+        if (trimmed.isEmpty()) {
+            Log.w(TAG, "speakText ignored: empty text")
             return
         }
-        tts = TextToSpeech(context.applicationContext) { status ->
-            ttsReady = (status == TextToSpeech.SUCCESS)
-            if (ttsReady) {
-                tts!!.language = Locale.getDefault()
-                tts!!.speak(text, TextToSpeech.QUEUE_FLUSH, null, "tpe_tts")
-                Log.i(TAG, "speakText (after TTS init): '$text'")
-            } else {
-                Log.e(TAG, "TTS initialization failed with status=$status")
+
+        synchronized(ttsLock) {
+            pendingTtsText = trimmed
+        }
+
+        mainHandler.post {
+            ensureTtsEngine(context.applicationContext)
+            val speakEngine = synchronized(ttsLock) {
+                if (ttsReady) tts else null
             }
+            val toSpeak = synchronized(ttsLock) {
+                val queued = pendingTtsText
+                pendingTtsText = null
+                queued
+            }
+            if (speakEngine == null || toSpeak.isNullOrBlank()) return@post
+
+            runCatching {
+                ensureAudibleTtsVolume(context.applicationContext)
+                requestTtsAudioFocus(context.applicationContext)
+                speakEngine.speak(toSpeak, TextToSpeech.QUEUE_FLUSH, null, "tpe_tts")
+                Log.i(TAG, "speakText: '$toSpeak'")
+            }.onFailure { e ->
+                Log.e(TAG, "speakText failed", e)
+            }
+        }
+    }
+
+    private fun ensureTtsEngine(context: Context) {
+        synchronized(ttsLock) {
+            if (ttsReady || ttsInitInProgress) return
+            ttsInitInProgress = true
+        }
+
+        runCatching {
+            tts = TextToSpeech(context) { status ->
+                val ready = (status == TextToSpeech.SUCCESS)
+                synchronized(ttsLock) {
+                    ttsReady = ready
+                    ttsInitInProgress = false
+                }
+
+                if (!ready) {
+                    Log.e(TAG, "TTS initialization failed with status=$status")
+                    return@TextToSpeech
+                }
+
+                val speakEngine = tts ?: return@TextToSpeech
+                val langResult = speakEngine.setLanguage(Locale.getDefault())
+                if (langResult == TextToSpeech.LANG_MISSING_DATA ||
+                    langResult == TextToSpeech.LANG_NOT_SUPPORTED
+                ) {
+                    speakEngine.setLanguage(Locale.US)
+                    Log.w(TAG, "TTS locale fallback to en-US")
+                }
+
+                runCatching {
+                    val attrs = android.media.AudioAttributes.Builder()
+                        .setUsage(android.media.AudioAttributes.USAGE_ASSISTANCE_ACCESSIBILITY)
+                        .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SPEECH)
+                        .build()
+                    speakEngine.setAudioAttributes(attrs)
+                }.onFailure { e ->
+                    Log.w(TAG, "Unable to set TTS audio attributes", e)
+                }
+
+                val queued = synchronized(ttsLock) {
+                    val value = pendingTtsText
+                    pendingTtsText = null
+                    value
+                }
+                if (!queued.isNullOrBlank()) {
+                    runCatching {
+                        ensureAudibleTtsVolume(context)
+                        requestTtsAudioFocus(context)
+                        speakEngine.speak(queued, TextToSpeech.QUEUE_FLUSH, null, "tpe_tts")
+                        Log.i(TAG, "speakText (after TTS init): '$queued'")
+                    }.onFailure { e ->
+                        Log.e(TAG, "speakText after init failed", e)
+                    }
+                }
+            }
+        }.onFailure { e ->
+            synchronized(ttsLock) {
+                ttsReady = false
+                ttsInitInProgress = false
+            }
+            Log.e(TAG, "TTS engine creation failed", e)
+        }
+    }
+
+    private fun requestTtsAudioFocus(context: Context) {
+        val am = context.getSystemService(AudioManager::class.java) ?: return
+        runCatching {
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                val attrs = android.media.AudioAttributes.Builder()
+                    .setUsage(android.media.AudioAttributes.USAGE_ASSISTANCE_ACCESSIBILITY)
+                    .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SPEECH)
+                    .build()
+                val req = android.media.AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK)
+                    .setAudioAttributes(attrs)
+                    .setAcceptsDelayedFocusGain(true)
+                    .setOnAudioFocusChangeListener { }
+                    .build()
+                am.requestAudioFocus(req)
+            } else {
+                @Suppress("DEPRECATION")
+                am.requestAudioFocus(
+                    null,
+                    AudioManager.STREAM_MUSIC,
+                    AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK,
+                )
+            }
+        }.onFailure { e ->
+            Log.w(TAG, "Unable to request audio focus for TTS", e)
+        }
+    }
+
+    private fun ensureAudibleTtsVolume(context: Context) {
+        val am = context.getSystemService(AudioManager::class.java) ?: return
+        runCatching {
+            val stream = AudioManager.STREAM_MUSIC
+            val current = am.getStreamVolume(stream)
+            if (current > 0) return
+            val max = am.getStreamMaxVolume(stream)
+            if (max <= 0) return
+            val minAudible = (max / 4).coerceAtLeast(1)
+            am.setStreamVolume(stream, minAudible, 0)
+            Log.i(TAG, "Raised media volume for TTS: $current -> $minAudible")
+        }.onFailure { e ->
+            Log.w(TAG, "Unable to adjust media volume for TTS", e)
         }
     }
 

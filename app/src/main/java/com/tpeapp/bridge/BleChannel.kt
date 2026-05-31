@@ -56,6 +56,12 @@ object BleChannel {
         MethodChannel(messenger, CHANNEL).setMethodCallHandler { call, result ->
             try {
                 when (call.method) {
+                    "restorePairings" -> {
+                        LovenseManager.restoreConnection()
+                        PavlokManager.restoreConnection()
+                        result.success(null)
+                    }
+
                     // ── Lovense ──────────────────────────────────────────
                     "lovense.scan"       -> { LovenseManager.startScan();    result.success(null) }
                     "lovense.stopScan"   -> { LovenseManager.stopScan();     result.success(null) }

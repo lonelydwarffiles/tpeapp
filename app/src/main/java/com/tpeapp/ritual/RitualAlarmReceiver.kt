@@ -24,6 +24,10 @@ class RitualAlarmReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         val isMorning = intent.action == ACTION_RITUAL_MORNING
         if (intent.action != ACTION_RITUAL_MORNING && intent.action != ACTION_RITUAL_EVENING) return
+        if (!RitualRepository.isEnabled(context)) {
+            Log.i(TAG, "Ritual alarm ignored because ritual is disabled")
+            return
+        }
 
         Log.i(TAG, "Ritual alarm fired: ${intent.action}")
         ensureChannel(context)

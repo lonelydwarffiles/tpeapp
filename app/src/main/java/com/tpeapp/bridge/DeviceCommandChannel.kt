@@ -10,10 +10,15 @@ import android.os.BatteryManager
 import android.provider.Settings
 import android.util.ArrayMap
 import android.util.Log
+import androidx.preference.PreferenceManager
 import com.tpeapp.apps.AppInventoryManager
 import com.tpeapp.device.DeviceCommandManager
 import com.tpeapp.handler.ChatRepository
 import com.tpeapp.handler.HandlerChatActivity
+import com.tpeapp.mqtt.PartnerMqttService
+import com.tpeapp.pairing.PairingActivity
+import com.tpeapp.service.FilterService
+import com.tpeapp.service.CoreServiceKeeper
 import com.tpeapp.vpn.VpnPolicyManager
 import io.flutter.plugin.common.BinaryMessenger
 import io.flutter.plugin.common.MethodChannel
@@ -134,6 +139,48 @@ object DeviceCommandChannel {
         return payload
     }
 
+    private fun syncCorePrefsFromFlutter(context: Context, values: Map<String, Any?>?) {
+        if (values.isNullOrEmpty()) return
+
+        val prefs = PreferenceManager.getDefaultSharedPreferences(context)
+        val editor = prefs.edit()
+
+        fun putStringIfPresent(key: String, value: Any?) {
+            val text = value?.toString()?.trim().orEmpty()
+            if (text.isNotEmpty()) {
+                editor.putString(key, text)
+            }
+        }
+
+        fun putBooleanIfPresent(key: String, value: Any?) {
+            when (value) {
+                is Boolean -> editor.putBoolean(key, value)
+                is String -> {
+                    val normalized = value.trim().lowercase()
+                    if (normalized == "true" || normalized == "1") editor.putBoolean(key, true)
+                    if (normalized == "false" || normalized == "0") editor.putBoolean(key, false)
+                }
+                is Number -> editor.putBoolean(key, value.toInt() != 0)
+            }
+        }
+
+        putBooleanIfPresent(PairingActivity.PREF_IS_PAIRED, values[PairingActivity.PREF_IS_PAIRED])
+        putStringIfPresent(PairingActivity.PREF_PARTNER_ENDPOINT, values[PairingActivity.PREF_PARTNER_ENDPOINT])
+        putStringIfPresent(FilterService.PREF_WEBHOOK_URL, values[FilterService.PREF_WEBHOOK_URL])
+        putStringIfPresent(FilterService.PREF_WEBHOOK_BEARER_TOKEN, values[FilterService.PREF_WEBHOOK_BEARER_TOKEN])
+        putStringIfPresent(PartnerMqttService.PREF_MQTT_BROKER_URI, values[PartnerMqttService.PREF_MQTT_BROKER_URI])
+        putStringIfPresent(PartnerMqttService.PREF_MQTT_USERNAME, values[PartnerMqttService.PREF_MQTT_USERNAME])
+        putStringIfPresent(PartnerMqttService.PREF_MQTT_PASSWORD, values[PartnerMqttService.PREF_MQTT_PASSWORD])
+        putStringIfPresent(PartnerMqttService.PREF_MQTT_CLIENT_ID, values[PartnerMqttService.PREF_MQTT_CLIENT_ID])
+        putStringIfPresent(PartnerMqttService.PREF_MQTT_TOPIC_PREFIX, values[PartnerMqttService.PREF_MQTT_TOPIC_PREFIX])
+        putStringIfPresent("device_id", values["device_id"])
+
+        editor.apply()
+
+        // Re-assert native foreground services immediately after syncing state.
+        CoreServiceKeeper.ensureCoreServicesRunning(context.applicationContext, "flutter_pref_sync")
+    }
+
     fun register(messenger: BinaryMessenger, context: Context) {
         val ctx = context
 
@@ -240,6 +287,12 @@ object DeviceCommandChannel {
                     }
                     "consumePendingSharePayload" -> {
                         result.success(consumePendingSharePayload())
+                    }
+                    "syncCorePrefs" -> {
+                        @Suppress("UNCHECKED_CAST")
+                        val values = call.argument<Map<String, Any?>>("values")
+                        syncCorePrefsFromFlutter(ctx, values)
+                        result.success(null)
                     }
                     "sendNotification" -> {
                         val title     = call.argument<String>("title")     ?: ""
