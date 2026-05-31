@@ -33,3 +33,4 @@ backend/fastapi/__pycache__/
 backend/fastapi/.venv/
 backend/fastapi/venv/
 *.py[cod]
+/.gradle/buildOutputCleanup
