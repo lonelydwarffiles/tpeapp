@@ -556,6 +556,7 @@ class _IntifaceScreenState extends State<IntifaceScreen> {
   Future<void> _refreshLovenseBattery(BleService ble, {bool silent = false}) async {
     try {
       if (BleChannel.useNativeLovense) {
+        await BleChannel.lovenseBattery();
         await BleChannel.lovenseReadBatteryLevel();
       } else {
         await ble.refreshLovenseBatteryLevel();

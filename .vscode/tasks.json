@@ -623,6 +623,17 @@
 				"1"
 			],
 			"isBackground": false
+		},
+		{
+			"label": "install-debug-apk",
+			"type": "shell",
+			"command": "c:\\Users\\techd\\Documents\\GitHub\\tpeapp\\gradlew.bat",
+			"args": [
+				":app:installDebug",
+				"--console=plain",
+				"--no-daemon"
+			],
+			"isBackground": false
 		}
 	]
 }

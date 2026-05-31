@@ -6,7 +6,10 @@ import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothGatt
 import android.bluetooth.BluetoothGattCallback
 import android.bluetooth.BluetoothGattCharacteristic
+import android.bluetooth.BluetoothGattCharacteristic.PROPERTY_INDICATE
+import android.bluetooth.BluetoothGattCharacteristic.PROPERTY_NOTIFY
 import android.bluetooth.BluetoothGattService
+import android.bluetooth.BluetoothGattDescriptor
 import android.bluetooth.BluetoothGattCharacteristic.PROPERTY_READ
 import android.bluetooth.BluetoothGattCharacteristic.PROPERTY_WRITE
 import android.bluetooth.BluetoothGattCharacteristic.PROPERTY_WRITE_NO_RESPONSE
@@ -24,6 +27,7 @@ import android.os.Looper
 import android.util.Log
 import androidx.core.content.ContextCompat
 import java.util.UUID
+import kotlin.text.Regex
 
 /**
  * BleManager — a self-contained BLE peripheral manager built entirely on
@@ -91,6 +95,8 @@ class BleManager(
             UUID.fromString("0000180f-0000-1000-8000-00805f9b34fb")
         private val BATTERY_LEVEL_CHAR_UUID: UUID =
             UUID.fromString("00002a19-0000-1000-8000-00805f9b34fb")
+        private val CLIENT_CHARACTERISTIC_CONFIG_UUID: UUID =
+            UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
 
         private const val DEFAULT_SCAN_TIMEOUT_MS = 10_000L
     }
@@ -663,6 +669,7 @@ class BleManager(
                 "characteristic_uuid" to characteristic.uuid.toString(),
             ))
             targetCharacteristic = characteristic
+            enableBatteryResponseNotifications(gatt, selectedService, characteristic)
 
             // Drain any commands that arrived before the characteristic was ready.
             drainPendingCommands(characteristic)
@@ -711,6 +718,21 @@ class BleManager(
                 return
             }
             tryEmitBatteryLevel(value)
+        }
+
+        override fun onCharacteristicChanged(
+            gatt: BluetoothGatt,
+            characteristic: BluetoothGattCharacteristic,
+        ) {
+            handleCharacteristicChanged(characteristic, characteristic.value)
+        }
+
+        override fun onCharacteristicChanged(
+            gatt: BluetoothGatt,
+            characteristic: BluetoothGattCharacteristic,
+            value: ByteArray,
+        ) {
+            handleCharacteristicChanged(characteristic, value)
         }
     }
 
@@ -892,6 +914,176 @@ class BleManager(
         mainHandler.removeCallbacks(reconnectRunnable)
     }
 
+    private fun handleCharacteristicChanged(
+        characteristic: BluetoothGattCharacteristic,
+        value: ByteArray?,
+    ) {
+        val bytes = value ?: return
+        val ascii = runCatching { bytes.toString(Charsets.UTF_8).trim() }.getOrNull().orEmpty()
+        emit(
+            "notification",
+            mapOf(
+                "characteristic_uuid" to characteristic.uuid.toString(),
+                "bytes" to bytes.size,
+                "hex" to bytes.toHexString(),
+                "text" to ascii,
+            ),
+        )
+
+        if (characteristic.uuid == BATTERY_LEVEL_CHAR_UUID) {
+            tryEmitBatteryLevel(bytes)
+            return
+        }
+
+        val batteryFromText = parseBatteryPctFromText(ascii)
+        if (batteryFromText != null) {
+            emit(
+                "battery_level",
+                mapOf(
+                    "battery_pct" to batteryFromText,
+                    "source" to "notification_text",
+                    "characteristic_uuid" to characteristic.uuid.toString(),
+                    "text" to ascii,
+                ),
+            )
+        }
+    }
+
+    private fun parseBatteryPctFromText(text: String): Int? {
+        val trimmed = text.trim()
+        if (trimmed.isEmpty()) return null
+
+        val prefixed = Regex("(?i)(?:get_battery|battery)\\s*[:=]\\s*(\\d{1,3})")
+            .find(trimmed)
+            ?.groupValues
+            ?.getOrNull(1)
+            ?.toIntOrNull()
+        if (prefixed != null) {
+            return prefixed.coerceIn(0, 100)
+        }
+
+        val percentSuffix = Regex("(\\d{1,3})\\s*%")
+            .find(trimmed)
+            ?.groupValues
+            ?.getOrNull(1)
+            ?.toIntOrNull()
+        if (percentSuffix != null) {
+            return percentSuffix.coerceIn(0, 100)
+        }
+
+        val plainNumber = trimmed.toIntOrNull()
+        if (plainNumber != null && plainNumber in 0..100) {
+            return plainNumber
+        }
+
+        // Common JSON-ish Lovense payload forms.
+        val jsonLike = Regex("(?i)\"?(?:battery|battery_pct|value)\"?\\s*[:=]\\s*\"?(\\d{1,3})")
+            .find(trimmed)
+            ?.groupValues
+            ?.getOrNull(1)
+            ?.toIntOrNull()
+        if (jsonLike != null) {
+            return jsonLike.coerceIn(0, 100)
+        }
+
+        return null
+    }
+
+    private fun enableBatteryResponseNotifications(
+        gatt: BluetoothGatt,
+        selectedService: BluetoothGattService,
+        writeCharacteristic: BluetoothGattCharacteristic,
+    ) {
+        // Keep existing behavior on the selected characteristic.
+        enableCharacteristicNotifications(gatt, writeCharacteristic)
+
+        // Lovense battery replies are commonly delivered on a companion RX notify characteristic.
+        val companion = selectedService.characteristics
+            .filter { it.uuid != writeCharacteristic.uuid }
+            .filter { c ->
+                val props = c.properties
+                (props and PROPERTY_NOTIFY) != 0 || (props and PROPERTY_INDICATE) != 0
+            }
+            .sortedBy { notificationPriority(it.uuid.toString()) }
+            .firstOrNull()
+
+        if (companion != null) {
+            enableCharacteristicNotifications(gatt, companion)
+            emit(
+                "notify_companion_selected",
+                mapOf(
+                    "service_uuid" to selectedService.uuid.toString(),
+                    "characteristic_uuid" to companion.uuid.toString(),
+                ),
+            )
+        }
+    }
+
+    private fun notificationPriority(uuid: String): Int {
+        val id = uuid.lowercase()
+        return when {
+            id.contains("fff1") -> 0
+            id.contains("52300003") -> 1
+            id.contains("ffc2") -> 2
+            else -> 10
+        }
+    }
+
+    private fun enableCharacteristicNotifications(
+        gatt: BluetoothGatt,
+        characteristic: BluetoothGattCharacteristic,
+    ) {
+        if (!hasPermission(Manifest.permission.BLUETOOTH_CONNECT)) {
+            emit("connect_permission_missing")
+            return
+        }
+
+        val props = characteristic.properties
+        val supportsNotify = (props and PROPERTY_NOTIFY) != 0
+        val supportsIndicate = (props and PROPERTY_INDICATE) != 0
+        if (!supportsNotify && !supportsIndicate) {
+            emit("notify_unavailable", mapOf("characteristic_uuid" to characteristic.uuid.toString()))
+            return
+        }
+
+        val localEnabled = gatt.setCharacteristicNotification(characteristic, true)
+        if (!localEnabled) {
+            emit("notify_enable_failed", mapOf("reason" to "local_enable_failed"))
+            return
+        }
+
+        val cccd = characteristic.getDescriptor(CLIENT_CHARACTERISTIC_CONFIG_UUID)
+        if (cccd == null) {
+            emit("notify_enable_failed", mapOf("reason" to "cccd_missing"))
+            return
+        }
+
+        val value = if (supportsNotify) {
+            BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
+        } else {
+            BluetoothGattDescriptor.ENABLE_INDICATION_VALUE
+        }
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            val result = gatt.writeDescriptor(cccd, value)
+            if (result != BluetoothGatt.GATT_SUCCESS) {
+                emit("notify_enable_failed", mapOf("status" to result))
+            } else {
+                emit("notify_enabled", mapOf("characteristic_uuid" to characteristic.uuid.toString()))
+            }
+        } else {
+            @Suppress("DEPRECATION")
+            cccd.value = value
+            @Suppress("DEPRECATION")
+            val enqueued = gatt.writeDescriptor(cccd)
+            if (!enqueued) {
+                emit("notify_enable_failed", mapOf("reason" to "enqueue_failed"))
+            } else {
+                emit("notify_enabled", mapOf("characteristic_uuid" to characteristic.uuid.toString()))
+            }
+        }
+    }
+
     private fun tryEmitBatteryLevel(bytes: ByteArray?) {
         if (bytes == null || bytes.isEmpty()) {
             emit("battery_read_failed", mapOf("reason" to "empty_value"))
@@ -905,9 +1097,13 @@ class BleManager(
                 "battery_pct" to batteryPct,
                 "raw" to raw,
                 "characteristic_uuid" to BATTERY_LEVEL_CHAR_UUID.toString(),
+                "source" to "battery_service",
             ),
         )
     }
+
+    private fun ByteArray.toHexString(): String =
+        joinToString(separator = "") { "%02X".format(it) }
 
     /** Returns true if [permission] has been granted. */
     private fun hasPermission(permission: String): Boolean =

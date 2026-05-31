@@ -270,6 +270,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
     if (lovenseConnected) {
       try {
+        await BleChannel.lovenseBattery();
         await BleChannel.lovenseReadBatteryLevel();
       } catch (_) {}
     }

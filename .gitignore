@@ -34,3 +34,4 @@ backend/fastapi/.venv/
 backend/fastapi/venv/
 *.py[cod]
 /.gradle/buildOutputCleanup
+.gradle/buildOutputCleanup/buildOutputCleanup.lock
