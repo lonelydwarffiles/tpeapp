@@ -2,11 +2,16 @@ package com.tpeapp.status
 
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.app.PendingIntent
 import android.content.Context
+import android.content.Intent
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.preference.PreferenceManager
+import com.tpeapp.R
+import com.tpeapp.service.FilterService
+import com.tpeapp.ui.MainActivity
 
 /**
  * SubStatusManager — manages the sub's current status and shows a persistent
@@ -18,8 +23,8 @@ object SubStatusManager {
 
     private const val TAG = "SubStatusManager"
     private const val PREF_STATUS = "sub_status"
-    private const val CHANNEL_ID = "sub_status"
-    private const val NOTIF_ID = 9001
+    private const val CHANNEL_ID = FilterService.CORE_CHANNEL_ID
+    private const val NOTIF_ID = FilterService.CORE_NOTIFICATION_ID
 
     const val STATUS_FREE_TIME   = "free_time"
     const val STATUS_TASK_ACTIVE = "task_active"
@@ -54,16 +59,29 @@ object SubStatusManager {
         }
 
         val notification = NotificationCompat.Builder(ctx, CHANNEL_ID)
-            .setSmallIcon(android.R.drawable.ic_menu_info_details)
-            .setContentTitle("$emoji $label")
-            .setContentText("Current status: $label")
+            .setSmallIcon(R.drawable.ic_shield)
+            .setContentTitle("Accountability core is active")
+            .setContentText("Status: $emoji $label • Commands + filter online")
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
+            .setContentIntent(
+                PendingIntent.getActivity(
+                    ctx,
+                    0,
+                    Intent(ctx, MainActivity::class.java),
+                    PendingIntent.FLAG_IMMUTABLE,
+                ),
+            )
             .build()
 
         try {
             NotificationManagerCompat.from(ctx).notify(NOTIF_ID, notification)
+            ctx.startService(
+                Intent(ctx, FilterService::class.java).apply {
+                    action = FilterService.ACTION_REFRESH_CORE_NOTIFICATION
+                },
+            )
         } catch (e: SecurityException) {
             Log.w(TAG, "POST_NOTIFICATIONS not granted", e)
         }
@@ -73,8 +91,8 @@ object SubStatusManager {
         val nm = ctx.getSystemService(NotificationManager::class.java)
         if (nm.getNotificationChannel(CHANNEL_ID) != null) return
         nm.createNotificationChannel(
-            NotificationChannel(CHANNEL_ID, "Sub Status", NotificationManager.IMPORTANCE_LOW).apply {
-                description = "Persistent indicator of the sub's current status (set by Dom via FCM)"
+            NotificationChannel(CHANNEL_ID, "Accountability Core Active", NotificationManager.IMPORTANCE_LOW).apply {
+                description = "Persistent indicator of accountability core status"
                 setShowBadge(false)
             }
         )

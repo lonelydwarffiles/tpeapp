@@ -30,6 +30,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   static const String _fallbackLiveEndpoint = 'https://mochii.live';
   static const EventChannel _nativeBleEvents =
       EventChannel('com.hound.controller/ble_events');
+  static const String _edgeCountKey = 'home_edge_count';
+  static const String _orgasmCountKey = 'home_orgasm_count';
 
   String _enrollmentState = 'enrolling';
   String _enrollmentError = '';
@@ -45,6 +47,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   bool _nativePavlokConnected = false;
   int? _nativeLovenseBatteryPct;
   int? _nativePavlokBatteryPct;
+  bool _countersLoaded = false;
+  int _edgeCount = 0;
+  int _orgasmCount = 0;
 
   @override
   void didChangeDependencies() {
@@ -65,6 +70,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     if (!_homeOpenedTracked) {
       _homeOpenedTracked = true;
       unawaited(_trackBehavior('app_home_opened', reason: _enrollmentState));
+    }
+    if (!_countersLoaded) {
+      _countersLoaded = true;
+      unawaited(_loadSessionCounters());
     }
   }
 
@@ -386,6 +395,41 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     }
   }
 
+  Future<void> _loadSessionCounters() async {
+    final prefs = context.read<SharedPreferences>();
+    final edgeCount = prefs.getInt(_edgeCountKey) ?? 0;
+    final orgasmCount = prefs.getInt(_orgasmCountKey) ?? 0;
+    if (!mounted) return;
+    setState(() {
+      _edgeCount = edgeCount;
+      _orgasmCount = orgasmCount;
+    });
+  }
+
+  Future<void> _incrementSessionCounter({required bool orgasm}) async {
+    final prefs = context.read<SharedPreferences>();
+    final edgeCount = orgasm ? _edgeCount : _edgeCount + 1;
+    final orgasmCount = orgasm ? _orgasmCount + 1 : _orgasmCount;
+
+    await prefs.setInt(_edgeCountKey, edgeCount);
+    await prefs.setInt(_orgasmCountKey, orgasmCount);
+
+    if (!mounted) return;
+    setState(() {
+      _edgeCount = edgeCount;
+      _orgasmCount = orgasmCount;
+    });
+
+    await _trackBehavior(
+      orgasm ? 'orgasm_recorded' : 'edge_recorded',
+      reason: 'home_counter_button',
+      payload: {
+        'edge_count': edgeCount,
+        'orgasm_count': orgasmCount,
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
@@ -462,6 +506,50 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           ),
         ],
       ),
+      floatingActionButtonLocation: FloatingActionButtonLocation.centerFloat,
+      floatingActionButton: SafeArea(
+        minimum: const EdgeInsets.fromLTRB(12, 0, 12, 10),
+        child: Card(
+          margin: EdgeInsets.zero,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Counters: $_edgeCount edges • $_orgasmCount orgasms',
+                  style: Theme.of(context).textTheme.bodyMedium,
+                ),
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    Expanded(
+                      child: FilledButton.icon(
+                        onPressed: () => unawaited(
+                          _incrementSessionCounter(orgasm: false),
+                        ),
+                        icon: const Icon(Icons.trending_up),
+                        label: const Text('Add Edge'),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: FilledButton.tonalIcon(
+                        onPressed: () => unawaited(
+                          _incrementSessionCounter(orgasm: true),
+                        ),
+                        icon: const Icon(Icons.favorite),
+                        label: const Text('Add Orgasm'),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
       body: CustomScrollView(
         slivers: [
           if (_enrollmentState == 'retrying' && _enrollmentError.isNotEmpty)
@@ -524,6 +612,33 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               ),
             ),
           ),
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 6, 16, 4),
+              child: Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          const Icon(Icons.favorite_outline),
+                          const SizedBox(width: 8),
+                          Text(
+                            'Session Counters',
+                            style: Theme.of(context).textTheme.titleSmall,
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 6),
+                      Text('Edges: $_edgeCount • Orgasms: $_orgasmCount'),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
           const SliverToBoxAdapter(
             child: Padding(
               padding: EdgeInsets.fromLTRB(16, 14, 16, 8),
@@ -560,6 +675,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 mainAxisSpacing: 12,
               ),
             ),
+          ),
+          const SliverToBoxAdapter(
+            child: SizedBox(height: 120),
           ),
         ],
       ),

@@ -29,7 +29,7 @@ object CoreServiceKeeper {
         }
 
         startForegroundServiceCompat(appContext, Intent(appContext, FilterService::class.java), "FilterService", reason)
-        startForegroundServiceCompat(appContext, Intent(appContext, PartnerMqttService::class.java), "PartnerMqttService", reason)
+        startServiceCompat(appContext, Intent(appContext, PartnerMqttService::class.java), "PartnerMqttService", reason)
     }
 
     fun scheduleWatchdog(context: Context) {
@@ -56,6 +56,22 @@ object CoreServiceKeeper {
                         "Failed to start $serviceName (reason=$reason): ${firstErr.message ?: firstErr::class.java.simpleName}; fallback=${secondErr.message ?: secondErr::class.java.simpleName}",
                     )
                 }
+        }
+    }
+
+    private fun startServiceCompat(
+        context: Context,
+        intent: Intent,
+        serviceName: String,
+        reason: String,
+    ) {
+        runCatching {
+            context.startService(intent)
+        }.onFailure { err ->
+            Log.w(
+                TAG,
+                "Failed to start $serviceName (reason=$reason): ${err.message ?: err::class.java.simpleName}",
+            )
         }
     }
 }

@@ -49,9 +49,12 @@ class FilterService : Service() {
 
     companion object {
         private const val TAG                  = "FilterService"
-        private const val CHANNEL_ID           = "tpe_filter_active"
-        private const val NOTIFICATION_ID      = 1001
+        const val CORE_CHANNEL_ID              = "tpe_core_active"
+        const val CORE_NOTIFICATION_ID         = 1001
+        const val ACTION_REFRESH_CORE_NOTIFICATION = "com.hound.controller.action.REFRESH_CORE_NOTIFICATION"
         private const val DEFAULT_THRESHOLD    = 0.55f   // tune to balance FP/FN
+        private const val PREF_SUB_STATUS      = "sub_status"
+        const val PREF_MQTT_TRANSPORT_STATUS   = "mqtt_transport_status"
 
         /** SharedPreferences key for the webhook endpoint URL. */
         const val PREF_WEBHOOK_URL             = "webhook_url"
@@ -239,7 +242,7 @@ class FilterService : Service() {
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
-        startForeground(NOTIFICATION_ID, buildForegroundNotification())
+        startForeground(CORE_NOTIFICATION_ID, buildForegroundNotification())
         LovenseManager.init(applicationContext)
         PavlokManager.init(applicationContext)
         loadPersistedSettings()
@@ -248,6 +251,9 @@ class FilterService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (intent?.action == ACTION_REFRESH_CORE_NOTIFICATION) {
+            refreshForegroundNotification()
+        }
         return START_STICKY
     }
 
@@ -576,23 +582,56 @@ class FilterService : Service() {
 
     private fun createNotificationChannel() {
         val nm = getSystemService(NotificationManager::class.java)
-        if (nm.getNotificationChannel(CHANNEL_ID) != null) return
+        if (nm.getNotificationChannel(CORE_CHANNEL_ID) != null) return
         val channel = NotificationChannel(
-            CHANNEL_ID,
-            "Accountability Filter Active",
+            CORE_CHANNEL_ID,
+            "Accountability Core Active",
             NotificationManager.IMPORTANCE_LOW
         ).apply {
-            description = "Shown while content filtering is running"
+            description = "Shown while accountability core services are active"
             setShowBadge(false)
         }
         nm.createNotificationChannel(channel)
     }
 
+    private fun refreshForegroundNotification() {
+        val nm = getSystemService(NotificationManager::class.java)
+        nm.notify(CORE_NOTIFICATION_ID, buildForegroundNotification())
+    }
+
+    private fun currentStatusLabel(): String {
+        val status = PreferenceManager.getDefaultSharedPreferences(applicationContext)
+            .getString(PREF_SUB_STATUS, "free_time")
+            ?.trim()
+            ?.lowercase()
+            ?: "free_time"
+        return when (status) {
+            "task_active" -> "Task Active"
+            "restricted" -> "Restricted"
+            "punished" -> "Punished"
+            else -> "Free Time"
+        }
+    }
+
+    private fun currentTransportLabel(): String {
+        val transport = PreferenceManager.getDefaultSharedPreferences(applicationContext)
+            .getString(PREF_MQTT_TRANSPORT_STATUS, "unknown")
+            ?.trim()
+            ?.lowercase()
+            ?: "unknown"
+        return when (transport) {
+            "online" -> "Online"
+            "reconnecting" -> "Reconnecting"
+            "offline" -> "Offline"
+            else -> "Unknown"
+        }
+    }
+
     private fun buildForegroundNotification() =
-        NotificationCompat.Builder(this, CHANNEL_ID)
+        NotificationCompat.Builder(this, CORE_CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_shield)
-            .setContentTitle("Content filter is active")
-            .setContentText("Tap to view accountability settings")
+            .setContentTitle("Accountability core is active")
+            .setContentText("Status: ${currentStatusLabel()} • MQTT: ${currentTransportLabel()}")
             .setOngoing(true)
             .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
             .setContentIntent(

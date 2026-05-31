@@ -30,7 +30,7 @@ class TextReplacementChannel {
     'default_mode': 'auto',
   };
 
-  /// Built-in defaults for pronoun shifting and playful puppy diction.
+  /// Built-in defaults for URL rewrite + self-reference normalization.
   ///
   /// Rules are regex pattern -> replacement (string or list of strings).
   /// When a list is provided, one option is randomly selected on each match.
@@ -44,19 +44,23 @@ class TextReplacementChannel {
     r'(?i)\bmyself\b': 'itself',
     r'(?i)\bmy\b': 'its',
     r'(?i)\bmine\b': 'its',
-    r'(?i)\byes\b': 'yip',
-    r'(?i)\byep\b': 'yip',
-    r'(?i)\bno\b': 'ruff-no',
-    r'(?i)\bokay\b': 'ok-paw',
-    r'(?i)\bok\b': 'ok-paw',
-    r'(?i)\bmaybe\b': 'pawisibly',
-    r'(?i)\bplease\b': 'pawlease',
-    r'(?i)\bhello\b': 'woof-hello',
-    r'(?i)\bhi\b': 'arf-hi',
-    r'(?i)\bgood\b': 'tail-wagging good',
-    r'(?i)\bgreat\b': 'paw-some',
-    r'(?i)\bthanks\b': 'tail-wag thanks',
-    r'(?i)\bsorry\b': 'puppy is sorry',
+  };
+
+  // Old playful-diction defaults that should no longer be auto-enforced.
+  static const Set<String> _deprecatedBarkRuleKeys = {
+    r'(?i)\byes\b',
+    r'(?i)\byep\b',
+    r'(?i)\bno\b',
+    r'(?i)\bokay\b',
+    r'(?i)\bok\b',
+    r'(?i)\bmaybe\b',
+    r'(?i)\bplease\b',
+    r'(?i)\bhello\b',
+    r'(?i)\bhi\b',
+    r'(?i)\bgood\b',
+    r'(?i)\bgreat\b',
+    r'(?i)\bthanks\b',
+    r'(?i)\bsorry\b',
   };
 
   static const Map<String, dynamic> _preferredSelfReferenceRules = {
@@ -120,6 +124,9 @@ class TextReplacementChannel {
       // Keep custom rules, backfill missing defaults, and enforce preferred
       // first-person-to-it/mutt self-reference mappings.
       final merged = <String, dynamic>{...defaultDict, ...current};
+      for (final key in _deprecatedBarkRuleKeys) {
+        merged.remove(key);
+      }
       merged.addAll(_preferredSelfReferenceRules);
       await setDict(merged);
     }

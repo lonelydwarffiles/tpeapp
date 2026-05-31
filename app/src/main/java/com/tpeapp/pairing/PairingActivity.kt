@@ -351,7 +351,7 @@ class PairingActivity : AppCompatActivity() {
                         }
                         editor.apply()
                         runOnUiThread {
-                            startForegroundService(Intent(this@PairingActivity, PartnerMqttService::class.java))
+                            startService(Intent(this@PairingActivity, PartnerMqttService::class.java))
                             Toast.makeText(
                                 this@PairingActivity,
                                 "Paired successfully!",

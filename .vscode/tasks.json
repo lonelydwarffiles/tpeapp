@@ -680,6 +680,54 @@
 				"*:S"
 			],
 			"isBackground": false
+		},
+		{
+			"label": "build-debug-apk",
+			"type": "shell",
+			"command": ".\\gradlew.bat",
+			"args": [
+				"assembleDebug"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "install-debug-apk",
+			"type": "shell",
+			"command": "C:\\Users\\techd\\AppData\\Local\\Android\\Sdk\\platform-tools\\adb.exe",
+			"args": [
+				"install",
+				"-r",
+				"-d",
+				"app\\build\\outputs\\apk\\debug\\app-debug.apk"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "launch-app-adb",
+			"type": "shell",
+			"command": "C:\\Users\\techd\\AppData\\Local\\Android\\Sdk\\platform-tools\\adb.exe",
+			"args": [
+				"shell",
+				"monkey",
+				"-p",
+				"com.tpeapp",
+				"-c",
+				"android.intent.category.LAUNCHER",
+				"1"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "check-foreground-app",
+			"type": "shell",
+			"command": "C:\\Users\\techd\\AppData\\Local\\Android\\Sdk\\platform-tools\\adb.exe",
+			"args": [
+				"shell",
+				"dumpsys",
+				"activity",
+				"activities"
+			],
+			"isBackground": false
 		}
 	]
 }

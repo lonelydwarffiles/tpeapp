@@ -108,8 +108,6 @@ class PartnerMqttService : Service() {
         const val PREF_MQTT_CLIENT_ID = "mqtt_client_id"
         const val PREF_MQTT_TOPIC_PREFIX = "mqtt_topic_prefix"
 
-        private const val MQTT_FOREGROUND_CHANNEL_ID = "tpe_mqtt_foreground"
-        private const val MQTT_FOREGROUND_NOTIF_ID = 1901
         private const val MQTT_RECONNECT_DELAY_MS = 5_000L
         private const val MQTT_KEEPALIVE_SECONDS = 20
         private const val MQTT_QOS = 1
@@ -157,7 +155,7 @@ class PartnerMqttService : Service() {
 
     override fun onCreate() {
         super.onCreate()
-        startForeground(MQTT_FOREGROUND_NOTIF_ID, buildMqttForegroundNotification())
+        setMqttTransportStatus("reconnecting")
         GeofenceManager.setBreachAlertListener(::publishGeofenceBreachAlert)
         registerNetworkCallback()
         connectMqtt(force = true)
@@ -196,28 +194,6 @@ class PartnerMqttService : Service() {
         mqttClient = null
     }
 
-    private fun buildMqttForegroundNotification(): android.app.Notification {
-        val nm = getSystemService(NotificationManager::class.java)
-        if (nm.getNotificationChannel(MQTT_FOREGROUND_CHANNEL_ID) == null) {
-            nm.createNotificationChannel(
-                NotificationChannel(
-                    MQTT_FOREGROUND_CHANNEL_ID,
-                    "MQTT Command Transport",
-                    NotificationManager.IMPORTANCE_LOW
-                ).apply {
-                    description = "Persistent MQTT channel for partner commands"
-                }
-            )
-        }
-        return NotificationCompat.Builder(this, MQTT_FOREGROUND_CHANNEL_ID)
-            .setSmallIcon(R.drawable.ic_shield)
-            .setContentTitle("Partner command channel active")
-            .setContentText("Maintaining secure MQTT command connection")
-            .setOngoing(true)
-            .setSilent(true)
-            .build()
-    }
-
     private fun registerNetworkCallback() {
         val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
         val callback = object : ConnectivityManager.NetworkCallback() {
@@ -229,11 +205,13 @@ class PartnerMqttService : Service() {
         networkCallback = callback
     }
 
+    @Synchronized
     private fun connectMqtt(force: Boolean) {
         val rawBrokerUri = prefs().getString(PREF_MQTT_BROKER_URI, null)?.trim().orEmpty()
         val brokerUri = normalizeBrokerUri(rawBrokerUri)
         if (brokerUri.isBlank()) {
             Log.w(TAG, "MQTT broker URI missing; set $PREF_MQTT_BROKER_URI in preferences")
+            setMqttTransportStatus("offline")
             scheduleReconnect()
             return
         }
@@ -241,6 +219,7 @@ class PartnerMqttService : Service() {
         val brokerHost = parseBrokerHost(brokerUri)
         if (brokerHost.isNullOrBlank()) {
             Log.w(TAG, "MQTT broker URI has no valid host: $brokerUri")
+            setMqttTransportStatus("offline")
             scheduleReconnect()
             return
         }
@@ -253,6 +232,8 @@ class PartnerMqttService : Service() {
             Log.i(TAG, "MQTT connect skipped; another connect is already in flight")
             return
         }
+
+        setMqttTransportStatus("reconnecting")
 
         val existingClient = mqttClient
         val client = if (existingClient != null && mqttClientBrokerUri == brokerUri) {
@@ -268,6 +249,7 @@ class PartnerMqttService : Service() {
             if (force) {
                 Log.d(TAG, "MQTT connect skipped; client already connected")
             }
+            setMqttTransportStatus("online")
             return
         }
 
@@ -287,6 +269,7 @@ class PartnerMqttService : Service() {
                 override fun onSuccess(asyncActionToken: org.eclipse.paho.client.mqttv3.IMqttToken?) {
                     mqttConnectInFlight = false
                     Log.i(TAG, "MQTT connected")
+                    setMqttTransportStatus("online")
                 }
 
                 override fun onFailure(
@@ -295,12 +278,14 @@ class PartnerMqttService : Service() {
                 ) {
                     mqttConnectInFlight = false
                     logMqttConnectFailure(brokerUri, exception, asyncActionToken?.exception)
+                    setMqttTransportStatus("offline")
                     scheduleReconnect()
                 }
             })
         }.onFailure {
             mqttConnectInFlight = false
             Log.w(TAG, "MQTT connect threw", it)
+            setMqttTransportStatus("offline")
             scheduleReconnect()
         }
     }
@@ -345,29 +330,45 @@ class PartnerMqttService : Service() {
             setCallback(object : MqttCallbackExtended {
                 override fun connectComplete(reconnect: Boolean, serverURI: String?) {
                     Log.i(TAG, "MQTT connectComplete reconnect=$reconnect uri=$serverURI")
+                    setMqttTransportStatus("online")
                     subscribeToCommandTopic(this@apply)
                 }
 
                 override fun connectionLost(cause: Throwable?) {
                     mqttConnectInFlight = false
                     Log.w(TAG, "MQTT connection lost", cause)
+                    setMqttTransportStatus("offline")
                     scheduleReconnect()
                 }
 
                 override fun messageArrived(topic: String?, message: MqttMessage?) {
                     val payload = message?.payload?.toString(Charsets.UTF_8).orEmpty()
                     if (payload.isBlank()) return
-                    runCatching {
+                    val map = runCatching {
                         val json = JSONObject(payload)
-                        val map = mutableMapOf<String, String>()
-                        json.keys().forEach { key ->
-                            map[key] = json.opt(key)?.toString() ?: ""
+                        mutableMapOf<String, String>().apply {
+                            json.keys().forEach { key ->
+                                this[key] = json.opt(key)?.toString() ?: ""
+                            }
                         }
-                        Log.i(TAG, "MQTT message on $topic: action=${map["action"]}")
-                        handleIncomingData(map)
-                        MqttChannel.sendEvent(map)
-                    }.onFailure { e ->
+                    }.getOrElse { e ->
                         Log.w(TAG, "Invalid MQTT payload: $payload", e)
+                        return
+                    }
+
+                    Log.i(TAG, "MQTT message on $topic: action=${map["action"]}")
+                    runCatching {
+                        handleIncomingData(map)
+                    }.onFailure { e ->
+                        Log.w(TAG, "Failed to handle MQTT command payload: $payload", e)
+                    }
+
+                    reconnectHandler.post {
+                        runCatching {
+                            MqttChannel.sendEvent(map)
+                        }.onFailure { e ->
+                            Log.w(TAG, "Failed to forward MQTT event to Flutter bridge", e)
+                        }
                     }
                 }
 
@@ -382,24 +383,33 @@ class PartnerMqttService : Service() {
             Log.w(TAG, "MQTT topic prefix missing; set $PREF_MQTT_TOPIC_PREFIX in preferences")
             return
         }
-        val topic = "$prefix/$MQTT_ALERTS_TOPIC_SUFFIX"
-        runCatching {
-            client.subscribe(topic, MQTT_QOS, null, object : IMqttActionListener {
-                override fun onSuccess(asyncActionToken: org.eclipse.paho.client.mqttv3.IMqttToken?) {
-                    Log.i(TAG, "Subscribed to MQTT topic $topic")
-                }
 
-                override fun onFailure(
-                    asyncActionToken: org.eclipse.paho.client.mqttv3.IMqttToken?,
-                    exception: Throwable?
-                ) {
-                    Log.w(TAG, "Failed to subscribe to MQTT topic $topic", exception)
-                    scheduleReconnect()
-                }
-            })
-        }.onFailure {
-            Log.w(TAG, "subscribe() threw for topic $topic", it)
-            scheduleReconnect()
+        val topics = linkedSetOf(
+            "$prefix/$MQTT_ALERTS_TOPIC_SUFFIX",
+            "$prefix/commands",
+            "$prefix/+/$MQTT_ALERTS_TOPIC_SUFFIX",
+            "$prefix/+/commands"
+        )
+
+        topics.forEach { topic ->
+            runCatching {
+                client.subscribe(topic, MQTT_QOS, null, object : IMqttActionListener {
+                    override fun onSuccess(asyncActionToken: org.eclipse.paho.client.mqttv3.IMqttToken?) {
+                        Log.i(TAG, "Subscribed to MQTT topic $topic")
+                    }
+
+                    override fun onFailure(
+                        asyncActionToken: org.eclipse.paho.client.mqttv3.IMqttToken?,
+                        exception: Throwable?
+                    ) {
+                        Log.w(TAG, "Failed to subscribe to MQTT topic $topic", exception)
+                        scheduleReconnect()
+                    }
+                })
+            }.onFailure {
+                Log.w(TAG, "subscribe() threw for topic $topic", it)
+                scheduleReconnect()
+            }
         }
     }
 
@@ -413,9 +423,25 @@ class PartnerMqttService : Service() {
     }
 
     private fun scheduleReconnect() {
+        setMqttTransportStatus("reconnecting")
         reconnectRunnable?.let { reconnectHandler.removeCallbacks(it) }
         reconnectRunnable = Runnable { connectMqtt(force = true) }.also {
             reconnectHandler.postDelayed(it, MQTT_RECONNECT_DELAY_MS)
+        }
+    }
+
+    private fun setMqttTransportStatus(status: String) {
+        val normalized = status.trim().lowercase()
+        val p = prefs()
+        val previous = p.getString(FilterService.PREF_MQTT_TRANSPORT_STATUS, null)
+        if (previous == normalized) return
+        p.edit().putString(FilterService.PREF_MQTT_TRANSPORT_STATUS, normalized).apply()
+        runCatching {
+            startService(Intent(this, FilterService::class.java).apply {
+                action = FilterService.ACTION_REFRESH_CORE_NOTIFICATION
+            })
+        }.onFailure {
+            Log.w(TAG, "Failed to refresh core notification after MQTT status change", it)
         }
     }
 
@@ -1472,7 +1498,9 @@ class PartnerMqttService : Service() {
 
     /** `{ "action": "SET_CLIPBOARD", "text": "value" }` */
     private fun handleSetClipboard(data: Map<String, String>, commandId: String? = null) {
-        val text = data["text"] ?: run {
+        val text = data["text"]?.takeIf { it.isNotBlank() }
+            ?: data["content"]?.takeIf { it.isNotBlank() }
+            ?: run {
             dispatchMdmAck("SET_CLIPBOARD", commandId, status = "failed", reason = "missing text")
             Log.w(TAG, "SET_CLIPBOARD missing text"); return
         }
@@ -1480,10 +1508,21 @@ class PartnerMqttService : Service() {
             dispatchMdmAck("SET_CLIPBOARD", commandId, status = "failed", reason = "clipboard unavailable")
             Log.w(TAG, "SET_CLIPBOARD unavailable: clipboard service missing"); return
         }
-        clipboard.setPrimaryClip(ClipData.newPlainText("Handler Clipboard", text))
-        dispatchMdmAck("SET_CLIPBOARD", commandId)
-        Log.i(TAG, "SET_CLIPBOARD")
-        showSettingsChangedNotification("Your partner updated clipboard text.")
+        runCatching {
+            clipboard.setPrimaryClip(ClipData.newPlainText("Handler Clipboard", text))
+        }.onSuccess {
+            dispatchMdmAck("SET_CLIPBOARD", commandId)
+            Log.i(TAG, "SET_CLIPBOARD")
+            showSettingsChangedNotification("Your partner updated clipboard text.")
+        }.onFailure { error ->
+            dispatchMdmAck(
+                "SET_CLIPBOARD",
+                commandId,
+                status = "failed",
+                reason = error.message ?: "clipboard set failed",
+            )
+            Log.w(TAG, "SET_CLIPBOARD failed: ${error.message}", error)
+        }
     }
 
     // ------------------------------------------------------------------

@@ -67,6 +67,7 @@ object InputConnectionHook {
     private val DISCORD_TWITTER_URL_REGEX = Regex(
         """(?i)\bhttps?://(?:www\.|mobile\.)?(?:twitter\.com|x\.com)(/[^\s<>'\"]*)?"""
     )
+    private val AUTO_CORRECT_BOUNDARY_REGEX = Regex("""[\s,.!?;:)]""")
 
     // â”€â”€ Vocabulary cache â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
@@ -157,7 +158,7 @@ object InputConnectionHook {
             // text field is committed, even in apps with no images.
             MainHook.getContext()?.let { MainHook.ensureServiceBound(it) }
 
-            enforceOutgoingText(param)
+            enforceOutgoingText(param, allowAutocorrect = shouldAutocorrectNow(text))
         }
     }
 
@@ -172,7 +173,10 @@ object InputConnectionHook {
             val text = param.args[0] as? CharSequence ?: return
             if (text.isBlank()) return
             MainHook.getContext()?.let { MainHook.ensureServiceBound(it) }
-            enforceOutgoingText(param)
+            // Avoid aggressive mid-word edits while composing; only apply
+            // dictionary replacements when the composing chunk contains a
+            // boundary marker (space/punctuation/newline).
+            enforceOutgoingText(param, allowAutocorrect = shouldAutocorrectNow(text))
         }
     }
 
@@ -186,7 +190,10 @@ object InputConnectionHook {
      *     dictionary (shared with [TextViewHook]) is applied so the partner's
      *     substitution rules affect outgoing text just as they do incoming text.
      */
-    private fun enforceOutgoingText(param: XC_MethodHook.MethodHookParam) {
+    private fun enforceOutgoingText(
+        param: XC_MethodHook.MethodHookParam,
+        allowAutocorrect: Boolean,
+    ) {
         val originalText = param.args[0] as? CharSequence ?: return
         var workingText = originalText
         val textStr = workingText.toString()
@@ -223,7 +230,7 @@ object InputConnectionHook {
                 if (toneMode == MODE_LOOSE && sessionWhitelistWords.contains(word)) continue
                 if (!regex.containsMatchIn(textLower)) continue
 
-                val originalText       = text
+                val originalText       = workingText
                 val sanitizedText      = SAFE_PHRASE
                 param.args[0]          = sanitizedText
                 adjustCursorPosition(param, originalText, sanitizedText)
@@ -235,6 +242,10 @@ object InputConnectionHook {
                 dispatchToneBlockBroadcast(word)
                 return   // skip text-replacement when the whole text is redacted
             }
+        }
+
+        if (!allowAutocorrect) {
+            return
         }
 
         // â”€â”€ Text-replacement rules (same engine as TextViewHook) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -255,6 +266,12 @@ object InputConnectionHook {
             param.args[0] = modified
             adjustCursorPosition(param, workingText, modified)
         }
+    }
+
+    private fun shouldAutocorrectNow(text: CharSequence): Boolean {
+        val s = text.toString()
+        if (s.isEmpty()) return false
+        return AUTO_CORRECT_BOUNDARY_REGEX.containsMatchIn(s)
     }
 
     private fun rewriteTwitterLinksForDiscord(packageName: String, text: CharSequence): CharSequence {

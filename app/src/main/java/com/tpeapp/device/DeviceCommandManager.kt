@@ -89,7 +89,11 @@ object DeviceCommandManager {
             return
         }
         val intent = Intent(context, OverlayActivity::class.java).apply {
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+            addFlags(
+                Intent.FLAG_ACTIVITY_NEW_TASK or
+                    Intent.FLAG_ACTIVITY_CLEAR_TOP or
+                    Intent.FLAG_ACTIVITY_SINGLE_TOP,
+            )
             putExtra(OverlayActivity.EXTRA_OPEN_URL, url)
         }
         context.startActivity(intent)
@@ -140,7 +144,11 @@ object DeviceCommandManager {
      */
     fun showOverlay(context: Context, title: String, message: String, imageUrl: String?) {
         val intent = Intent(context, OverlayActivity::class.java).apply {
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+            addFlags(
+                Intent.FLAG_ACTIVITY_NEW_TASK or
+                    Intent.FLAG_ACTIVITY_CLEAR_TOP or
+                    Intent.FLAG_ACTIVITY_SINGLE_TOP,
+            )
             putExtra(OverlayActivity.EXTRA_TITLE, title)
             putExtra(OverlayActivity.EXTRA_MESSAGE, message)
             imageUrl?.let { putExtra(OverlayActivity.EXTRA_IMAGE_URL, it) }

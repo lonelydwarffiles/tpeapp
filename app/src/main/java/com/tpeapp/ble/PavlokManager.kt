@@ -90,6 +90,9 @@ object PavlokManager {
     private const val REPEAT_BASE: Int = 0x80
     private const val VIBE_BEEP_CONST: Int = 0x0C
     private const val LEGACY_TIME_BYTE: Int = 0xFA
+    private const val LEGACY_CMD_ZAP: Int = 0x04
+    private const val LEGACY_CMD_VIBRATE: Int = 0x01
+    private const val LEGACY_CMD_BEEP: Int = 0x02
     private val PAVLOK_NAME_HINTS = listOf("pavlok")
 
     // ------------------------------------------------------------------
@@ -211,6 +214,7 @@ object PavlokManager {
         sendVibrateOrBeep(
             characteristicHint = VIBRATE_CHAR_UUID,
             label = "vibrate",
+            legacyCommand = LEGACY_CMD_VIBRATE,
             intensity = intensity,
             durationMs = durationMs,
         )
@@ -225,6 +229,7 @@ object PavlokManager {
         sendVibrateOrBeep(
             characteristicHint = BEEP_CHAR_UUID,
             label = "beep",
+            legacyCommand = LEGACY_CMD_BEEP,
             intensity = intensity,
             durationMs = durationMs,
         )
@@ -282,6 +287,7 @@ object PavlokManager {
     private fun sendVibrateOrBeep(
         characteristicHint: UUID,
         label: String,
+        legacyCommand: Int,
         intensity: Int,
         durationMs: Int,
     ) {
@@ -311,7 +317,7 @@ object PavlokManager {
                 off,
             ),
         )
-        b.sendByteCommandToCharacteristic(
+        val wrotePavlokS = b.sendByteCommandToCharacteristic(
             characteristicUuids = listOf(
                 characteristicHint,
                 ALT_CHAR_156E2000,
@@ -319,9 +325,31 @@ object PavlokManager {
                 ALT_CHAR_156E5000,
                 ALT_CHAR_156E6000,
                 ALT_CHAR_156E7000,
-                TX_UUID,
             ),
             payload = payload,
+        )
+
+        if (wrotePavlokS) {
+            return
+        }
+
+        val legacyDurationUnit = (durationMs.coerceIn(0, 25_500) / 100).coerceIn(0, 255)
+        val legacyPayload = byteArrayOf(
+            legacyCommand.toByte(),
+            intensity.coerceIn(0, 255).toByte(),
+            legacyDurationUnit.toByte(),
+        )
+        Log.d(
+            TAG,
+            "Falling back to legacy Pavlok $label packet on TX_UUID: cmd=%d intensity=%d durationUnit=%d".format(
+                legacyCommand,
+                intensity.coerceIn(0, 255),
+                legacyDurationUnit,
+            ),
+        )
+        b.sendByteCommandToCharacteristic(
+            characteristicUuids = listOf(TX_UUID),
+            payload = legacyPayload,
         )
     }
 
@@ -341,17 +369,34 @@ object PavlokManager {
             TAG,
             "Sending Pavlok zap packet to $ZAP_CHAR_UUID: rr=%d ii=%d".format(repeats, safeIntensity),
         )
-        b.sendByteCommandToCharacteristic(
+        val wrotePavlokS = b.sendByteCommandToCharacteristic(
             characteristicUuids = listOf(
                 ZAP_CHAR_UUID,
-                ALT_CHAR_156E5000,
-                ALT_CHAR_156E6000,
-                ALT_CHAR_156E2000,
-                ALT_CHAR_156E4000,
-                ALT_CHAR_156E7000,
-                TX_UUID,
             ),
             payload = payload,
+        )
+
+        if (wrotePavlokS) {
+            return
+        }
+
+        val legacyDurationUnit = (durationMs.coerceIn(0, 25_500) / 100).coerceIn(1, 255)
+        val legacyPayload = byteArrayOf(
+            LEGACY_CMD_ZAP.toByte(),
+            intensity.coerceIn(0, 255).toByte(),
+            legacyDurationUnit.toByte(),
+        )
+        Log.d(
+            TAG,
+            "Falling back to legacy Pavlok zap packet on TX_UUID: cmd=%d intensity=%d durationUnit=%d".format(
+                LEGACY_CMD_ZAP,
+                intensity.coerceIn(0, 255),
+                legacyDurationUnit,
+            ),
+        )
+        b.sendByteCommandToCharacteristic(
+            characteristicUuids = listOf(TX_UUID),
+            payload = legacyPayload,
         )
     }
 

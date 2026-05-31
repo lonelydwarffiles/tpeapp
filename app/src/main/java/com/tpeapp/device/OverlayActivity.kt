@@ -55,10 +55,22 @@ class OverlayActivity : AppCompatActivity() {
         binding = ActivityOverlayBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
-        val openUrl         = intent.getStringExtra(EXTRA_OPEN_URL)
-        val dismissKeyguard = intent.getBooleanExtra(EXTRA_DISMISS_KEYGUARD, false)
-        val title           = intent.getStringExtra(EXTRA_TITLE)
-        val message         = intent.getStringExtra(EXTRA_MESSAGE)
+        binding.btnOverlayDismiss.setOnClickListener { finish() }
+
+        renderIntent(intent)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        renderIntent(intent)
+    }
+
+    private fun renderIntent(currentIntent: Intent) {
+        val openUrl = currentIntent.getStringExtra(EXTRA_OPEN_URL)
+        val dismissKeyguard = currentIntent.getBooleanExtra(EXTRA_DISMISS_KEYGUARD, false)
+        val title = currentIntent.getStringExtra(EXTRA_TITLE)
+        val message = currentIntent.getStringExtra(EXTRA_MESSAGE)
 
         if (openUrl != null) {
             launchUrl(openUrl)
@@ -76,8 +88,6 @@ class OverlayActivity : AppCompatActivity() {
         binding.tvOverlayMessage.text = message ?: ""
         binding.tvOverlayMessage.visibility =
             if (message.isNullOrBlank()) android.view.View.GONE else android.view.View.VISIBLE
-
-        binding.btnOverlayDismiss.setOnClickListener { finish() }
 
         Log.i(TAG, "OverlayActivity shown: title='$title' dismissKeyguard=$dismissKeyguard")
     }

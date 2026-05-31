@@ -431,9 +431,28 @@ object TextViewHook {
 
     private fun postProcessGrammar(input: String): String {
         var out = input
+
+        // Keep a few domain-specific corrections that are common in replacement maps.
         out = Regex("""\bthis mutt are\b""", RegexOption.IGNORE_CASE).replace(out, "this mutt is")
         out = Regex("""\bit are\b""", RegexOption.IGNORE_CASE).replace(out, "it is")
         out = Regex("""\bit\s+is\s+is\b""", RegexOption.IGNORE_CASE).replace(out, "it is")
+
+        // Normalize whitespace around punctuation and collapse accidental doubles.
+        out = Regex("""\s+([,.;:!?])""").replace(out, "$1")
+        out = Regex("""([,.;:!?])(?!\s|$)""").replace(out, "$1 ")
+        out = Regex("""\s{2,}""").replace(out, " ")
+
+        // Normalize standalone lowercase "i" pronoun.
+        out = Regex("""(?<=^|\s)i(?=\s|$|[,.!?;:])""").replace(out, "I")
+
+        // Capitalize sentence starts while preserving existing caps elsewhere.
+        out = Regex("""(^|[.!?]\s+)([a-z])""").replace(out) { m ->
+            val prefix = m.groupValues[1]
+            val letter = m.groupValues[2]
+            prefix + letter.uppercase()
+        }
+
+        out = out.trim()
         return out
     }
 

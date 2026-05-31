@@ -346,7 +346,10 @@ class _StartupGateState extends State<_StartupGate>
       onMessage: (_) {},
     );
     _webSocketService!.onCommandEvent = _onGlobalCommandEvent;
-    _mqttSub ??= MqttChannel.events.listen(_onGlobalCommandEvent);
+    // Native MQTT service already executes device commands directly.
+    // Listening to the bridge channel here can re-run side effects (for example TTS) twice.
+    _mqttSub?.cancel();
+    _mqttSub = null;
   }
 
   void _onGlobalCommandEvent(Map<String, String> data) {

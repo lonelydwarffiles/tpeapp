@@ -321,11 +321,11 @@ class BleManager(
     fun sendByteCommandToCharacteristic(
         characteristicUuids: List<UUID>,
         payload: ByteArray,
-    ) {
+    ): Boolean {
         val currentGatt = gatt
         if (currentGatt == null) {
             emit("write_failed", mapOf("reason" to "gatt_null"))
-            return
+            return false
         }
 
         var selected: BluetoothGattCharacteristic? = null
@@ -365,7 +365,7 @@ class BleManager(
                     "available_services" to currentGatt.services.map { it.uuid.toString() },
                 ),
             )
-            return
+            return false
         }
 
         if (selectedUuid != null) {
@@ -378,6 +378,7 @@ class BleManager(
             )
         }
         writeCharacteristic(selected, payload)
+        return true
     }
 
     /** True when GATT characteristic is ready for write commands. */

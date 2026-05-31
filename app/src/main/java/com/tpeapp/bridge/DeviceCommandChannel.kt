@@ -395,8 +395,17 @@ object DeviceCommandChannel {
                             ?: return@setMethodCallHandler result.error("INVALID", "text required", null)
                         val clipboard = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
                             ?: return@setMethodCallHandler result.error("UNAVAILABLE", "clipboard service missing", null)
-                        clipboard.setPrimaryClip(ClipData.newPlainText("Handler Clipboard", text))
-                        result.success(null)
+                        runCatching {
+                            clipboard.setPrimaryClip(ClipData.newPlainText("Handler Clipboard", text))
+                        }.onSuccess {
+                            result.success(null)
+                        }.onFailure { error ->
+                            result.error(
+                                "SET_CLIPBOARD_FAILED",
+                                error.message ?: "clipboard write failed",
+                                null,
+                            )
+                        }
                     }
                     "openHandlerChat" -> {
                         val threadId = call.argument<String>("threadId")

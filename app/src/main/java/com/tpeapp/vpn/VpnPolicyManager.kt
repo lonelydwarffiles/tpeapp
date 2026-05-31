@@ -40,7 +40,7 @@ object VpnPolicyManager {
      * Ensures VPN is enabled by default for local policy mode.
      *
      * Behavior:
-     * - If no desired state exists yet, default to connected.
+    * - If no desired state exists yet, default to disconnected.
      * - If desired state is explicitly disconnected, respect it.
      * - If permission is already granted, start the local tunnel automatically.
      * - If permission is missing, record pending user action but do not force a prompt
@@ -60,7 +60,7 @@ object VpnPolicyManager {
             changed = true
         }
         if (desiredState.isBlank()) {
-            desiredState = "connected"
+            desiredState = "disconnected"
             edit.putString(PREF_VPN_DESIRED_STATE, desiredState)
             changed = true
         }
@@ -220,7 +220,7 @@ object VpnPolicyManager {
             ?.trim()
             ?.lowercase()
             .takeUnless { it.isNullOrBlank() }
-            ?: "block_all"
+            ?: "off"
 
         val blocked = parseStringArray(policy, "blocked_packages", "blockedPackages")
         val allowed = parseStringArray(policy, "allowed_packages", "allowedPackages")
