@@ -179,6 +179,20 @@ class BleChannel {
     await _service.lovenseBattery();
   }
 
+  /// Reads the Lovense battery level from the standard BLE Battery Service.
+  static Future<void> lovenseReadBatteryLevel() async {
+    if (_useNativeLovense) {
+      await _invokeLovenseNative(
+        'lovense.readBatteryLevel',
+        () async {
+          await _service.refreshLovenseBatteryLevel();
+        },
+      );
+      return;
+    }
+    await _service.refreshLovenseBatteryLevel();
+  }
+
   // â”€â”€ Pavlok â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   /// Starts a BLE scan for a Pavlok wristband in range.
@@ -278,6 +292,20 @@ class BleChannel {
       return;
     }
     await _service.pavlokStopAll();
+  }
+
+  /// Reads the Pavlok battery level from the standard BLE Battery Service.
+  static Future<void> pavlokReadBatteryLevel() async {
+    if (_useNativePavlok) {
+      await _invokeNative(
+        'pavlok.readBatteryLevel',
+        () async {
+          await _service.refreshPavlokBatteryLevel();
+        },
+      );
+      return;
+    }
+    await _service.refreshPavlokBatteryLevel();
   }
 
   static Future<void> _invokeLovenseNative(

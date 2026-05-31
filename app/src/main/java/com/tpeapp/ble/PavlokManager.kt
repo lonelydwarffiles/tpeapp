@@ -230,6 +230,11 @@ object PavlokManager {
         zap(0, 0)
     }
 
+    /** Reads battery percentage from the standard BLE Battery Service if exposed. */
+    fun readBatteryLevel() {
+        ble?.readBatteryLevel()
+    }
+
     // ------------------------------------------------------------------
     //  DataChannel dispatch
     // ------------------------------------------------------------------

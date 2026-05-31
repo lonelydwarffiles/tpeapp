@@ -201,6 +201,11 @@ object LovenseManager {
     /** Queries the toy's battery level. The response arrives as a BLE RX notification. */
     fun queryBattery() = send("Battery;")
 
+    /** Reads battery percentage from the standard BLE Battery Service if exposed. */
+    fun readBatteryLevel() {
+        ble?.readBatteryLevel()
+    }
+
     // ------------------------------------------------------------------
     //  DataChannel dispatch
     // ------------------------------------------------------------------

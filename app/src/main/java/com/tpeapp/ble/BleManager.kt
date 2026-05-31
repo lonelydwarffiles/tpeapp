@@ -7,6 +7,7 @@ import android.bluetooth.BluetoothGatt
 import android.bluetooth.BluetoothGattCallback
 import android.bluetooth.BluetoothGattCharacteristic
 import android.bluetooth.BluetoothGattService
+import android.bluetooth.BluetoothGattCharacteristic.PROPERTY_READ
 import android.bluetooth.BluetoothGattCharacteristic.PROPERTY_WRITE
 import android.bluetooth.BluetoothGattCharacteristic.PROPERTY_WRITE_NO_RESPONSE
 import android.bluetooth.BluetoothManager
@@ -85,6 +86,11 @@ class BleManager(
          * Replace with the UUID of the specific characteristic to write commands to.
          */
         val CHARACTERISTIC_UUID: UUID = UUID.fromString("00002a37-0000-1000-8000-00805f9b34fb")
+
+        private val BATTERY_SERVICE_UUID: UUID =
+            UUID.fromString("0000180f-0000-1000-8000-00805f9b34fb")
+        private val BATTERY_LEVEL_CHAR_UUID: UUID =
+            UUID.fromString("00002a19-0000-1000-8000-00805f9b34fb")
 
         private const val DEFAULT_SCAN_TIMEOUT_MS = 10_000L
     }
@@ -371,6 +377,59 @@ class BleManager(
     /** True when GATT characteristic is ready for write commands. */
     fun isReady(): Boolean = targetCharacteristic != null
 
+    /** Reads battery percentage from the standard Battery Service (0x180F/0x2A19). */
+    fun readBatteryLevel() {
+        if (!hasPermission(Manifest.permission.BLUETOOTH_CONNECT)) {
+            emit("connect_permission_missing")
+            return
+        }
+
+        val currentGatt = gatt
+        if (currentGatt == null) {
+            emit("battery_read_failed", mapOf("reason" to "gatt_null"))
+            return
+        }
+
+        val batteryService = currentGatt.getService(BATTERY_SERVICE_UUID)
+        val batteryChar = batteryService?.getCharacteristic(BATTERY_LEVEL_CHAR_UUID)
+        if (batteryChar == null) {
+            emit(
+                "battery_unavailable",
+                mapOf(
+                    "service_uuid" to BATTERY_SERVICE_UUID.toString(),
+                    "characteristic_uuid" to BATTERY_LEVEL_CHAR_UUID.toString(),
+                ),
+            )
+            return
+        }
+
+        if ((batteryChar.properties and PROPERTY_READ) == 0) {
+            emit(
+                "battery_read_failed",
+                mapOf(
+                    "reason" to "characteristic_not_readable",
+                    "characteristic_uuid" to batteryChar.uuid.toString(),
+                ),
+            )
+            return
+        }
+
+        emit("battery_read_requested", mapOf("characteristic_uuid" to batteryChar.uuid.toString()))
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            val enqueued = currentGatt.readCharacteristic(batteryChar)
+            if (!enqueued) {
+                emit("battery_read_failed", mapOf("reason" to "enqueue_failed"))
+            }
+        } else {
+            @Suppress("DEPRECATION")
+            val enqueued = currentGatt.readCharacteristic(batteryChar)
+            if (!enqueued) {
+                emit("battery_read_failed", mapOf("reason" to "enqueue_failed"))
+            }
+        }
+    }
+
     /** Disconnects from the GATT server and releases all resources. */
     fun disconnect() {
         autoReconnectEnabled = false
@@ -622,6 +681,37 @@ class BleManager(
                 emit("write_failed", mapOf("status" to status, "characteristic_uuid" to characteristic.uuid.toString()))
             }
         }
+
+        override fun onCharacteristicRead(
+            gatt: BluetoothGatt,
+            characteristic: BluetoothGattCharacteristic,
+            status: Int,
+        ) {
+            if (characteristic.uuid != BATTERY_LEVEL_CHAR_UUID) {
+                return
+            }
+            if (status != BluetoothGatt.GATT_SUCCESS) {
+                emit("battery_read_failed", mapOf("status" to status))
+                return
+            }
+            tryEmitBatteryLevel(characteristic.value)
+        }
+
+        override fun onCharacteristicRead(
+            gatt: BluetoothGatt,
+            characteristic: BluetoothGattCharacteristic,
+            value: ByteArray,
+            status: Int,
+        ) {
+            if (characteristic.uuid != BATTERY_LEVEL_CHAR_UUID) {
+                return
+            }
+            if (status != BluetoothGatt.GATT_SUCCESS) {
+                emit("battery_read_failed", mapOf("status" to status))
+                return
+            }
+            tryEmitBatteryLevel(value)
+        }
     }
 
     // ------------------------------------------------------------------
@@ -800,6 +890,23 @@ class BleManager(
 
     private fun cancelReconnect() {
         mainHandler.removeCallbacks(reconnectRunnable)
+    }
+
+    private fun tryEmitBatteryLevel(bytes: ByteArray?) {
+        if (bytes == null || bytes.isEmpty()) {
+            emit("battery_read_failed", mapOf("reason" to "empty_value"))
+            return
+        }
+        val raw = bytes.first().toInt() and 0xFF
+        val batteryPct = raw.coerceIn(0, 100)
+        emit(
+            "battery_level",
+            mapOf(
+                "battery_pct" to batteryPct,
+                "raw" to raw,
+                "characteristic_uuid" to BATTERY_LEVEL_CHAR_UUID.toString(),
+            ),
+        )
     }
 
     /** Returns true if [permission] has been granted. */

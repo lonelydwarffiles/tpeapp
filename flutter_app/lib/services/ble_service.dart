@@ -94,6 +94,9 @@ class BleService extends ChangeNotifier {
   static final _firmwareUuid = Guid('00002a26-0000-1000-8000-00805f9b34fb');
   static final _hardwareUuid = Guid('00002a27-0000-1000-8000-00805f9b34fb');
   static final _softwareUuid = Guid('00002a28-0000-1000-8000-00805f9b34fb');
+  static final _batteryServiceUuid =
+      Guid('0000180f-0000-1000-8000-00805f9b34fb');
+  static final _batteryLevelUuid = Guid('00002a19-0000-1000-8000-00805f9b34fb');
 
   // ── State ────────────────────────────────────────────────────────────
   BluetoothDevice? _lovenseDevice;
@@ -103,6 +106,7 @@ class BleService extends ChangeNotifier {
   StreamSubscription<BluetoothConnectionState>? _lovenseConnSub;
   String? _lastLovenseId;
   Map<String, dynamic> _lovenseInfo = const {};
+  int? _lovenseBatteryPct;
 
   BluetoothDevice? _pavlokDevice;
   BluetoothCharacteristic? _pavlokTx;
@@ -111,6 +115,7 @@ class BleService extends ChangeNotifier {
   StreamSubscription<BluetoothConnectionState>? _pavlokConnSub;
   String? _lastPavlokId;
   Map<String, dynamic> _pavlokInfo = const {};
+  int? _pavlokBatteryPct;
 
   Timer? _autoRepairTimer;
   bool _autoRepairBusy = false;
@@ -124,6 +129,8 @@ class BleService extends ChangeNotifier {
   bool get pavlokConnected => _pavlokDevice != null && _pavlokTx != null;
   String? get lovenseError => _lovenseError;
   String? get pavlokError => _pavlokError;
+  int? get lovenseBatteryPct => _lovenseBatteryPct;
+  int? get pavlokBatteryPct => _pavlokBatteryPct;
   bool get autoRepairEnabled => _autoRepairEnabled;
   bool get blockManualDisconnect => _blockManualDisconnect;
 
@@ -131,11 +138,13 @@ class BleService extends ChangeNotifier {
         'lovense': {
           'connected': lovenseConnected,
           if (_lastLovenseId != null) 'device_id': _lastLovenseId,
+          if (_lovenseBatteryPct != null) 'battery_pct': _lovenseBatteryPct,
           ..._lovenseInfo,
         },
         'pavlok': {
           'connected': pavlokConnected,
           if (_lastPavlokId != null) 'device_id': _lastPavlokId,
+          if (_pavlokBatteryPct != null) 'battery_pct': _pavlokBatteryPct,
           ..._pavlokInfo,
         },
       };
@@ -205,6 +214,7 @@ class BleService extends ChangeNotifier {
   Future<void> _disconnectLovense({required bool clearSavedDevice}) async {
     _lastLovenseId = null;
     _lovenseInfo = const {};
+    _lovenseBatteryPct = null;
     await _lovenseConnSub?.cancel();
     _lovenseConnSub = null;
     await _lovenseDevice?.disconnect();
@@ -237,6 +247,31 @@ class BleService extends ChangeNotifier {
 
   Future<void> lovenseBattery() => _lovenseSend('Battery;');
 
+  Future<int?> refreshLovenseBatteryLevel() async {
+    final device = _lovenseDevice;
+    if (device == null) {
+      return null;
+    }
+    try {
+      final services = await device.discoverServices();
+      _lovenseBatteryPct = await _readBatteryPctFromServices(services);
+      if (_lovenseBatteryPct != null) {
+        _lovenseInfo = {
+          ..._lovenseInfo,
+          'battery_pct': _lovenseBatteryPct,
+        };
+      } else {
+        final next = Map<String, dynamic>.from(_lovenseInfo);
+        next.remove('battery_pct');
+        _lovenseInfo = next;
+      }
+      notifyListeners();
+      return _lovenseBatteryPct;
+    } catch (_) {
+      return null;
+    }
+  }
+
   Future<void> _connectLovense(BluetoothDevice device) async {
     try {
       await device.connect(license: License.nonprofit, autoConnect: false);
@@ -246,6 +281,13 @@ class BleService extends ChangeNotifier {
       _attachLovenseConnectionWatcher(device);
       final services = await device.discoverServices();
       _lovenseInfo = await _collectDeviceInfo(device, services, brand: 'lovense');
+      _lovenseBatteryPct = await _readBatteryPctFromServices(services);
+      if (_lovenseBatteryPct != null) {
+        _lovenseInfo = {
+          ..._lovenseInfo,
+          'battery_pct': _lovenseBatteryPct,
+        };
+      }
       _lovenseTxCandidates = _findLovenseTxCandidates(services);
       _lovenseTx =
           _lovenseTxCandidates.isNotEmpty ? _lovenseTxCandidates.first : null;
@@ -332,6 +374,7 @@ class BleService extends ChangeNotifier {
   Future<void> _disconnectPavlok({required bool clearSavedDevice}) async {
     _lastPavlokId = null;
     _pavlokInfo = const {};
+    _pavlokBatteryPct = null;
     await _pavlokConnSub?.cancel();
     _pavlokConnSub = null;
     await _pavlokDevice?.disconnect();
@@ -358,6 +401,31 @@ class BleService extends ChangeNotifier {
 
   Future<void> pavlokStopAll() => _pavlokSend(_cmdZap, 0, 0);
 
+  Future<int?> refreshPavlokBatteryLevel() async {
+    final device = _pavlokDevice;
+    if (device == null) {
+      return null;
+    }
+    try {
+      final services = await device.discoverServices();
+      _pavlokBatteryPct = await _readBatteryPctFromServices(services);
+      if (_pavlokBatteryPct != null) {
+        _pavlokInfo = {
+          ..._pavlokInfo,
+          'battery_pct': _pavlokBatteryPct,
+        };
+      } else {
+        final next = Map<String, dynamic>.from(_pavlokInfo);
+        next.remove('battery_pct');
+        _pavlokInfo = next;
+      }
+      notifyListeners();
+      return _pavlokBatteryPct;
+    } catch (_) {
+      return null;
+    }
+  }
+
   Future<void> _connectPavlok(BluetoothDevice device) async {
     try {
       await device.connect(license: License.nonprofit, autoConnect: false);
@@ -367,6 +435,13 @@ class BleService extends ChangeNotifier {
       _attachPavlokConnectionWatcher(device);
       final services = await device.discoverServices();
       _pavlokInfo = await _collectDeviceInfo(device, services, brand: 'pavlok');
+      _pavlokBatteryPct = await _readBatteryPctFromServices(services);
+      if (_pavlokBatteryPct != null) {
+        _pavlokInfo = {
+          ..._pavlokInfo,
+          'battery_pct': _pavlokBatteryPct,
+        };
+      }
       _pavlokTxCandidates = _findPavlokTxCandidates(services);
       _pavlokTx = _pavlokTxCandidates.isNotEmpty ? _pavlokTxCandidates.first : null;
       if (_pavlokTx != null) {
@@ -506,6 +581,7 @@ class BleService extends ChangeNotifier {
         _lovenseDevice = null;
         _lovenseTx = null;
         _lovenseTxCandidates = const [];
+        _lovenseBatteryPct = null;
         _lovenseError = 'Lovense disconnected. Auto-repair is retrying.';
         notifyListeners();
       }
@@ -519,6 +595,7 @@ class BleService extends ChangeNotifier {
         _pavlokDevice = null;
         _pavlokTx = null;
         _pavlokTxCandidates = const [];
+        _pavlokBatteryPct = null;
         _pavlokError = 'Pavlok disconnected. Auto-repair is retrying.';
         notifyListeners();
       }
@@ -574,6 +651,37 @@ class BleService extends ChangeNotifier {
     } catch (_) {
       return null;
     }
+  }
+
+  Future<int?> _readBatteryPctFromServices(List<BluetoothService> services) async {
+    for (final service in services) {
+      if (service.serviceUuid != _batteryServiceUuid) {
+        continue;
+      }
+      for (final char in service.characteristics) {
+        if (char.characteristicUuid != _batteryLevelUuid) {
+          continue;
+        }
+        try {
+          if (!char.properties.read) {
+            return null;
+          }
+          final bytes = await char.read();
+          return _parseBatteryPct(bytes);
+        } catch (_) {
+          return null;
+        }
+      }
+    }
+    return null;
+  }
+
+  int? _parseBatteryPct(List<int> bytes) {
+    if (bytes.isEmpty) {
+      return null;
+    }
+    // Battery Level characteristic is a single uint8 (0-100).
+    return bytes.first.clamp(0, 100).toInt();
   }
 
   Future<void> _persistSavedIds() async {

@@ -6,10 +6,12 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../channels/ble_channel.dart';
 import '../channels/device_command_channel.dart';
 import '../channels/filter_service_channel.dart';
 import '../channels/mqtt_channel.dart';
 import '../services/api_service.dart';
+import '../services/ble_service.dart';
 import '../services/kiosk_task_controller.dart';
 import '../services/remote_command_service.dart';
 import '../services/websocket_service.dart';
@@ -30,17 +32,25 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   static const String _fallbackLiveEndpoint = 'https://mochii.live';
+  static const EventChannel _nativeBleEvents =
+      EventChannel('com.hound.controller/ble_events');
 
   String _enrollmentState = 'enrolling';
   String _enrollmentError = '';
 
   StreamSubscription<Map<String, String>>? _mqttSub;
+  StreamSubscription<dynamic>? _nativeBleSub;
   Timer? _enrollmentStatusTimer;
+  Timer? _toyStatusTimer;
   RemoteCommandService? _remoteCommands;
   ApiService? _api;
   WebSocketService? _webSocketService;
   bool _homeOpenedTracked = false;
   String _lastConnectedEndpoint = '';
+  bool _nativeLovenseConnected = false;
+  bool _nativePavlokConnected = false;
+  int? _nativeLovenseBatteryPct;
+  int? _nativePavlokBatteryPct;
 
   @override
   void didChangeDependencies() {
@@ -75,9 +85,21 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _mqttSub = MqttChannel.events.listen(_onMqttEvent);
+    _nativeBleSub = _nativeBleEvents.receiveBroadcastStream().listen(
+      _onNativeBleEvent,
+      onError: (_) {
+        // Optional stream; ignore when native channel is unavailable.
+      },
+    );
     _refreshEnrollmentState();
     _enrollmentStatusTimer = Timer.periodic(const Duration(seconds: 5), (_) {
       _refreshEnrollmentState();
+    });
+    _toyStatusTimer = Timer.periodic(const Duration(seconds: 30), (_) {
+      unawaited(_refreshToyStatus());
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      unawaited(_refreshToyStatus());
     });
   }
 
@@ -85,10 +107,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _mqttSub?.cancel();
+    _nativeBleSub?.cancel();
     if (_webSocketService != null) {
       _webSocketService!.onCommandEvent = null;
     }
     _enrollmentStatusTimer?.cancel();
+    _toyStatusTimer?.cancel();
     super.dispose();
   }
 
@@ -102,6 +126,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         _lastConnectedEndpoint = endpoint;
         unawaited(_webSocketService?.ensureConnected() ?? Future<void>.value());
       }
+      unawaited(_refreshToyStatus());
     }
 
     unawaited(
@@ -172,6 +197,99 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     if (commands != null) {
       unawaited(commands.handleEvent(data));
     }
+  }
+
+  void _onNativeBleEvent(dynamic raw) {
+    if (!mounted || raw is! Map) return;
+    final event = Map<Object?, Object?>.from(raw);
+    final device = (event['device'] ?? '').toString();
+    final type = (event['type'] ?? '').toString();
+    final batteryPct = event['battery_pct'] is num
+        ? (event['battery_pct'] as num).toInt().clamp(0, 100)
+        : null;
+
+    if (device == 'lovense') {
+      if (type == 'ready' || type == 'connected') {
+        setState(() => _nativeLovenseConnected = true);
+      } else if (type == 'disconnected') {
+        setState(() {
+          _nativeLovenseConnected = false;
+          _nativeLovenseBatteryPct = null;
+        });
+      }
+      if (batteryPct != null) {
+        setState(() => _nativeLovenseBatteryPct = batteryPct);
+      }
+      return;
+    }
+
+    if (device == 'pavlok') {
+      if (type == 'ready' || type == 'connected') {
+        setState(() => _nativePavlokConnected = true);
+      } else if (type == 'disconnected') {
+        setState(() {
+          _nativePavlokConnected = false;
+          _nativePavlokBatteryPct = null;
+        });
+      }
+      if (batteryPct != null) {
+        setState(() => _nativePavlokBatteryPct = batteryPct);
+      }
+    }
+  }
+
+  Future<void> _refreshToyStatus() async {
+    if (!mounted) return;
+    final ble = context.read<BleService>();
+
+    bool lovenseConnected = _nativeLovenseConnected;
+    bool pavlokConnected = _nativePavlokConnected;
+
+    try {
+      lovenseConnected = await BleChannel.lovenseIsConnectedNative();
+    } catch (_) {
+      // Keep existing value when native bridge is unavailable.
+    }
+    try {
+      pavlokConnected = await BleChannel.pavlokIsConnectedNative();
+    } catch (_) {
+      // Keep existing value when native bridge is unavailable.
+    }
+
+    if (!mounted) return;
+    setState(() {
+      _nativeLovenseConnected = lovenseConnected;
+      _nativePavlokConnected = pavlokConnected;
+      if (!lovenseConnected) {
+        _nativeLovenseBatteryPct = null;
+      }
+      if (!pavlokConnected) {
+        _nativePavlokBatteryPct = null;
+      }
+    });
+
+    if (lovenseConnected) {
+      try {
+        await BleChannel.lovenseReadBatteryLevel();
+      } catch (_) {}
+    }
+    if (pavlokConnected) {
+      try {
+        await BleChannel.pavlokReadBatteryLevel();
+      } catch (_) {}
+    }
+
+    // Keep direct-BLE values fresh as fallback when native path is off.
+    unawaited(ble.refreshLovenseBatteryLevel());
+    unawaited(ble.refreshPavlokBatteryLevel());
+  }
+
+  Future<void> _refreshToyStatusFromCard() async {
+    await _refreshToyStatus();
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Toy battery/status refreshed.')),
+    );
   }
 
   Future<void> _openCheckIn() async {
@@ -316,6 +434,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
+    final ble = context.watch<BleService>();
+    final lovenseConnected = _nativeLovenseConnected || ble.lovenseConnected;
+    final pavlokConnected = _nativePavlokConnected || ble.pavlokConnected;
+    final lovenseBattery = _nativeLovenseBatteryPct ?? ble.lovenseBatteryPct;
+    final pavlokBattery = _nativePavlokBatteryPct ?? ble.pavlokBatteryPct;
     final width = MediaQuery.sizeOf(context).width;
     final crossAxisCount = width >= 900
         ? 4
@@ -406,6 +529,46 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 ),
               ),
             ),
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 6, 16, 4),
+              child: Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          const Icon(Icons.battery_charging_full_outlined),
+                          const SizedBox(width: 8),
+                          Text(
+                            'Toy Battery Levels',
+                            style: Theme.of(context).textTheme.titleSmall,
+                          ),
+                          const Spacer(),
+                          TextButton(
+                            onPressed: _refreshToyStatusFromCard,
+                            child: const Text('Refresh'),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        'Lovense: ${lovenseConnected ? 'Paired' : 'Unpaired'}'
+                        '${lovenseBattery == null ? ' • Battery: Unknown' : ' • Battery: ${lovenseBattery}%'}',
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        'Pavlok: ${pavlokConnected ? 'Paired' : 'Unpaired'}'
+                        '${pavlokBattery == null ? ' • Battery: Unknown' : ' • Battery: ${pavlokBattery}%'}',
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
           const SliverToBoxAdapter(
             child: Padding(
               padding: EdgeInsets.fromLTRB(16, 14, 16, 8),

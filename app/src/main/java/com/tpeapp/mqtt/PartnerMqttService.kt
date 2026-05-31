@@ -67,6 +67,7 @@ import org.eclipse.paho.client.mqttv3.MqttMessage
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.UUID
+import kotlin.random.Random
 
 /**
  * Handles MQTT command payloads sent by the Accountability Partner to remotely
@@ -137,6 +138,11 @@ class PartnerMqttService : Service() {
 
         private const val RULE_CHANNEL_ID        = "tpe_rule_reminder"
         private const val RULE_NOTIF_ID_BASE     = 7001
+
+        private const val BUZZ_INTER_PULSE_DELAY_MIN_MS = 500L
+        private const val BUZZ_INTER_PULSE_DELAY_MAX_MS = 2_300L
+        private const val BUZZ_STRENGTH_MIN_PERCENT = 50
+        private const val BUZZ_STRENGTH_MAX_PERCENT = 100
     }
 
     private val reconnectHandler = Handler(Looper.getMainLooper())
@@ -689,14 +695,27 @@ class PartnerMqttService : Service() {
      * Supported `toy_command` values: `vibrate`, `rotate`, `pump`, `stop`, `battery`.
      */
     private fun handleLovenseCommand(data: Map<String, String>) {
-        val rawCmd = data["toy_command"]?.lowercase() ?: return
-        val cmd = when (rawCmd) {
-            "pulse", "wave", "tease" -> "vibrate"
+        val rawCmd = data["toy_command"]?.lowercase()?.trim() ?: return
+        val cmd = when {
+            rawCmd.contains("buzz") -> "buzz"
+            rawCmd == "pulse" || rawCmd == "wave" || rawCmd == "tease" -> "vibrate"
             else -> rawCmd
         }
         val level = data["toy_level"]?.toIntOrNull()?.coerceIn(0, 20) ?: 0
         LovenseManager.init(applicationContext)
         when (cmd) {
+            "buzz"    -> {
+                val seconds = extractSecondsFromCommand(rawCmd)
+                    ?: data["buzz_seconds"]?.toIntOrNull()
+                    ?: 1
+                val loop = rawCmd.contains("loop") ||
+                    (data["loop"]?.equals("true", ignoreCase = true) == true)
+                val repeatCount = if (loop) seconds else 1
+                runLovenseBuzzPattern(
+                    seconds = seconds.coerceIn(1, 300),
+                    repeatCount = repeatCount.coerceIn(1, 300),
+                )
+            }
             "vibrate" -> LovenseManager.vibrate(level)
             "rotate"  -> LovenseManager.rotate(level)
             "pump"    -> LovenseManager.pump(level.coerceIn(0, 3))
@@ -711,6 +730,46 @@ class PartnerMqttService : Service() {
             if (cmd != "stop" && cmd != "battery") " (level $level)" else ""
         showSettingsChangedNotification(details)
         Log.i(TAG, "Lovense FCM command handled: cmd=$cmd level=$level")
+    }
+
+    private fun runLovenseBuzzPattern(seconds: Int, repeatCount: Int) {
+        fun runPulse(remaining: Int) {
+            if (remaining <= 0) return
+
+            val strengthPercent = Random.nextInt(
+                from = BUZZ_STRENGTH_MIN_PERCENT,
+                until = BUZZ_STRENGTH_MAX_PERCENT + 1,
+            )
+            val lovenseLevel = ((strengthPercent / 100.0) * 20.0)
+                .toInt()
+                .coerceIn(10, 20)
+            LovenseManager.vibrate(lovenseLevel)
+
+            reconnectHandler.postDelayed({
+                LovenseManager.stopAll()
+                if (remaining - 1 <= 0) return@postDelayed
+                val gapMs = Random.nextLong(
+                    from = BUZZ_INTER_PULSE_DELAY_MIN_MS,
+                    until = BUZZ_INTER_PULSE_DELAY_MAX_MS + 1,
+                )
+                reconnectHandler.postDelayed({ runPulse(remaining - 1) }, gapMs)
+            }, seconds * 1_000L)
+        }
+
+        runPulse(repeatCount)
+    }
+
+    private fun extractSecondsFromCommand(rawCmd: String): Int? {
+        val tokens = Regex("""[a-z0-9%]+""")
+            .findAll(rawCmd.lowercase())
+            .map { it.value }
+            .toList()
+        for (token in tokens) {
+            if (!Regex("""^\d{1,3}s?$""").matches(token)) continue
+            val normalized = if (token.endsWith("s")) token.dropLast(1) else token
+            return normalized.toIntOrNull()
+        }
+        return null
     }
 
     /**

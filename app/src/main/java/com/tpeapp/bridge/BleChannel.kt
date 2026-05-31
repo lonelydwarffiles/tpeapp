@@ -26,6 +26,7 @@ import io.flutter.plugin.common.MethodChannel
  *  - `lovense.pump`        (level: Int)     → air-pump 0–3
  *  - `lovense.stopAll`                      → stops all functions
  *  - `lovense.battery`                      → requests battery level (response via notification)
+ *  - `lovense.readBatteryLevel`             → reads battery level from standard BLE Battery Service
  *
  * ## Pavlok methods
  *  - `pavlok.scan`                                           → starts BLE scan for Pavlok
@@ -35,6 +36,7 @@ import io.flutter.plugin.common.MethodChannel
  *  - `pavlok.vibrate`  (intensity: Int, durationMs: Int)     → wristband vibration
  *  - `pavlok.beep`     (intensity: Int, durationMs: Int)     → audible beep
  *  - `pavlok.stopAll`                                        → stops all stimulation
+ *  - `pavlok.readBatteryLevel`                                → reads battery level from standard BLE Battery Service
  *
  * The underlying [LovenseManager] and [PavlokManager] singletons are also used
  * by [com.tpeapp.consequence.ConsequenceDispatcher] for automated punishment /
@@ -75,6 +77,7 @@ object BleChannel {
                     }
                     "lovense.stopAll"    -> { LovenseManager.stopAll();      result.success(null) }
                     "lovense.battery"    -> { LovenseManager.queryBattery(); result.success(null) }
+                    "lovense.readBatteryLevel" -> { LovenseManager.readBatteryLevel(); result.success(null) }
                     "lovense.scanCandidates" -> {
                         val timeoutMs = (call.argument<Int>("timeoutMs") ?: 8000).toLong()
                         LovenseManager.scanCandidates(timeoutMs) { candidates ->
@@ -117,6 +120,7 @@ object BleChannel {
                         result.success(null)
                     }
                     "pavlok.stopAll"     -> { PavlokManager.stopAll();       result.success(null) }
+                    "pavlok.readBatteryLevel" -> { PavlokManager.readBatteryLevel(); result.success(null) }
                     "pavlok.scanCandidates" -> {
                         val timeoutMs = (call.argument<Int>("timeoutMs") ?: 8000).toLong()
                         PavlokManager.scanCandidates(timeoutMs) { candidates ->

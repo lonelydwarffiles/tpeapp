@@ -1,13 +1,17 @@
 package com.tpeapp.mindful
 
 import android.accessibilityservice.AccessibilityService
+import android.Manifest
 import android.content.SharedPreferences
+import android.content.pm.PackageManager
+import android.provider.ContactsContract
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
+import androidx.core.content.ContextCompat
 import androidx.preference.PreferenceManager
 import com.tpeapp.consequence.ConsequenceDispatcher
 import com.tpeapp.mindful.HonorificManager
@@ -16,6 +20,7 @@ import com.tpeapp.service.FilterService
 import com.tpeapp.webhook.WebhookManager
 import org.json.JSONArray
 import org.json.JSONObject
+import kotlin.random.Random
 
 /**
  * ToneEnforcementService — an [AccessibilityService] that monitors text-field
@@ -44,6 +49,11 @@ import org.json.JSONObject
  * switches to a different EditText node or a different app package.
  */
 class ToneEnforcementService : AccessibilityService() {
+
+    private enum class GrammarProfile {
+        STRICT,
+        LIGHT,
+    }
 
     companion object {
         private const val TAG = "ToneEnforcementService"
@@ -82,6 +92,13 @@ class ToneEnforcementService : AccessibilityService() {
         /** Max age (ms) for tracking recent replacements to prevent re-application. */
         private const val RECENT_REPLACEMENT_WINDOW_MS = 5_000L
 
+        /** Contact snapshot refresh interval used by contact-based exemptions. */
+        private const val CONTACT_CACHE_TTL_MS = 60_000L
+
+        /** Chance range for optional negation->affirmation rewrites. */
+        private const val AFFIRMATION_REWRITE_MIN_CHANCE = 0.10
+        private const val AFFIRMATION_REWRITE_MAX_CHANCE = 0.20
+
         /**
          * Grammar correction rules as (pattern → replacement) pairs.
          * Applied AFTER text dictionary replacements to fix agreement errors.
@@ -89,14 +106,74 @@ class ToneEnforcementService : AccessibilityService() {
         private val GRAMMAR_RULES = listOf(
             // Subject-verb agreement
             Regex("""\bthis mutt are\b""", RegexOption.IGNORE_CASE) to "this mutt is",
+            Regex("""\bthis mutt were\b""", RegexOption.IGNORE_CASE) to "this mutt was",
+            Regex("""\bthis mutt have\b""", RegexOption.IGNORE_CASE) to "this mutt has",
+            Regex("""\bthis mutt do\b""", RegexOption.IGNORE_CASE) to "this mutt does",
+            Regex("""\bthis mutt don't\b|\bthis mutt do not\b""", RegexOption.IGNORE_CASE) to "this mutt does not",
+            Regex("""\bthis mutt can't\b|\bthis mutt cannot\b""", RegexOption.IGNORE_CASE) to "this mutt is unable to",
+            Regex("""\bthis mutt won't\b|\bthis mutt will not\b""", RegexOption.IGNORE_CASE) to "this mutt will not",
             Regex("""\bit are\b""", RegexOption.IGNORE_CASE) to "it is",
+            Regex("""\bit were\b""", RegexOption.IGNORE_CASE) to "it was",
+            Regex("""\bit have\b""", RegexOption.IGNORE_CASE) to "it has",
+            Regex("""\bit do\b""", RegexOption.IGNORE_CASE) to "it does",
+            Regex("""\bit don't\b|\bit do not\b""", RegexOption.IGNORE_CASE) to "it does not",
+            Regex("""\bit can't\b|\bit cannot\b""", RegexOption.IGNORE_CASE) to "it is unable to",
+            Regex("""\bpuppy are\b""", RegexOption.IGNORE_CASE) to "puppy is",
+            Regex("""\bpuppy were\b""", RegexOption.IGNORE_CASE) to "puppy was",
+            Regex("""\bpuppy have\b""", RegexOption.IGNORE_CASE) to "puppy has",
+            Regex("""\bpuppy do\b""", RegexOption.IGNORE_CASE) to "puppy does",
+            Regex("""\bpuppy don't\b|\bpuppy do not\b""", RegexOption.IGNORE_CASE) to "puppy does not",
+            Regex("""\bpuppy can't\b|\bpuppy cannot\b""", RegexOption.IGNORE_CASE) to "puppy is unable to",
+            Regex("""\bpup are\b""", RegexOption.IGNORE_CASE) to "pup is",
+            Regex("""\bpup were\b""", RegexOption.IGNORE_CASE) to "pup was",
+            Regex("""\bpup have\b""", RegexOption.IGNORE_CASE) to "pup has",
+            Regex("""\bpup do\b""", RegexOption.IGNORE_CASE) to "pup does",
+            Regex("""\bpup don't\b|\bpup do not\b""", RegexOption.IGNORE_CASE) to "pup does not",
+            Regex("""\bpup can't\b|\bpup cannot\b""", RegexOption.IGNORE_CASE) to "pup is unable to",
+            Regex("""\bthis bitch are\b""", RegexOption.IGNORE_CASE) to "this bitch is",
+            Regex("""\bthis bitch were\b""", RegexOption.IGNORE_CASE) to "this bitch was",
+            Regex("""\bthis bitch have\b""", RegexOption.IGNORE_CASE) to "this bitch has",
+            Regex("""\bthis bitch do\b""", RegexOption.IGNORE_CASE) to "this bitch does",
+            Regex("""\bthis bitch don't\b|\bthis bitch do not\b""", RegexOption.IGNORE_CASE) to "this bitch does not",
+            Regex("""\bthis bitch can't\b|\bthis bitch cannot\b""", RegexOption.IGNORE_CASE) to "this bitch is unable to",
+            // Singular-subject contraction/auxiliary edge cases
+            Regex("""\b(it|puppy|pup|this mutt|this bitch) aren't\b""", RegexOption.IGNORE_CASE) to "$1 is not",
+            Regex("""\b(it|puppy|pup|this mutt|this bitch) ain't\b""", RegexOption.IGNORE_CASE) to "$1 is not",
+            Regex("""\b(it|puppy|pup|this mutt|this bitch) haven't\b""", RegexOption.IGNORE_CASE) to "$1 has not",
+            Regex("""\b(it|puppy|pup|this mutt|this bitch) were not\b""", RegexOption.IGNORE_CASE) to "$1 was not",
+            Regex("""\b(it|puppy|pup|this mutt|this bitch)\s+(?:don't|do not)\s+have\b""", RegexOption.IGNORE_CASE) to "$1 does not have",
+            // Common malformed contractions
+            Regex("""\bits dont\b""", RegexOption.IGNORE_CASE) to "it does not",
+            Regex("""\bits doesnt\b""", RegexOption.IGNORE_CASE) to "it does not",
+            Regex("""\bits cant\b""", RegexOption.IGNORE_CASE) to "it is unable to",
+            Regex("""\bits wont\b""", RegexOption.IGNORE_CASE) to "it will not",
             // Double verbs
             Regex("""\b(is|are|was|were)\s+\1\b""", RegexOption.IGNORE_CASE) to "$1",
+            Regex("""\b(has|have|had)\s+\1\b""", RegexOption.IGNORE_CASE) to "$1",
+            Regex("""\b(do|does|did)\s+\1\b""", RegexOption.IGNORE_CASE) to "$1",
+            Regex("""\b(not)\s+\1\b""", RegexOption.IGNORE_CASE) to "$1",
             // Double common words
-            Regex("""\b(the|a|an|and|or|but)\s+\1\b""", RegexOption.IGNORE_CASE) to "$1"
+            Regex("""\b(the|a|an|and|or|but)\s+\1\b""", RegexOption.IGNORE_CASE) to "$1",
+            Regex("""\b(please)\s+\1\b""", RegexOption.IGNORE_CASE) to "$1",
+            // Common cleanup from aggressive replacements
+            Regex("""\bits's\b""", RegexOption.IGNORE_CASE) to "its",
+            Regex("""\b(its)\s+is\b""", RegexOption.IGNORE_CASE) to "it is",
+            Regex("""\b(it|puppy|pup|this mutt|this bitch)\s+is\s+not\s+not\b""", RegexOption.IGNORE_CASE) to "$1 is not",
+            Regex("""\b(it|puppy|pup|this mutt|this bitch)\s+is\s+unable to\s+unable to\b""", RegexOption.IGNORE_CASE) to "$1 is unable to"
         )
         private val DISCORD_TWITTER_URL_REGEX = Regex(
             """(?i)\bhttps?://(?:www\.|mobile\.)?(?:twitter\.com|x\.com)(/[^\s<>'\"]*)?"""
+        )
+
+        private val NEGATION_AFFIRMATION_RULES = listOf(
+            Regex("""(?i)\bno\b""") to listOf("yes", "yes please", "okay", "okay yes"),
+            Regex("""(?i)\bnope\b""") to listOf("yes", "yes please", "okay"),
+            Regex("""(?i)\bnah\b""") to listOf("yes", "yes please", "okay"),
+            Regex("""(?i)\bno thanks\b""") to listOf("yes please", "yes please thank you", "okay yes please"),
+            Regex("""(?i)\bnot now\b""") to listOf("yes now", "yes please now", "okay now"),
+            Regex("""(?i)\bdon't\b|\bdo not\b""") to listOf("do", "will", "yes"),
+            Regex("""(?i)\bcan't\b|\bcannot\b""") to listOf("can", "can now", "can do"),
+            Regex("""(?i)\bwon't\b|\bwill not\b""") to listOf("will", "will now", "yes"),
         )
 
             /**
@@ -266,6 +343,13 @@ class ToneEnforcementService : AccessibilityService() {
      */
     private val sessionReplacementChoices = mutableMapOf<String, String>()
 
+    /** Per-session decision cache for whether a negation pattern should flip. */
+    private val sessionNegationFlipDecisions = mutableMapOf<String, Boolean>()
+
+    /** Stable per-session probability for negation->affirmation rewrites. */
+    private var sessionAffirmationChance =
+        Random.nextDouble(AFFIRMATION_REWRITE_MIN_CHANCE, AFFIRMATION_REWRITE_MAX_CHANCE)
+
         /**
          * Tracks the chosen persona for self-reference pronouns this session.
          * Once a self-reference pattern is matched, a persona is selected and
@@ -279,6 +363,19 @@ class ToneEnforcementService : AccessibilityService() {
 
     private var lastFocusedNodeId: Int = -1
     private var lastPackageName: String? = null
+    private var lastWindowContextPackage: String? = null
+    private var lastWindowContextText: String? = null
+
+    private data class ContactSnapshot(
+        val loadedAtMs: Long,
+        val names: Set<String>,
+        val phoneKeys: Set<String>,
+    )
+
+    @Volatile
+    private var cachedContactSnapshot: ContactSnapshot? = null
+
+    private val phoneTokenRegex = Regex("""\+?[\d()\-\s]{7,}\d""")
 
     /** Tracks the last package for which a PTS request was already fired this session. */
     private var lastPtsRequestedPackage: String? = null
@@ -337,6 +434,8 @@ class ToneEnforcementService : AccessibilityService() {
      */
     private fun handleWindowStateChanged(event: AccessibilityEvent) {
         val pkg = event.packageName?.toString() ?: return
+        lastWindowContextPackage = pkg
+        lastWindowContextText = buildWindowContextText(event)
         if (!PermissionToSpeakManager.isEnabled(applicationContext)) return
 
         val isMessagingApp = MESSAGING_PACKAGE_KEYWORDS.any { pkg.contains(it, ignoreCase = true) }
@@ -388,6 +487,11 @@ class ToneEnforcementService : AccessibilityService() {
                 return
             }
 
+            if (isTextCorrectionExemptForCurrentContact(event, currentPackage, currentText)) {
+                Log.d(TAG, "Text correction skipped for exempt contact context")
+                return
+            }
+
             // ---- Contextual honorific rewrite --------------------------------------
             HonorificManager
                 .rewriteForContext(applicationContext, currentPackage, currentText)
@@ -411,15 +515,23 @@ class ToneEnforcementService : AccessibilityService() {
             if (rewritten != currentText) {
                 Log.i(TAG, "Text-replacement dictionary matched — applying rewrite")
                 lastReplacementAcceptedAt = System.currentTimeMillis()
-                applyReplacement(node, rewritten)
+                applyReplacement(node, ensureTrailingSpace(rewritten))
                 return
             }
 
             // ---- Grammar correction pass --------------------------------------------------
-            val grammarCorrected = postProcessGrammar(currentText)
+            val grammarCorrected = postProcessGrammar(currentPackage, currentText)
             if (grammarCorrected != currentText) {
                 Log.i(TAG, "Grammar error detected and corrected")
                 applyReplacement(node, grammarCorrected)
+                return
+            }
+
+            // ---- Optional negation -> affirmation pass ---------------------------
+            val affirmativeRewrite = applyOptionalAffirmativeRewrite(currentText)
+            if (affirmativeRewrite != currentText) {
+                Log.i(TAG, "Optional affirmation rewrite applied")
+                applyReplacement(node, affirmativeRewrite)
                 return
             }
 
@@ -668,9 +780,13 @@ class ToneEnforcementService : AccessibilityService() {
      * 
      * Skips any rules the user has explicitly bypassed during this session.
      */
-    private fun postProcessGrammar(text: String): String {
+    private fun postProcessGrammar(packageName: String?, text: String): String {
+        val profile = grammarProfileForPackage(packageName)
         var corrected = text
         for ((pattern, replacement) in GRAMMAR_RULES) {
+                if (profile == GrammarProfile.LIGHT && !isLightGrammarRule(pattern.pattern)) {
+                    continue
+                }
                 val ruleId = pattern.pattern  // Use the regex pattern string as ID
                 if (grammarBypassRules.contains(ruleId)) {
                     Log.d(TAG, "Skipping bypassed grammar rule: $ruleId")
@@ -686,7 +802,192 @@ class ToneEnforcementService : AccessibilityService() {
                     Log.w(TAG, "Grammar rule failed: $ruleId", err)
             }
         }
+        corrected = normalizeGrammarSurfaceText(corrected)
         return corrected
+    }
+
+    private fun grammarProfileForPackage(packageName: String?): GrammarProfile {
+        val pkg = packageName?.lowercase().orEmpty()
+        if (pkg.isBlank()) return GrammarProfile.STRICT
+
+        val strictKeywords = listOf(
+            "sms", "message", "messaging", "whatsapp", "telegram", "signal", "messenger",
+            "discord", "slack", "teams",
+        )
+        if (strictKeywords.any { pkg.contains(it) }) {
+            return GrammarProfile.STRICT
+        }
+
+        val lightKeywords = listOf(
+            "notes", "keep", "docs", "office", "word", "onenote",
+            "chrome", "firefox", "edge", "brave",
+            "search", "launcher",
+        )
+        if (lightKeywords.any { pkg.contains(it) }) {
+            return GrammarProfile.LIGHT
+        }
+
+        return GrammarProfile.STRICT
+    }
+
+    private fun isLightGrammarRule(rulePattern: String): Boolean {
+        val lightRuleMarkers = listOf(
+            "\\b(is|are|was|were)\\s+\\1\\b",
+            "\\b(has|have|had)\\s+\\1\\b",
+            "\\b(do|does|did)\\s+\\1\\b",
+            "\\b(not)\\s+\\1\\b",
+            "\\b(the|a|an|and|or|but)\\s+\\1\\b",
+            "\\b(please)\\s+\\1\\b",
+            "its's",
+            "unable to\\s+unable to",
+        )
+        return lightRuleMarkers.any { marker -> rulePattern.contains(marker) }
+    }
+
+    private fun normalizeGrammarSurfaceText(text: String): String {
+        var normalized = text
+        // Collapse runaway spacing while preserving intentional trailing space behavior elsewhere.
+        normalized = normalized.replace(Regex("""[ \t]{2,}"""), " ")
+        // Remove spaces before punctuation: "word ," -> "word,"
+        normalized = normalized.replace(Regex("""\s+([,.;!?:])"""), "$1")
+        // Avoid accidental duplicate punctuation bursts from chained rewrites.
+        normalized = normalized.replace(Regex("""([,.;!?:])\1+"""), "$1")
+        return normalized
+    }
+
+    private fun isTextCorrectionExemptForCurrentContact(
+        event: AccessibilityEvent,
+        packageName: String?,
+        currentText: String,
+    ): Boolean {
+        val snapshot = loadPhoneContactSnapshot()
+        if (snapshot.names.isEmpty() && snapshot.phoneKeys.isEmpty()) return false
+
+        val contextParts = mutableListOf<String>()
+        if (lastWindowContextPackage == packageName) {
+            lastWindowContextText?.let { if (it.isNotBlank()) contextParts.add(it) }
+        }
+        event.contentDescription?.toString()?.let { if (it.isNotBlank()) contextParts.add(it) }
+        event.text
+            ?.mapNotNull { it?.toString() }
+            ?.forEach { text ->
+                if (text.isBlank()) return@forEach
+                if (text == currentText) return@forEach
+                contextParts.add(text)
+            }
+
+        if (contextParts.isEmpty()) return false
+        val haystack = contextParts.joinToString(" ").lowercase().trim()
+
+        val hasNameMatch = snapshot.names.any { name ->
+            name.length >= 3 && containsNameInContext(haystack, name)
+        }
+        if (hasNameMatch) return true
+
+        val numberTokens = phoneTokenRegex.findAll(haystack)
+            .mapNotNull { match ->
+                normalizePhoneDigits(match.value)
+                    ?.takeIf { it.length >= 7 }
+            }
+            .toList()
+        return numberTokens.any { digits ->
+            val keys = mutableSetOf(digits)
+            if (digits.length >= 7) keys.add(digits.takeLast(7))
+            if (digits.length >= 10) keys.add(digits.takeLast(10))
+            keys.any { snapshot.phoneKeys.contains(it) }
+        }
+    }
+
+    private fun loadPhoneContactSnapshot(): ContactSnapshot {
+        val now = System.currentTimeMillis()
+        val cached = cachedContactSnapshot
+        if (cached != null && (now - cached.loadedAtMs) < CONTACT_CACHE_TTL_MS) {
+            return cached
+        }
+
+        if (!hasReadContactsPermission()) {
+            return ContactSnapshot(now, emptySet(), emptySet())
+        }
+
+        val names = mutableSetOf<String>()
+        val phoneKeys = mutableSetOf<String>()
+
+        val projection = arrayOf(
+            ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME,
+            ContactsContract.CommonDataKinds.Phone.NUMBER,
+            ContactsContract.CommonDataKinds.Phone.NORMALIZED_NUMBER,
+        )
+
+        runCatching {
+            applicationContext.contentResolver.query(
+                ContactsContract.CommonDataKinds.Phone.CONTENT_URI,
+                projection,
+                null,
+                null,
+                null,
+            )
+        }.getOrNull()?.use { cursor ->
+            val nameIndex = cursor.getColumnIndex(ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME)
+            val numberIndex = cursor.getColumnIndex(ContactsContract.CommonDataKinds.Phone.NUMBER)
+            val normalizedIndex = cursor.getColumnIndex(ContactsContract.CommonDataKinds.Phone.NORMALIZED_NUMBER)
+
+            while (cursor.moveToNext()) {
+                val rawName = if (nameIndex >= 0) cursor.getString(nameIndex) else null
+                normalizeContactName(rawName)?.let { names.add(it) }
+
+                val rawNormalized = if (normalizedIndex >= 0) cursor.getString(normalizedIndex) else null
+                val rawNumber = if (numberIndex >= 0) cursor.getString(numberIndex) else null
+                val digits = normalizePhoneDigits(rawNormalized) ?: normalizePhoneDigits(rawNumber)
+                if (digits != null) {
+                    phoneKeys.add(digits)
+                    if (digits.length >= 7) phoneKeys.add(digits.takeLast(7))
+                    if (digits.length >= 10) phoneKeys.add(digits.takeLast(10))
+                }
+            }
+        }
+
+        return ContactSnapshot(now, names, phoneKeys).also {
+            cachedContactSnapshot = it
+        }
+    }
+
+    private fun hasReadContactsPermission(): Boolean {
+        val granted = ContextCompat.checkSelfPermission(
+            applicationContext,
+            Manifest.permission.READ_CONTACTS,
+        ) == PackageManager.PERMISSION_GRANTED
+        if (!granted) {
+            Log.d(TAG, "READ_CONTACTS not granted; contact-based exemption disabled")
+        }
+        return granted
+    }
+
+    private fun normalizeContactName(raw: String?): String? {
+        if (raw.isNullOrBlank()) return null
+        return raw.lowercase().trim().replace(Regex("""\s+"""), " ")
+            .takeIf { it.length >= 3 }
+    }
+
+    private fun normalizePhoneDigits(raw: String?): String? {
+        if (raw.isNullOrBlank()) return null
+        val digits = raw.filter { it.isDigit() }
+        return digits.takeIf { it.length >= 7 }
+    }
+
+    private fun containsNameInContext(context: String, name: String): Boolean {
+        val escaped = Regex.escape(name)
+        val pattern = Regex("(?<![\\w])$escaped(?![\\w])")
+        return pattern.containsMatchIn(context)
+    }
+
+    private fun buildWindowContextText(event: AccessibilityEvent): String {
+        val parts = mutableListOf<String>()
+        event.contentDescription?.toString()?.takeIf { it.isNotBlank() }?.let(parts::add)
+        event.text
+            ?.mapNotNull { it?.toString() }
+            ?.filter { it.isNotBlank() }
+            ?.forEach(parts::add)
+        return parts.joinToString(" ").trim()
     }
 
     private fun applyDiscordTwitterLinkRewrite(packageName: String?, text: String): String {
@@ -699,6 +1000,24 @@ class ToneEnforcementService : AccessibilityService() {
         }
     }
 
+    private fun applyOptionalAffirmativeRewrite(text: String): String {
+        var rewritten = text
+        for ((pattern, options) in NEGATION_AFFIRMATION_RULES) {
+            val key = "negation:${pattern.pattern}"
+            val shouldFlip = sessionNegationFlipDecisions.getOrPut(key) {
+                Random.nextDouble() <= sessionAffirmationChance
+            }
+            if (!shouldFlip) continue
+            if (!pattern.containsMatchIn(rewritten)) continue
+
+            val replacement = sessionReplacementChoices.getOrPut(key) {
+                options.random()
+            }
+            rewritten = pattern.replace(rewritten, replacement)
+        }
+        return rewritten
+    }
+
     /**
      * Replaces the text inside [node] with [replacement] using
      * [AccessibilityNodeInfo.ACTION_SET_TEXT].
@@ -707,6 +1026,12 @@ class ToneEnforcementService : AccessibilityService() {
         val args = Bundle()
         args.putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, replacement)
         node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)
+    }
+
+    private fun ensureTrailingSpace(text: String): String {
+        if (text.isBlank()) return text
+        if (text.last().isWhitespace()) return text
+        return "$text "
     }
 
     /**
@@ -757,6 +1082,9 @@ class ToneEnforcementService : AccessibilityService() {
         grammarBypassRules.clear()
         recentDictReplacements.clear()
         sessionReplacementChoices.clear()
+        sessionNegationFlipDecisions.clear()
+        sessionAffirmationChance =
+            Random.nextDouble(AFFIRMATION_REWRITE_MIN_CHANCE, AFFIRMATION_REWRITE_MAX_CHANCE)
             sessionPersona = null
         lastCorrectedWord       = null
         lastCorrectionTimestamp = 0L
@@ -767,6 +1095,8 @@ class ToneEnforcementService : AccessibilityService() {
         lastAppliedReplacementText = null
         lastAppliedReplacementAt = 0L
         lastPtsRequestedPackage = null
+        lastWindowContextPackage = null
+        lastWindowContextText = null
         pendingCorrectionRunnable?.let { handler.removeCallbacks(it) }
         pendingCorrectionRunnable = null
         isApplyingCorrection    = false

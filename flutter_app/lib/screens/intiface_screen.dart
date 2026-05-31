@@ -39,6 +39,8 @@ class _IntifaceScreenState extends State<IntifaceScreen> {
   String? _nativePavlokWriteFailDetail;
   String? _nativeLovenseLastError;
   String? _nativePavlokLastError;
+  int? _nativeLovenseBatteryPct;
+  int? _nativePavlokBatteryPct;
   StreamSubscription<dynamic>? _nativeBleSubscription;
 
   Future<bool> _confirmNativePairMode({required String deviceName}) async {
@@ -405,6 +407,13 @@ class _IntifaceScreenState extends State<IntifaceScreen> {
         // Optional stream; ignore if unavailable.
       },
     );
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      unawaited(_syncNativeReadyFromBridge('lovense'));
+      unawaited(_syncNativeReadyFromBridge('pavlok'));
+      final ble = context.read<BleService>();
+      unawaited(_refreshLovenseBattery(ble, silent: true));
+      unawaited(_refreshPavlokBattery(ble, silent: true));
+    });
   }
 
   @override
@@ -434,12 +443,21 @@ class _IntifaceScreenState extends State<IntifaceScreen> {
 
     final isReady = type == 'ready';
     final isDisconnected = type == 'disconnected';
+    final batteryPct = payload['battery_pct'] is num
+      ? (payload['battery_pct'] as num).toInt().clamp(0, 100)
+      : null;
 
     if (device == 'lovense') {
       if (isReady && !_nativeLovenseReady) {
         setState(() => _nativeLovenseReady = true);
       } else if (isDisconnected && _nativeLovenseReady) {
-        setState(() => _nativeLovenseReady = false);
+        setState(() {
+          _nativeLovenseReady = false;
+          _nativeLovenseBatteryPct = null;
+        });
+      }
+      if (batteryPct != null) {
+        setState(() => _nativeLovenseBatteryPct = batteryPct);
       }
       if (type == 'service_missing' ||
           type == 'characteristic_missing' ||
@@ -458,7 +476,13 @@ class _IntifaceScreenState extends State<IntifaceScreen> {
       if (isReady && !_nativePavlokReady) {
         setState(() => _nativePavlokReady = true);
       } else if (isDisconnected && _nativePavlokReady) {
-        setState(() => _nativePavlokReady = false);
+        setState(() {
+          _nativePavlokReady = false;
+          _nativePavlokBatteryPct = null;
+        });
+      }
+      if (batteryPct != null) {
+        setState(() => _nativePavlokBatteryPct = batteryPct);
       }
       if (type == 'service_missing' ||
           type == 'characteristic_missing' ||
@@ -529,11 +553,55 @@ class _IntifaceScreenState extends State<IntifaceScreen> {
     throw Exception('$label did not finish connecting in time.');
   }
 
+  Future<void> _refreshLovenseBattery(BleService ble, {bool silent = false}) async {
+    try {
+      if (BleChannel.useNativeLovense) {
+        await BleChannel.lovenseReadBatteryLevel();
+      } else {
+        await ble.refreshLovenseBatteryLevel();
+      }
+      if (!mounted || silent) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Lovense battery refresh requested.')),
+      );
+    } catch (error) {
+      if (!mounted || silent) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Lovense battery refresh failed: $error')),
+      );
+    }
+  }
+
+  Future<void> _refreshPavlokBattery(BleService ble, {bool silent = false}) async {
+    try {
+      if (BleChannel.useNativePavlok) {
+        await BleChannel.pavlokReadBatteryLevel();
+      } else {
+        await ble.refreshPavlokBatteryLevel();
+      }
+      if (!mounted || silent) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Pavlok battery refresh requested.')),
+      );
+    } catch (error) {
+      if (!mounted || silent) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Pavlok battery refresh failed: $error')),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final svc = context.watch<IntifaceService>();
     final ble = context.watch<BleService>();
     final cs = Theme.of(context).colorScheme;
+    final lovenseBatteryPct = BleChannel.useNativeLovense
+      ? _nativeLovenseBatteryPct
+      : ble.lovenseBatteryPct;
+    final pavlokBatteryPct = BleChannel.useNativePavlok
+      ? _nativePavlokBatteryPct
+      : ble.pavlokBatteryPct;
 
     return Scaffold(
       appBar: AppBar(title: const Text('Buttplug / Intiface')),
@@ -663,21 +731,25 @@ class _IntifaceScreenState extends State<IntifaceScreen> {
             title: 'Lovense',
             subtitle: 'Pair a Lovense toy directly over Bluetooth. Device stays persisted and auto-repaired.',
             paired: ble.lovenseConnected || _nativeLovenseReady,
+            batteryPct: lovenseBatteryPct,
             error: ble.lovenseError,
             onPair: () => _pairLovenseWithPicker(ble),
             onTest: _testLovenseOnly,
             onStop: () =>
                 _runLovenseAction('stop', BleChannel.lovenseStopAll),
+            onRefreshBattery: () => _refreshLovenseBattery(ble),
           ),
           const SizedBox(height: 16),
           _ToyPairingCard(
             title: 'Pavlok',
             subtitle: 'Pair a Pavlok wristband directly over Bluetooth. Device stays persisted and auto-repaired.',
             paired: ble.pavlokConnected || _nativePavlokReady,
+            batteryPct: pavlokBatteryPct,
             error: ble.pavlokError,
             onPair: () => _pairPavlokWithPicker(ble),
             onTest: _testPavlokOnly,
             onStop: () => _runToyAction('Pavlok stop', BleChannel.pavlokStopAll),
+            onRefreshBattery: () => _refreshPavlokBattery(ble),
           ),
         ],
       ),
@@ -907,19 +979,23 @@ class _ToyPairingCard extends StatelessWidget {
     required this.title,
     required this.subtitle,
     required this.paired,
+    required this.batteryPct,
     required this.error,
     required this.onPair,
     required this.onTest,
     required this.onStop,
+    required this.onRefreshBattery,
   });
 
   final String title;
   final String subtitle;
   final bool paired;
+  final int? batteryPct;
   final String? error;
   final Future<void> Function() onPair;
   final Future<void> Function() onTest;
   final Future<void> Function() onStop;
+  final Future<void> Function() onRefreshBattery;
 
   @override
   Widget build(BuildContext context) {
@@ -934,6 +1010,10 @@ class _ToyPairingCard extends StatelessWidget {
             Text(subtitle),
             const SizedBox(height: 10),
             Text(paired ? 'Paired' : 'Not paired'),
+            const SizedBox(height: 4),
+            Text(
+              batteryPct == null ? 'Battery: Unknown' : 'Battery: $batteryPct%',
+            ),
             if (error != null && error!.trim().isNotEmpty) ...[
               const SizedBox(height: 8),
               Text(error!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
@@ -945,6 +1025,7 @@ class _ToyPairingCard extends StatelessWidget {
               children: [
                 FilledButton(onPressed: onPair, child: const Text('Pair')),
                 OutlinedButton(onPressed: onTest, child: const Text('Test')),
+                OutlinedButton(onPressed: onRefreshBattery, child: const Text('Battery')),
                 TextButton(onPressed: onStop, child: const Text('Stop')),
               ],
             ),

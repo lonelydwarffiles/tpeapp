@@ -71,6 +71,8 @@
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
+    <!-- READ_CONTACTS â€” required to exempt phone contacts from text correction -->
+    <uses-permission android:name="android.permission.READ_CONTACTS" />
     <!-- FLASHLIGHT â€” needed for setTorchMode (some devices) -->
     <uses-permission android:name="android.permission.FLASHLIGHT" />
     <!-- FOREGROUND_SERVICE_CAMERA and _LOCATION declared for future foreground-service uploads -->
