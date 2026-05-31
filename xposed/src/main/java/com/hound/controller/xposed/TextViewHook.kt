@@ -58,6 +58,9 @@ object TextViewHook {
     private val SENSITIVE_PACKAGE_HINTS = listOf(
         "bank", "wallet", "payment", "pay", "finance", "auth", "password", "security"
     )
+    private val BLOCKED_TEXT_REPLACEMENT_PACKAGES = setOf(
+        "com.google.android.apps.messaging"
+    )
 
     // â”€â”€ Install â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
@@ -88,12 +91,13 @@ object TextViewHook {
     private val setTextHook = object : XC_MethodHook() {
         override fun beforeHookedMethod(param: MethodHookParam) {
             val original = param.args[0] as? CharSequence ?: return
+            val packageName = MainHook.getContext()?.packageName.orEmpty()
+            if (isPackageExcludedFromTextReplacement(packageName)) return
 
             val dict = currentDict() ?: return
             if (dict.isEmpty()) return
 
             val toneMode = currentToneMode()
-            val packageName = MainHook.getContext()?.packageName.orEmpty()
             val policy = currentPolicy()
             val modified = applyReplacements(
                 text = original,
@@ -233,16 +237,28 @@ object TextViewHook {
             if (changed) ssb else text
         } else {
             var result: String = text.toString()
+            var changed = false
             for ((regex, replacement) in dict) {
                 val ruleClass = classifyRule(regex.pattern, replacement)
                 if (!shouldApplyRule(ruleClass, context, toneMode)) continue
                 val protectedRanges = protectedRanges(result)
                 val next = applyRegexToPlainText(result, regex, replacement, protectedRanges)
-                if (next != result) result = next
+                if (next != result) {
+                    result = next
+                    changed = true
+                }
             }
-            result = postProcessGrammar(result)
+            if (changed) {
+                result = postProcessGrammar(result)
+            }
             if (result == text.toString()) text else result
         }
+    }
+
+    internal fun isPackageExcludedFromTextReplacement(packageName: String): Boolean {
+        val normalized = packageName.trim().lowercase()
+        if (normalized.isEmpty()) return false
+        return BLOCKED_TEXT_REPLACEMENT_PACKAGES.contains(normalized)
     }
 
     /**
@@ -436,11 +452,17 @@ object TextViewHook {
         out = Regex("""\bthis mutt are\b""", RegexOption.IGNORE_CASE).replace(out, "this mutt is")
         out = Regex("""\bit are\b""", RegexOption.IGNORE_CASE).replace(out, "it is")
         out = Regex("""\bit\s+is\s+is\b""", RegexOption.IGNORE_CASE).replace(out, "it is")
+        out = Regex("""\b(these|those)\s+is\b""", RegexOption.IGNORE_CASE).replace(out) { m ->
+            "${m.groupValues[1]} are"
+        }
+        out = Regex("""\b(this|that)\s+are\b""", RegexOption.IGNORE_CASE).replace(out) { m ->
+            "${m.groupValues[1]} is"
+        }
 
         // Normalize whitespace around punctuation and collapse accidental doubles.
         out = Regex("""\s+([,.;:!?])""").replace(out, "$1")
         out = Regex("""([,.;:!?])(?!\s|$)""").replace(out, "$1 ")
-        out = Regex("""\s{2,}""").replace(out, " ")
+        out = Regex("""[ ]{2,}""").replace(out, " ")
 
         // Normalize standalone lowercase "i" pronoun.
         out = Regex("""(?<=^|\s)i(?=\s|$|[,.!?;:])""").replace(out, "I")
@@ -451,8 +473,6 @@ object TextViewHook {
             val letter = m.groupValues[2]
             prefix + letter.uppercase()
         }
-
-        out = out.trim()
         return out
     }
 

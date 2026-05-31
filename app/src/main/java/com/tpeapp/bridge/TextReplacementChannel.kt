@@ -6,6 +6,7 @@ import androidx.preference.PreferenceManager
 import com.tpeapp.service.FilterService
 import io.flutter.plugin.common.BinaryMessenger
 import io.flutter.plugin.common.MethodChannel
+import org.json.JSONObject
 
 /**
  * TextReplacementChannel — MethodChannel bridge for the text-replacement dictionary.
@@ -21,6 +22,8 @@ import io.flutter.plugin.common.MethodChannel
  *  - `setDict`  (json: String)      → persists the dictionary JSON
  *  - `getPolicy`         → String   → current policy JSON (empty string if not set)
  *  - `setPolicy` (json: String)     → persists the policy JSON
+ *  - `getPackagePolicy` (packageName) → String? → package override mode, if set
+ *  - `setPackagePolicy` (packageName, mode)     → updates/removes one package override
  */
 object TextReplacementChannel {
 
@@ -55,6 +58,66 @@ object TextReplacementChannel {
                         .putString(FilterService.PREF_TEXT_REPLACEMENT_POLICY, json)
                         .apply()
                     Log.i(TAG, "Text-replacement policy updated (${json.length} chars)")
+                    result.success(null)
+                }
+                "getPackagePolicy" -> {
+                    val packageName = call.argument<String>("packageName")
+                        ?.trim()
+                        ?.lowercase()
+                        ?: return@setMethodCallHandler result.error("INVALID", "packageName required", null)
+
+                    val policyJson = prefs.getString(FilterService.PREF_TEXT_REPLACEMENT_POLICY, "") ?: ""
+                    if (policyJson.isBlank()) {
+                        result.success(null)
+                        return@setMethodCallHandler
+                    }
+
+                    val mode = runCatching {
+                        val root = JSONObject(policyJson)
+                        root.optJSONObject("packages")?.optString(packageName, null)
+                    }.getOrNull()
+                    result.success(mode)
+                }
+                "setPackagePolicy" -> {
+                    val packageName = call.argument<String>("packageName")
+                        ?.trim()
+                        ?.lowercase()
+                        ?: return@setMethodCallHandler result.error("INVALID", "packageName required", null)
+                    val rawMode = call.argument<String>("mode")
+                        ?.trim()
+                        ?.lowercase()
+                        ?: return@setMethodCallHandler result.error("INVALID", "mode required", null)
+
+                    val policyJson = prefs.getString(FilterService.PREF_TEXT_REPLACEMENT_POLICY, "") ?: ""
+                    val root = runCatching {
+                        if (policyJson.isBlank()) JSONObject() else JSONObject(policyJson)
+                    }.getOrElse { JSONObject() }
+                    val packages = root.optJSONObject("packages") ?: JSONObject().also { root.put("packages", it) }
+
+                    val normalizedMode = when (rawMode) {
+                        "off", "none", "disabled" -> "off"
+                        "identity", "identity_only", "identity-only" -> "identity"
+                        "full", "all" -> "full"
+                        "auto", "loose", "soft" -> "auto"
+                        "inherit", "default", "" -> ""
+                        else -> return@setMethodCallHandler result.error(
+                            "INVALID",
+                            "mode must be one of auto/full/identity/off/inherit",
+                            null,
+                        )
+                    }
+
+                    if (normalizedMode.isEmpty()) {
+                        packages.remove(packageName)
+                    } else {
+                        packages.put(packageName, normalizedMode)
+                    }
+
+                    val saved = root.toString()
+                    prefs.edit()
+                        .putString(FilterService.PREF_TEXT_REPLACEMENT_POLICY, saved)
+                        .apply()
+                    Log.i(TAG, "Text-replacement package policy updated for $packageName -> ${normalizedMode.ifEmpty { "inherit" }}")
                     result.success(null)
                 }
                 else -> result.notImplemented()

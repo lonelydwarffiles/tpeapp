@@ -114,6 +114,33 @@ class TextReplacementChannel {
   static Future<void> setPolicy(Map<String, dynamic> policy) =>
       _channel.invokeMethod('setPolicy', {'json': jsonEncode(policy)});
 
+  /// Returns the explicit mode override for a package, or null when it inherits default behavior.
+  static Future<String?> getPackagePolicy(String packageName) async {
+    final pkg = packageName.trim().toLowerCase();
+    if (pkg.isEmpty) return null;
+    return _channel.invokeMethod<String>('getPackagePolicy', {
+      'packageName': pkg,
+    });
+  }
+
+  /// Sets a per-package policy mode.
+  ///
+  /// Accepted values: auto, full, identity, off. Use inherit/default to clear the override.
+  static Future<void> setPackagePolicy(String packageName, String mode) async {
+    final pkg = packageName.trim().toLowerCase();
+    final normalizedMode = mode.trim().toLowerCase();
+    if (pkg.isEmpty) {
+      throw ArgumentError.value(packageName, 'packageName', 'packageName must not be empty');
+    }
+    if (normalizedMode.isEmpty) {
+      throw ArgumentError.value(mode, 'mode', 'mode must not be empty');
+    }
+    await _channel.invokeMethod('setPackagePolicy', {
+      'packageName': pkg,
+      'mode': normalizedMode,
+    });
+  }
+
   /// Seeds [defaultDict] only when no dictionary has been configured yet.
   static Future<void> ensureDefaults() async {
     final current = await getDict();

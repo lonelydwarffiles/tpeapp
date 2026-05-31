@@ -59,6 +59,7 @@ object InputConnectionHook {
 
     /** How long the vocabulary / tone-mode caches remain valid (ms). */
     private const val CACHE_TTL_MS = 30_000L
+    private const val REPLACEMENT_UNDO_WINDOW_MS = 4_000L
     private const val MODE_STRICT = "strict"
     private const val MODE_LOOSE = "loose"
 
@@ -113,6 +114,11 @@ object InputConnectionHook {
      * next matching [commitText] should be allowed through.
      */
     @Volatile private var bypassWindowOpen : Boolean = false
+
+    // One-shot undo state for text replacements: lets users type a just-replaced
+    // token back once without it being immediately re-replaced.
+    @Volatile private var lastAutocorrectSource: String? = null
+    @Volatile private var lastAutocorrectAtMs: Long = 0L
 
     // â”€â”€ Install â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
@@ -197,6 +203,10 @@ object InputConnectionHook {
         val originalText = param.args[0] as? CharSequence ?: return
         var workingText = originalText
         val textStr = workingText.toString()
+        val packageName = MainHook.getContext()?.packageName.orEmpty()
+        if (TextViewHook.isPackageExcludedFromTextReplacement(packageName)) {
+            return
+        }
 
         val vocabRegexes = currentVocabRegexes() ?: emptyList()
         val toneMode  = currentToneMode()
@@ -248,8 +258,12 @@ object InputConnectionHook {
             return
         }
 
+        val originalToken = workingText.toString().trim()
+        if (shouldAllowImmediateUndo(originalToken)) {
+            return
+        }
+
         // â”€â”€ Text-replacement rules (same engine as TextViewHook) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-        val packageName = MainHook.getContext()?.packageName.orEmpty()
         val fxtwitterRewritten = rewriteTwitterLinksForDiscord(packageName, workingText)
         if (fxtwitterRewritten.toString() != workingText.toString()) {
             param.args[0] = fxtwitterRewritten
@@ -265,13 +279,34 @@ object InputConnectionHook {
         if (modified.toString() != workingText.toString()) {
             param.args[0] = modified
             adjustCursorPosition(param, workingText, modified)
+            val source = workingText.toString().trim()
+            if (source.isNotEmpty()) {
+                lastAutocorrectSource = source
+                lastAutocorrectAtMs = System.currentTimeMillis()
+            }
         }
     }
 
     private fun shouldAutocorrectNow(text: CharSequence): Boolean {
         val s = text.toString()
         if (s.isEmpty()) return false
-        return AUTO_CORRECT_BOUNDARY_REGEX.containsMatchIn(s)
+        return AUTO_CORRECT_BOUNDARY_REGEX.matches(s.takeLast(1)) || s.contains('\n') || s.contains('\r')
+    }
+
+    private fun shouldAllowImmediateUndo(inputToken: String): Boolean {
+        if (inputToken.isEmpty()) return false
+        val source = lastAutocorrectSource ?: return false
+        val now = System.currentTimeMillis()
+        if (now - lastAutocorrectAtMs > REPLACEMENT_UNDO_WINDOW_MS) {
+            lastAutocorrectSource = null
+            return false
+        }
+        if (!inputToken.equals(source, ignoreCase = true)) return false
+
+        // Consume one undo pass.
+        lastAutocorrectSource = null
+        lastAutocorrectAtMs = 0L
+        return true
     }
 
     private fun rewriteTwitterLinksForDiscord(packageName: String, text: CharSequence): CharSequence {
