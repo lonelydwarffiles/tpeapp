@@ -335,6 +335,7 @@ object PavlokManager {
                 ALT_CHAR_156E7000,
             ),
             payload = payload,
+            allowTargetFallback = false,
         )
 
         if (wrotePavlokS) {
@@ -361,7 +362,7 @@ object PavlokManager {
         )
     }
 
-    /** Sends Pavlok-S zap packet: RR II */
+    /** Sends Pavlok zap packets with firmware-compatible fallbacks on the dedicated zap characteristic. */
     private fun sendZap(intensity: Int, durationMs: Int) {
         val b = ble
         if (b == null) {
@@ -371,40 +372,67 @@ object PavlokManager {
         // Approximate repeats from duration (500 ms chunks), minimum one repeat for non-zero duration.
         val repeatCount = if (durationMs <= 0) 1 else (durationMs / 500).coerceIn(1, 10)
         val repeats = encodeRepeats(repeatCount)
+        val singleRepeat = encodeRepeats(1)
         val safeIntensity = toPercentIntensity(intensity)
-        val payload = byteArrayOf(repeats.toByte(), safeIntensity.toByte())
-        Log.d(
-            TAG,
-            "Sending Pavlok zap packet to $ZAP_CHAR_UUID: rr=%d ii=%d".format(repeats, safeIntensity),
-        )
-        val wrotePavlokS = b.sendByteCommandToCharacteristic(
-            characteristicUuids = listOf(
-                ZAP_CHAR_UUID,
-            ),
-            payload = payload,
+        val rawIntensity = intensity.coerceIn(0, 255)
+        val zapPayloadCandidates = listOf(
+            byteArrayOf(singleRepeat.toByte(), rawIntensity.toByte()),
+            byteArrayOf(singleRepeat.toByte(), safeIntensity.toByte()),
+            byteArrayOf(repeats.toByte(), rawIntensity.toByte()),
+            byteArrayOf(repeats.toByte(), safeIntensity.toByte()),
         )
 
-        if (wrotePavlokS) {
-            return
+        for (payload in zapPayloadCandidates) {
+            val rr = payload[0].toInt() and 0xFF
+            val ii = payload[1].toInt() and 0xFF
+            Log.d(TAG, "Trying Pavlok zap packet on $ZAP_CHAR_UUID: rr=%d ii=%d".format(rr, ii))
+            val wrote = b.sendByteCommandToCharacteristic(
+                characteristicUuids = listOf(ZAP_CHAR_UUID),
+                payload = payload,
+                allowTargetFallback = false,
+            )
+            if (wrote) {
+                return
+            }
         }
 
         val legacyDurationUnit = (durationMs.coerceIn(0, 25_500) / 100).coerceIn(1, 255)
         val legacyPayload = byteArrayOf(
             LEGACY_CMD_ZAP.toByte(),
-            intensity.coerceIn(0, 255).toByte(),
+            rawIntensity.toByte(),
             legacyDurationUnit.toByte(),
         )
+
+        // Some Pavlok firmware revisions expose 1003 but expect the legacy 3-byte command frame.
+        val wroteLegacyOnZapChar = b.sendByteCommandToCharacteristic(
+            characteristicUuids = listOf(ZAP_CHAR_UUID),
+            payload = legacyPayload,
+            allowTargetFallback = false,
+        )
+        if (wroteLegacyOnZapChar) {
+            Log.d(
+                TAG,
+                "Zap succeeded via legacy payload on zap characteristic: cmd=%d intensity=%d durationUnit=%d".format(
+                    LEGACY_CMD_ZAP,
+                    rawIntensity,
+                    legacyDurationUnit,
+                ),
+            )
+            return
+        }
+
         Log.d(
             TAG,
             "Falling back to legacy Pavlok zap packet on TX_UUID: cmd=%d intensity=%d durationUnit=%d".format(
                 LEGACY_CMD_ZAP,
-                intensity.coerceIn(0, 255),
+                rawIntensity,
                 legacyDurationUnit,
             ),
         )
         b.sendByteCommandToCharacteristic(
             characteristicUuids = listOf(TX_UUID),
             payload = legacyPayload,
+            allowTargetFallback = false,
         )
     }
 

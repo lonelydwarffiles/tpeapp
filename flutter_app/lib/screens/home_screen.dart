@@ -55,6 +55,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   static const int _edgeResumeStableMs = 6000;
   static const int _edgeResumeWaitMaxMs = 20000;
   static const int _edgeStatusNotifyMinGapMs = 7000;
+  static const int _edgePeakZapIntensity = 255;
+  static const int _edgePeakZapDurationMs = 500;
+  static const int _pavlokZapConnectWaitMs = 8000;
+  static const int _pavlokZapConnectPollMs = 400;
   static const int _recoveryLowBuzzLevel = 1;
   static const int _edgeTimelineRetentionMs = 7 * 24 * 60 * 60 * 1000;
   static const int _edgeTimelineMaxEvents = 1200;
@@ -1449,6 +1453,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     final aboveSoftStop = _hrAtOrAboveSoftStopForEdge(status);
     final manualHoldWasActive = _manualBuzzHoldUntilLowHr;
 
+    await _attemptPeakShockZap(
+      status: status,
+      source: 'manual_edge_log',
+    );
+
     // Manual self-report is always accepted and acts as a recovery trigger.
     await _queueSessionCounter(orgasm: false);
     await _approvePendingCounters(includeEdge: true, includeOrgasm: false);
@@ -1613,22 +1622,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         }
       }
 
-      if (_edgeTargetShockAtPeak) {
-        final peakStatus = await _fetchRealtimeEdgeStatus();
-        if (_hrLimitReachedForPeakShock(peakStatus)) {
-          await BleChannel.pavlokZap(intensity: 100, durationMs: 500);
-          await _trackBehavior(
-            'edge_target_peak_shock_fired',
-            reason: 'hr_limit_hit_while_buzzing',
-            payload: {
-              'edge_hr_state': '${peakStatus['edge_hr_state'] ?? ''}',
-              'edge_hr_last': _intFromAny(peakStatus['edge_hr_last']),
-              'edge_hr_pause_bpm': _intFromAny(peakStatus['edge_hr_pause_bpm']),
-              'latest_heart_rate': _intFromAny(peakStatus['latest_heart_rate']),
-            },
-          );
-        }
-      }
+      final peakStatus = await _fetchRealtimeEdgeStatus();
+      await _attemptPeakShockZap(
+        status: peakStatus,
+        source: 'edge_target_automation',
+      );
 
       await _queueSessionCounter(orgasm: false);
       await _approvePendingCounters(includeEdge: true, includeOrgasm: false);
@@ -1649,6 +1647,138 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       // Keep automation best-effort and retry on next tick.
     } finally {
       _edgeTargetStepInFlight = false;
+    }
+  }
+
+  Future<bool> _ensurePavlokConnectedForZap() async {
+    final ble = context.read<BleService>();
+    if (_nativePavlokConnected || ble.pavlokConnected) {
+      return true;
+    }
+
+    try {
+      if (await BleChannel.pavlokIsConnectedNative()) {
+        if (mounted) {
+          setState(() => _nativePavlokConnected = true);
+        }
+        return true;
+      }
+    } catch (_) {
+      // Keep reconnect path best-effort.
+    }
+
+    try {
+      await BleChannel.pavlokScan();
+    } catch (_) {
+      return false;
+    }
+
+    var waitedMs = 0;
+    while (waitedMs < _pavlokZapConnectWaitMs) {
+      await Future<void>.delayed(const Duration(milliseconds: _pavlokZapConnectPollMs));
+      waitedMs += _pavlokZapConnectPollMs;
+      final connectedNow = _nativePavlokConnected || ble.pavlokConnected;
+      if (connectedNow) {
+        return true;
+      }
+      try {
+        if (await BleChannel.pavlokIsConnectedNative()) {
+          if (mounted) {
+            setState(() => _nativePavlokConnected = true);
+          }
+          return true;
+        }
+      } catch (_) {
+        // Keep polling until timeout.
+      }
+    }
+
+    return _nativePavlokConnected || ble.pavlokConnected;
+  }
+
+  Future<bool> _attemptPeakShockZap({
+    required Map<String, dynamic> status,
+    required String source,
+  }) async {
+    final forceEdgeZap =
+        source == 'edge_target_automation' || source == 'manual_edge_log';
+    final hrGateEligible = _hrLimitReachedForPeakShock(status);
+    final allowEdgeAutomationFallback = source == 'edge_target_automation';
+    if (!forceEdgeZap &&
+        (!_edgeTargetShockAtPeak || (!hrGateEligible && !allowEdgeAutomationFallback))) {
+      return false;
+    }
+
+    try {
+      await BleChannel.pavlokZap(
+        intensity: _edgePeakZapIntensity,
+        durationMs: _edgePeakZapDurationMs,
+      );
+      await _trackBehavior(
+        'edge_target_peak_shock_fired',
+        reason: forceEdgeZap
+            ? 'edge_zap_forced'
+            : hrGateEligible
+            ? 'hr_limit_hit_while_buzzing'
+            : 'edge_target_completion_fallback',
+        payload: {
+          'source': source,
+          'edge_zap_forced': forceEdgeZap,
+          'hr_gate_eligible': hrGateEligible,
+          'pavlok_intensity': _edgePeakZapIntensity,
+          'pavlok_duration_ms': _edgePeakZapDurationMs,
+          'edge_hr_state': '${status['edge_hr_state'] ?? ''}',
+          'edge_hr_last': _intFromAny(status['edge_hr_last']),
+          'edge_hr_pause_bpm': _intFromAny(status['edge_hr_pause_bpm']),
+          'latest_heart_rate': _intFromAny(status['latest_heart_rate']),
+        },
+      );
+      return true;
+    } catch (_) {
+      // Quick-action parity: try dispatch first; only reconnect if initial send fails.
+      final reconnected = await _ensurePavlokConnectedForZap();
+      if (reconnected) {
+        try {
+          await BleChannel.pavlokZap(
+            intensity: _edgePeakZapIntensity,
+            durationMs: _edgePeakZapDurationMs,
+          );
+          await _trackBehavior(
+            'edge_target_peak_shock_fired',
+            reason: 'edge_zap_retry_after_reconnect',
+            payload: {
+              'source': source,
+              'edge_zap_forced': forceEdgeZap,
+              'hr_gate_eligible': hrGateEligible,
+              'pavlok_intensity': _edgePeakZapIntensity,
+              'pavlok_duration_ms': _edgePeakZapDurationMs,
+              'edge_hr_state': '${status['edge_hr_state'] ?? ''}',
+              'edge_hr_last': _intFromAny(status['edge_hr_last']),
+              'edge_hr_pause_bpm': _intFromAny(status['edge_hr_pause_bpm']),
+              'latest_heart_rate': _intFromAny(status['latest_heart_rate']),
+            },
+          );
+          return true;
+        } catch (_) {
+          // Fall through to failure telemetry below.
+        }
+      }
+      await _trackBehavior(
+        'edge_target_peak_shock_failed',
+        reason: 'pavlok_zap_dispatch_failed',
+        payload: {
+          'source': source,
+          'reconnect_attempted': true,
+          'reconnected': reconnected,
+          'pavlok_intensity': _edgePeakZapIntensity,
+          'pavlok_duration_ms': _edgePeakZapDurationMs,
+          'edge_hr_state': '${status['edge_hr_state'] ?? ''}',
+          'edge_hr_last': _intFromAny(status['edge_hr_last']),
+          'edge_hr_pause_bpm': _intFromAny(status['edge_hr_pause_bpm']),
+          'latest_heart_rate': _intFromAny(status['latest_heart_rate']),
+        },
+      );
+      return false;
     }
   }
 

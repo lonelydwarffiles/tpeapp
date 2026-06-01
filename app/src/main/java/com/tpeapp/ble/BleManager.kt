@@ -322,6 +322,7 @@ class BleManager(
     fun sendByteCommandToCharacteristic(
         characteristicUuids: List<UUID>,
         payload: ByteArray,
+        allowTargetFallback: Boolean = true,
     ): Boolean {
         val currentGatt = gatt
         if (currentGatt == null) {
@@ -343,7 +344,7 @@ class BleManager(
             }
         }
 
-        if (selected == null) {
+        if (selected == null && allowTargetFallback) {
             selected = targetCharacteristic
             if (selected != null) {
                 emit(
@@ -378,8 +379,7 @@ class BleManager(
                 ),
             )
         }
-        writeCharacteristic(selected, payload)
-        return true
+        return writeCharacteristic(selected, payload)
     }
 
     /** True when GATT characteristic is ready for write commands. */
@@ -756,19 +756,19 @@ class BleManager(
      * Writes [data] to [characteristic] using the appropriate API for the
      * running Android version.
      */
-    private fun writeCharacteristic(characteristic: BluetoothGattCharacteristic, data: ByteArray) {
+    private fun writeCharacteristic(characteristic: BluetoothGattCharacteristic, data: ByteArray): Boolean {
         markBatteryQueryWindow(data)
         if (!hasPermission(Manifest.permission.BLUETOOTH_CONNECT)) {
             Log.w(TAG, "Missing BLUETOOTH_CONNECT — cannot write characteristic")
             emit("connect_permission_missing")
-            return
+            return false
         }
 
         val currentGatt = gatt
         if (currentGatt == null) {
             Log.w(TAG, "GATT is null — cannot write characteristic")
             emit("write_failed", mapOf("reason" to "gatt_null"))
-            return
+            return false
         }
 
         val props = characteristic.properties
@@ -817,10 +817,12 @@ class BleManager(
             if (result != BluetoothGatt.GATT_SUCCESS) {
                 Log.w(TAG, "writeCharacteristic (API33) returned $result")
                 emit("write_failed", mapOf("status" to result))
+                return false
             } else if (effectiveWriteType == BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE) {
                 // No-response writes may not trigger onCharacteristicWrite on all devices.
                 emit("write_ok", mapOf("mode" to "no_response", "bytes" to data.size))
             }
+            return true
         } else {
             @Suppress("DEPRECATION")
             characteristic.value = data
@@ -830,9 +832,11 @@ class BleManager(
             if (!enqueued) {
                 Log.w(TAG, "writeCharacteristic (legacy) returned false")
                 emit("write_failed", mapOf("reason" to "enqueue_failed"))
+                return false
             } else if (writeType == BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE) {
                 emit("write_ok", mapOf("mode" to "no_response", "bytes" to data.size))
             }
+            return true
         }
     }
 

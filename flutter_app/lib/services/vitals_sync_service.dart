@@ -36,7 +36,7 @@ void vitalsCallbackDispatcher() {
       final prefs = await SharedPreferences.getInstance();
 
       // Bail out if the user has disabled Health Connect sync.
-      if (!(prefs.getBool(kHealthConnectEnabled) ?? false)) {
+      if (!(prefs.getBool(kHealthConnectEnabled) ?? true)) {
         return Future.value(true);
       }
 
@@ -241,6 +241,6 @@ class VitalsSyncService {
   /// Returns true if the periodic task is currently enabled in preferences.
   Future<bool> isEnabled() async {
     final prefs = await SharedPreferences.getInstance();
-    return prefs.getBool(kHealthConnectEnabled) ?? false;
+    return prefs.getBool(kHealthConnectEnabled) ?? true;
   }
 }

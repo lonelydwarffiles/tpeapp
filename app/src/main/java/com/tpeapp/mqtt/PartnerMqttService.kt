@@ -69,6 +69,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.net.URI
 import java.util.UUID
+import java.util.concurrent.atomic.AtomicInteger
 import kotlin.random.Random
 
 /**
@@ -143,9 +144,14 @@ class PartnerMqttService : Service() {
         private const val BUZZ_INTER_PULSE_DELAY_MAX_MS = 2_300L
         private const val BUZZ_STRENGTH_MIN_PERCENT = 50
         private const val BUZZ_STRENGTH_MAX_PERCENT = 100
+        private const val LOVENSE_DEFAULT_TRANSIENT_DURATION_MS = 2_500L
+        private const val LOVENSE_PATTERN_STEP_MS = 650L
     }
 
     private val reconnectHandler = Handler(Looper.getMainLooper())
+    private val lovenseHandler = Handler(Looper.getMainLooper())
+    private val lovensePatternGeneration = AtomicInteger(0)
+    private val lovensePendingRunnables = mutableSetOf<Runnable>()
     private var reconnectRunnable: Runnable? = null
     private var mqttClient: MqttAsyncClient? = null
     private var networkCallback: ConnectivityManager.NetworkCallback? = null
@@ -179,6 +185,7 @@ class PartnerMqttService : Service() {
 
     override fun onDestroy() {
         super.onDestroy()
+        cancelLovenseActuation(stopNow = true)
         GeofenceManager.setBreachAlertListener(null)
         reconnectRunnable?.let { reconnectHandler.removeCallbacks(it) }
         reconnectRunnable = null
@@ -831,13 +838,17 @@ class PartnerMqttService : Service() {
         val rawCmd = data["toy_command"]?.lowercase()?.trim() ?: return
         val cmd = when {
             rawCmd.contains("buzz") -> "buzz"
-            rawCmd == "pulse" || rawCmd == "wave" || rawCmd == "tease" -> "vibrate"
+            rawCmd == "pulse" || rawCmd == "wave" || rawCmd == "tease" -> rawCmd
             else -> rawCmd
         }
         val level = data["toy_level"]?.toIntOrNull()?.coerceIn(0, 20) ?: 0
+        val durationMs = data["toy_duration_ms"]?.toLongOrNull()?.coerceIn(0L, 1_200_000L)
+            ?: data["duration_ms"]?.toLongOrNull()?.coerceIn(0L, 1_200_000L)
+            ?: 0L
         LovenseManager.init(applicationContext)
         when (cmd) {
             "buzz"    -> {
+                cancelLovenseActuation(stopNow = true)
                 val seconds = extractSecondsFromCommand(rawCmd)
                     ?: data["buzz_seconds"]?.toIntOrNull()
                     ?: 1
@@ -849,10 +860,43 @@ class PartnerMqttService : Service() {
                     repeatCount = repeatCount.coerceIn(1, 300),
                 )
             }
-            "vibrate" -> LovenseManager.vibrate(level)
-            "rotate"  -> LovenseManager.rotate(level)
-            "pump"    -> LovenseManager.pump(level.coerceIn(0, 3))
-            "stop"    -> LovenseManager.stopAll()
+            "pulse", "wave", "tease" -> {
+                cancelLovenseActuation(stopNow = true)
+                val effectiveDuration = if (durationMs > 0L) durationMs else LOVENSE_DEFAULT_TRANSIENT_DURATION_MS
+                runLovenseTransientPattern(
+                    pattern = cmd,
+                    baseLevel = if (level > 0) level else 12,
+                    durationMs = effectiveDuration,
+                )
+            }
+            "vibrate" -> {
+                cancelLovenseActuation(stopNow = true)
+                LovenseManager.vibrate(level)
+                if (durationMs > 0L) {
+                    scheduleLovenseAction(durationMs) {
+                        LovenseManager.stopAll()
+                    }
+                }
+            }
+            "rotate"  -> {
+                cancelLovenseActuation(stopNow = true)
+                LovenseManager.rotate(level)
+                if (durationMs > 0L) {
+                    scheduleLovenseAction(durationMs) {
+                        LovenseManager.stopAll()
+                    }
+                }
+            }
+            "pump"    -> {
+                cancelLovenseActuation(stopNow = true)
+                LovenseManager.pump(level.coerceIn(0, 3))
+                if (durationMs > 0L) {
+                    scheduleLovenseAction(durationMs) {
+                        LovenseManager.stopAll()
+                    }
+                }
+            }
+            "stop"    -> cancelLovenseActuation(stopNow = true)
             "battery" -> LovenseManager.queryBattery()
             else      -> {
                 Log.w(TAG, "Unknown Lovense FCM command: $cmd")
@@ -865,8 +909,73 @@ class PartnerMqttService : Service() {
         Log.i(TAG, "Lovense FCM command handled: cmd=$cmd level=$level")
     }
 
+    private fun scheduleLovenseAction(delayMs: Long, action: () -> Unit) {
+        var runnable: Runnable? = null
+        runnable = Runnable {
+            synchronized(lovensePendingRunnables) {
+                lovensePendingRunnables.removeIf { it === runnable }
+            }
+            action()
+        }
+        synchronized(lovensePendingRunnables) {
+            runnable?.let { lovensePendingRunnables.add(it) }
+        }
+        runnable?.let { lovenseHandler.postDelayed(it, delayMs.coerceAtLeast(0L)) }
+    }
+
+    private fun cancelLovenseActuation(stopNow: Boolean) {
+        lovensePatternGeneration.incrementAndGet()
+        synchronized(lovensePendingRunnables) {
+            lovensePendingRunnables.forEach { lovenseHandler.removeCallbacks(it) }
+            lovensePendingRunnables.clear()
+        }
+        if (stopNow) {
+            runCatching { LovenseManager.stopAll() }
+        }
+    }
+
+    private fun runLovenseTransientPattern(pattern: String, baseLevel: Int, durationMs: Long) {
+        val generation = lovensePatternGeneration.incrementAndGet()
+        val startedAt = System.currentTimeMillis()
+        val safeDuration = durationMs.coerceIn(250L, 1_200_000L)
+        var step = 0
+
+        fun tick() {
+            if (generation != lovensePatternGeneration.get()) return
+
+            val elapsed = System.currentTimeMillis() - startedAt
+            if (elapsed >= safeDuration) {
+                LovenseManager.stopAll()
+                return
+            }
+
+            val nextLevel = when (pattern) {
+                "pulse" -> if (step % 2 == 0) baseLevel else (baseLevel / 3)
+                "wave" -> {
+                    val phase = step % 6
+                    val wave = floatArrayOf(0.30f, 0.55f, 0.85f, 1.00f, 0.75f, 0.45f)
+                    (baseLevel * wave[phase]).toInt()
+                }
+                "tease" -> if (step % 4 == 0) (baseLevel * 0.9f).toInt() else (baseLevel * 0.2f).toInt()
+                else -> baseLevel
+            }.coerceIn(0, 20)
+
+            LovenseManager.vibrate(nextLevel)
+            step += 1
+
+            scheduleLovenseAction(LOVENSE_PATTERN_STEP_MS) {
+                tick()
+            }
+        }
+
+        tick()
+    }
+
     private fun runLovenseBuzzPattern(seconds: Int, repeatCount: Int) {
+        val generation = lovensePatternGeneration.incrementAndGet()
+
         fun runPulse(remaining: Int) {
+            if (generation != lovensePatternGeneration.get()) return
             if (remaining <= 0) return
 
             val strengthPercent = Random.nextInt(
@@ -878,15 +987,18 @@ class PartnerMqttService : Service() {
                 .coerceIn(10, 20)
             LovenseManager.vibrate(lovenseLevel)
 
-            reconnectHandler.postDelayed({
+            scheduleLovenseAction(seconds * 1_000L) {
+                if (generation != lovensePatternGeneration.get()) return@scheduleLovenseAction
                 LovenseManager.stopAll()
-                if (remaining - 1 <= 0) return@postDelayed
+                if (remaining - 1 <= 0) return@scheduleLovenseAction
                 val gapMs = Random.nextLong(
                     from = BUZZ_INTER_PULSE_DELAY_MIN_MS,
                     until = BUZZ_INTER_PULSE_DELAY_MAX_MS + 1,
                 )
-                reconnectHandler.postDelayed({ runPulse(remaining - 1) }, gapMs)
-            }, seconds * 1_000L)
+                scheduleLovenseAction(gapMs) {
+                    runPulse(remaining - 1)
+                }
+            }
         }
 
         runPulse(repeatCount)
