@@ -582,6 +582,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         },
       );
 
+      // Kick the edge automation immediately after the approved counts land.
+      unawaited(_runEdgeTargetStepIfNeeded());
+
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(

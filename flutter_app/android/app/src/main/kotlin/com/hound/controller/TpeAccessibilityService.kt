@@ -78,6 +78,16 @@ class TpeAccessibilityService : AccessibilityService() {
             AccessibilityEvent.TYPE_NOTIFICATION_STATE_CHANGED ->
                 extractCommandPayload(safeEvent, packageName, source = "notification")
 
+            AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED,
+            AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED,
+            AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED -> {
+                if (shouldInspectOnScreenText(packageName)) {
+                    extractCommandPayload(safeEvent, packageName, source = "screen")
+                } else {
+                    null
+                }
+            }
+
             else -> null
         }
 
