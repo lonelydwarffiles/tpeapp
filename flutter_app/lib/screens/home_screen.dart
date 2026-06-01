@@ -867,6 +867,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     final pavlokConnected = _nativePavlokConnected || ble.pavlokConnected;
     final lovenseBattery = _nativeLovenseBatteryPct ?? ble.lovenseBatteryPct;
     final pavlokBattery = _nativePavlokBatteryPct ?? ble.pavlokBatteryPct;
+    final buzzControlsVisible =
+        _edgeTargetCount > 0 || _manualBuzzHoldUntilLowHr || _edgeTargetStepInFlight;
     final width = MediaQuery.sizeOf(context).width;
     final crossAxisCount = width >= 900
         ? 4
@@ -960,9 +962,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   _edgeTargetCount > 0
                       ? (_edgeCount >= _edgeTargetCount
                           ? 'Edge target reached: $_edgeCount/$_edgeTargetCount'
-                      : lovenseConnected
-                        ? 'Edge target: $_edgeCount/$_edgeTargetCount (auto-running)'
-                        : 'Edge target: $_edgeCount/$_edgeTargetCount (waiting for toy)')
+                          : lovenseConnected
+                              ? 'Edge target: $_edgeCount/$_edgeTargetCount (auto-running)'
+                              : 'Edge target: $_edgeCount/$_edgeTargetCount (waiting for toy)')
                       : 'Edge target: off',
                   style: Theme.of(context).textTheme.bodySmall,
                 ),
@@ -978,69 +980,71 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                       : 'Buzz hold: off',
                   style: Theme.of(context).textTheme.bodySmall,
                 ),
-                const SizedBox(height: 8),
-                Row(
-                  children: [
-                    Expanded(
-                      child: FilledButton.icon(
-                        onPressed: () => unawaited(
-                          _queueSessionCounter(orgasm: false),
+                if (buzzControlsVisible) ...[
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: FilledButton.icon(
+                          onPressed: () => unawaited(
+                            _queueSessionCounter(orgasm: false),
+                          ),
+                          icon: const Icon(Icons.trending_up),
+                          label: const Text('Queue Edge'),
                         ),
-                        icon: const Icon(Icons.trending_up),
-                        label: const Text('Queue Edge'),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: FilledButton.tonalIcon(
+                          onPressed: () => unawaited(
+                            _queueSessionCounter(orgasm: true),
+                          ),
+                          icon: const Icon(Icons.favorite),
+                          label: const Text('Queue Orgasm'),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton.icon(
+                      onPressed: () => unawaited(_activateManualBuzzHoldUntilLowHr()),
+                      icon: Icon(
+                        _manualBuzzHoldUntilLowHr
+                            ? Icons.pause_circle_filled
+                            : Icons.pause_circle_outline,
+                      ),
+                      label: Text(
+                        _manualBuzzHoldUntilLowHr
+                            ? 'Buzz Hold Active (Tap to Re-stop)'
+                            : 'Hold Buzz Until HR Low',
                       ),
                     ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: FilledButton.tonalIcon(
-                        onPressed: () => unawaited(
-                          _queueSessionCounter(orgasm: true),
-                        ),
-                        icon: const Icon(Icons.favorite),
-                        label: const Text('Queue Orgasm'),
+                  ),
+                  const SizedBox(height: 8),
+                  SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton.icon(
+                      onPressed: (_counterApproveInFlight ||
+                              (_edgePendingCount <= 0 && _orgasmPendingCount <= 0))
+                          ? null
+                          : () => unawaited(_approvePendingCounters()),
+                      icon: _counterApproveInFlight
+                          ? const SizedBox(
+                              width: 16,
+                              height: 16,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Icon(Icons.cloud_upload_outlined),
+                      label: Text(
+                        _counterApproveInFlight
+                            ? 'Approving...'
+                            : 'Approve Pending Counters',
                       ),
                     ),
-                  ],
-                ),
-                const SizedBox(height: 8),
-                SizedBox(
-                  width: double.infinity,
-                  child: OutlinedButton.icon(
-                    onPressed: () => unawaited(_activateManualBuzzHoldUntilLowHr()),
-                    icon: Icon(
-                      _manualBuzzHoldUntilLowHr
-                          ? Icons.pause_circle_filled
-                          : Icons.pause_circle_outline,
-                    ),
-                    label: Text(
-                      _manualBuzzHoldUntilLowHr
-                          ? 'Buzz Hold Active (Tap to Re-stop)'
-                          : 'Hold Buzz Until HR Low',
-                    ),
                   ),
-                ),
-                const SizedBox(height: 8),
-                SizedBox(
-                  width: double.infinity,
-                  child: OutlinedButton.icon(
-                    onPressed: (_counterApproveInFlight ||
-                            (_edgePendingCount <= 0 && _orgasmPendingCount <= 0))
-                        ? null
-                        : () => unawaited(_approvePendingCounters()),
-                    icon: _counterApproveInFlight
-                        ? const SizedBox(
-                            width: 16,
-                            height: 16,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : const Icon(Icons.cloud_upload_outlined),
-                    label: Text(
-                      _counterApproveInFlight
-                          ? 'Approving...'
-                          : 'Approve Pending Counters',
-                    ),
-                  ),
-                ),
+                ],
               ],
             ),
           ),
@@ -1053,8 +1057,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               child: Container(
                 width: double.infinity,
                 margin: const EdgeInsets.fromLTRB(16, 8, 16, 4),
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                 decoration: BoxDecoration(
                   color: cs.surfaceContainerHighest.withOpacity(0.7),
                   borderRadius: BorderRadius.circular(12),

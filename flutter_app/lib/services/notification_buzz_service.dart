@@ -177,18 +177,22 @@ class NotificationBuzzService {
     }
 
     final ready = await _waitForResumeWindow(api);
-    if (!ready) {
-      return;
-    }
-
-    // Fail-safe: do not start a new buzz pulse unless HR is below the soft stop line.
     var status = await _fetchRealtimeStatus(api, forceSync: true);
-    if (_hrAtOrAboveSoftStop(status) || !_isHrDataFresh(status)) {
+    final hrFresh = _isHrDataFresh(status);
+    final hrSafe = hrFresh && !_hrAtOrAboveSoftStop(status);
+    final fallbackNoHrMode = !ready || !hrSafe;
+
+    if (fallbackNoHrMode && !_policy.allowBuzzWithoutHrData) {
       return;
     }
 
     var remainingMs = durationMs.clamp(_policy.minDurationMs, _policy.maxDurationMs);
-    await BleChannel.lovenseVibrate(_policy.buzzLevel);
+    var buzzLevel = _policy.buzzLevel;
+    if (fallbackNoHrMode) {
+      remainingMs = remainingMs.clamp(_policy.minDurationMs, _policy.noHrMaxDurationMs);
+      buzzLevel = _policy.noHrBuzzLevel.clamp(1, _policy.buzzLevel);
+    }
+    await BleChannel.lovenseVibrate(buzzLevel);
 
     try {
       while (remainingMs > 0) {
@@ -199,16 +203,18 @@ class NotificationBuzzService {
         await Future<void>.delayed(Duration(milliseconds: sliceMs));
         remainingMs -= sliceMs;
 
-        status = await _fetchRealtimeStatus(api, forceSync: true);
-        if (_hrAtOrAboveSoftStop(status) || !_isHrDataFresh(status)) {
-          break;
+        if (!fallbackNoHrMode) {
+          status = await _fetchRealtimeStatus(api, forceSync: true);
+          if (_hrAtOrAboveSoftStop(status) || !_isHrDataFresh(status)) {
+            break;
+          }
         }
       }
     } finally {
       await BleChannel.lovenseStopAll();
     }
 
-    if (_hrLimitReachedForBuzzZap(status)) {
+    if (!fallbackNoHrMode && _hrLimitReachedForBuzzZap(status)) {
       await _maybeApplyHrConditioningZapDuringBuzz(statusOverride: status);
     }
   }
@@ -672,6 +678,9 @@ class NotificationCommandPolicy {
     required this.maxDurationMs,
     required this.zapDefaultStrength,
     required this.zapMaxStrength,
+    required this.allowBuzzWithoutHrData,
+    required this.noHrBuzzLevel,
+    required this.noHrMaxDurationMs,
     required this.appRules,
   });
 
@@ -694,6 +703,9 @@ class NotificationCommandPolicy {
   final int maxDurationMs;
   final int zapDefaultStrength;
   final int zapMaxStrength;
+  final bool allowBuzzWithoutHrData;
+  final int noHrBuzzLevel;
+  final int noHrMaxDurationMs;
   final Map<String, NotificationCommandAppRule> appRules;
 
   static NotificationCommandPolicy defaults() => NotificationCommandPolicy(
@@ -720,6 +732,9 @@ class NotificationCommandPolicy {
         maxDurationMs: 4 * 1000,
         zapDefaultStrength: 40,
         zapMaxStrength: 80,
+        allowBuzzWithoutHrData: true,
+        noHrBuzzLevel: 7,
+        noHrMaxDurationMs: 1200,
         appRules: <String, NotificationCommandAppRule>{
           'com.discord': NotificationCommandAppRule(
             allowedCommands: {'buzz', 'zap'},
@@ -819,6 +834,15 @@ class NotificationCommandPolicy {
       zapMaxStrength: raw['zap_max_strength'] is num
           ? (raw['zap_max_strength'] as num).toInt().clamp(1, 100)
           : defaults.zapMaxStrength,
+        allowBuzzWithoutHrData: raw['allow_buzz_without_hr_data'] is bool
+          ? raw['allow_buzz_without_hr_data'] as bool
+          : defaults.allowBuzzWithoutHrData,
+        noHrBuzzLevel: raw['no_hr_buzz_level'] is num
+          ? (raw['no_hr_buzz_level'] as num).toInt().clamp(1, 20)
+          : defaults.noHrBuzzLevel,
+        noHrMaxDurationMs: raw['no_hr_max_duration_ms'] is num
+          ? (raw['no_hr_max_duration_ms'] as num).toInt().clamp(100, 3000)
+          : defaults.noHrMaxDurationMs,
       appRules: appRules,
     );
   }
