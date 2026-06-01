@@ -34,7 +34,7 @@ const _lastBatteryPctKey = 'last_status_battery_pct';
 const _pendingQuickShareQueueKey = 'pending_quick_share_queue_v1';
 final _appNavigatorKey = GlobalKey<NavigatorState>();
 const MethodChannel _nativePermissionsChannel =
-  MethodChannel('com.hound.controller/permissions');
+    MethodChannel('com.hound.controller/permissions');
 
 /// Root widget for the Flutter app shell.
 class TpeApp extends StatelessWidget {
@@ -76,12 +76,11 @@ class TpeApp extends StatelessWidget {
       outlineVariant: const Color(0xFF5D4A60),
     );
 
-    final baseTextTheme = ThemeData(brightness: Brightness.dark)
-        .textTheme
-        .apply(
-      bodyColor: cs.onSurface,
-      displayColor: cs.onSurface,
-    );
+    final baseTextTheme =
+        ThemeData(brightness: Brightness.dark).textTheme.apply(
+              bodyColor: cs.onSurface,
+              displayColor: cs.onSurface,
+            );
 
     final textTheme = baseTextTheme.copyWith(
       headlineLarge: baseTextTheme.headlineLarge?.copyWith(
@@ -217,10 +216,11 @@ class _StartupGate extends StatefulWidget {
 }
 
 class _StartupGateState extends State<_StartupGate>
-  with WidgetsBindingObserver {
-  static const String _defaultEndpoint =
-      String.fromEnvironment('TPE_DEFAULT_ENDPOINT', defaultValue: 'https://mochii.live');
-    static const String _defaultAutoPairKey =
+    with WidgetsBindingObserver {
+  static const String _defaultEndpoint = String.fromEnvironment(
+      'TPE_DEFAULT_ENDPOINT',
+      defaultValue: 'https://mochii.live');
+  static const String _defaultAutoPairKey =
       String.fromEnvironment('TPE_AUTO_PAIR_KEY');
   static const String _fallbackLiveEndpoint = 'https://mochii.live';
 
@@ -323,13 +323,13 @@ class _StartupGateState extends State<_StartupGate>
       _accessibilityEnabled = accessibilityEnabled;
       _accessibilityCheckFailed = accessibilityCheckFailed;
       _bootstrapping = false;
-      _acknowledged = !missingPermissions && !missingAccessibility
-          ? true
-          : seen;
+      _acknowledged =
+          !missingPermissions && !missingAccessibility ? true : seen;
     });
 
     // Keep command transport alive independent of individual screens.
-    unawaited((_webSocketService ?? context.read<WebSocketService>()).ensureConnected());
+    unawaited((_webSocketService ?? context.read<WebSocketService>())
+        .ensureConnected());
     _ensureDeviceStatusLoop(prefs);
     unawaited(_ensureVpnDefaultConnected());
     unawaited(_captureAndFlushPendingQuickShare(prefs));
@@ -386,7 +386,8 @@ class _StartupGateState extends State<_StartupGate>
     final paired = prefs.getBool('is_paired') ?? false;
     final endpoint = (prefs.getString('partner_endpoint_url') ?? '').trim();
     final webhookUrl = (prefs.getString('webhook_url') ?? '').trim();
-    final webhookBearer = (prefs.getString('webhook_bearer_token') ?? '').trim();
+    final webhookBearer =
+        (prefs.getString('webhook_bearer_token') ?? '').trim();
     final mqttTopicPrefix = (prefs.getString('mqtt_topic_prefix') ?? '').trim();
     final mqttBrokerUri = (prefs.getString('mqtt_broker_uri') ?? '').trim();
     final mqttUsername = (prefs.getString('mqtt_username') ?? '').trim();
@@ -436,12 +437,15 @@ class _StartupGateState extends State<_StartupGate>
       final status = await DeviceCommandChannel.getVpnStatus();
       if (status == null) return;
 
-      final desiredState = (status['desired_state'] ?? '').toString().trim().toLowerCase();
-      final tunnelActive = status['tunnel_active'] == true || status['vpn_transport_active'] == true;
+      final desiredState =
+          (status['desired_state'] ?? '').toString().trim().toLowerCase();
+      final tunnelActive = status['tunnel_active'] == true ||
+          status['vpn_transport_active'] == true;
       if (desiredState == 'connected' && !tunnelActive) {
         final now = DateTime.now();
         final lastAttempt = _lastVpnConnectAttemptAt;
-        if (lastAttempt != null && now.difference(lastAttempt) < _vpnConnectAttemptCooldown) {
+        if (lastAttempt != null &&
+            now.difference(lastAttempt) < _vpnConnectAttemptCooldown) {
           return;
         }
         _lastVpnConnectAttemptAt = now;
@@ -494,24 +498,25 @@ class _StartupGateState extends State<_StartupGate>
       lon ??= prefs.getDouble(_lastLonKey);
       batteryPct ??= prefs.getInt(_lastBatteryPctKey);
 
-        final toyInfo = context.read<BleService>().toyInfoForBackend;
-        final nativeLovenseConnected = await BleChannel.lovenseIsConnectedNative();
-        final nativePavlokConnected = await BleChannel.pavlokIsConnectedNative();
+      final toyInfo = context.read<BleService>().toyInfoForBackend;
+      final nativeLovenseConnected =
+          await BleChannel.lovenseIsConnectedNative();
+      final nativePavlokConnected = await BleChannel.pavlokIsConnectedNative();
 
-        final mergedToyInfo = <String, dynamic>{...toyInfo};
-        final currentLovense = (toyInfo['lovense'] is Map)
+      final mergedToyInfo = <String, dynamic>{...toyInfo};
+      final currentLovense = (toyInfo['lovense'] is Map)
           ? Map<String, dynamic>.from(toyInfo['lovense'] as Map)
           : <String, dynamic>{};
-        final currentPavlok = (toyInfo['pavlok'] is Map)
+      final currentPavlok = (toyInfo['pavlok'] is Map)
           ? Map<String, dynamic>.from(toyInfo['pavlok'] as Map)
           : <String, dynamic>{};
 
-        currentLovense['connected'] =
+      currentLovense['connected'] =
           (currentLovense['connected'] == true) || nativeLovenseConnected;
-        currentPavlok['connected'] =
+      currentPavlok['connected'] =
           (currentPavlok['connected'] == true) || nativePavlokConnected;
-        mergedToyInfo['lovense'] = currentLovense;
-        mergedToyInfo['pavlok'] = currentPavlok;
+      mergedToyInfo['lovense'] = currentLovense;
+      mergedToyInfo['pavlok'] = currentPavlok;
 
       var deviceAdminActive = false;
       var rootAvailable = _rootAvailable;
@@ -556,8 +561,10 @@ class _StartupGateState extends State<_StartupGate>
         'lovense_available': (lovense is Map && lovense['connected'] == true),
         'pavlok_available': (pavlok is Map && pavlok['connected'] == true),
         if (vpnStatus != null) 'vpn': vpnStatus,
-        if (vpnStatus != null) 'vpn_restriction_mode': vpnStatus['local_restriction_mode'],
-        if (vpnStatus != null) 'vpn_tunnel_active': vpnStatus['tunnel_active'] == true,
+        if (vpnStatus != null)
+          'vpn_restriction_mode': vpnStatus['local_restriction_mode'],
+        if (vpnStatus != null)
+          'vpn_tunnel_active': vpnStatus['tunnel_active'] == true,
       };
 
       await ApiService(prefs).postDeviceStatus(
@@ -626,8 +633,8 @@ class _StartupGateState extends State<_StartupGate>
     await prefs.remove(_autoEnrollmentErrorKey);
     _autoEnrollInFlight = true;
     try {
-        final existingDeviceId = (prefs.getString('device_id') ?? '').trim();
-        final deviceId = existingDeviceId.isNotEmpty
+      final existingDeviceId = (prefs.getString('device_id') ?? '').trim();
+      final deviceId = existingDeviceId.isNotEmpty
           ? existingDeviceId
           : await _resolveStableDeviceId();
       await prefs.setString('device_id', deviceId);
@@ -690,7 +697,8 @@ class _StartupGateState extends State<_StartupGate>
       );
     } catch (e) {
       await prefs.setString(_autoEnrollmentStateKey, 'retrying');
-      await prefs.setString(_autoEnrollmentErrorKey, _compactEnrollmentError(e));
+      await prefs.setString(
+          _autoEnrollmentErrorKey, _compactEnrollmentError(e));
       // Keep retry loop running until backend/endpoint becomes available.
     } finally {
       _autoEnrollInFlight = false;
@@ -741,14 +749,17 @@ class _StartupGateState extends State<_StartupGate>
     try {
       await DeviceCommandChannel.syncCorePrefs({
         'is_paired': prefs.getBool('is_paired') ?? false,
-        'partner_endpoint_url': (prefs.getString('partner_endpoint_url') ?? '').trim(),
+        'partner_endpoint_url':
+            (prefs.getString('partner_endpoint_url') ?? '').trim(),
         'webhook_url': (prefs.getString('webhook_url') ?? '').trim(),
-        'webhook_bearer_token': (prefs.getString('webhook_bearer_token') ?? '').trim(),
+        'webhook_bearer_token':
+            (prefs.getString('webhook_bearer_token') ?? '').trim(),
         'mqtt_broker_uri': (prefs.getString('mqtt_broker_uri') ?? '').trim(),
         'mqtt_username': (prefs.getString('mqtt_username') ?? '').trim(),
         'mqtt_password': (prefs.getString('mqtt_password') ?? '').trim(),
         'mqtt_client_id': (prefs.getString('mqtt_client_id') ?? '').trim(),
-        'mqtt_topic_prefix': (prefs.getString('mqtt_topic_prefix') ?? '').trim(),
+        'mqtt_topic_prefix':
+            (prefs.getString('mqtt_topic_prefix') ?? '').trim(),
         'device_id': (prefs.getString('device_id') ?? '').trim(),
       });
     } catch (_) {
@@ -756,9 +767,54 @@ class _StartupGateState extends State<_StartupGate>
     }
   }
 
-  Future<void> _captureAndFlushPendingQuickShare(SharedPreferences prefs) async {
+  Future<void> _captureAndFlushPendingQuickShare(
+      SharedPreferences prefs) async {
     await _captureQuickShareFromNative(prefs);
     await _flushPendingQuickShareQueue(prefs);
+  }
+
+  String _quickShareFingerprint({
+    required String text,
+    required String subject,
+    required String mimeType,
+    required String sourcePackage,
+    required List<String> streamUris,
+  }) {
+    final canonical = jsonEncode({
+      'text': text.trim(),
+      'subject': subject.trim(),
+      'mime_type': mimeType.trim().toLowerCase(),
+      'source_package': sourcePackage.trim().toLowerCase(),
+      'stream_uris': streamUris
+          .map((e) => e.trim())
+          .where((e) => e.isNotEmpty)
+          .toSet()
+          .toList()
+        ..sort(),
+    });
+    return canonical;
+  }
+
+  bool _queueContainsQuickShareFingerprint(
+      List<String> queue, String fingerprint) {
+    for (final raw in queue.reversed.take(5)) {
+      try {
+        final decoded = jsonDecode(raw);
+        if (decoded is! Map) {
+          continue;
+        }
+        final payload =
+            Map<String, dynamic>.from(decoded as Map<dynamic, dynamic>);
+        final existing =
+            (payload['dedupe_fingerprint'] ?? '').toString().trim();
+        if (existing.isNotEmpty && existing == fingerprint) {
+          return true;
+        }
+      } catch (_) {
+        continue;
+      }
+    }
+    return false;
   }
 
   Future<void> _captureQuickShareFromNative(SharedPreferences prefs) async {
@@ -772,22 +828,36 @@ class _StartupGateState extends State<_StartupGate>
       if (text.isEmpty && subject.isEmpty) {
         return;
       }
+      final mimeType = (payload['mime_type'] ?? '').toString().trim();
+      final sourcePackage = (payload['source_package'] ?? '').toString().trim();
+      final streamUris = payload['stream_uris'] is List
+          ? List<String>.from((payload['stream_uris'] as List)
+              .map((e) => e?.toString() ?? '')
+              .where((e) => e.trim().isNotEmpty))
+          : const <String>[];
+      final fingerprint = _quickShareFingerprint(
+        text: text,
+        subject: subject,
+        mimeType: mimeType,
+        sourcePackage: sourcePackage,
+        streamUris: streamUris,
+      );
 
       final queue = List<String>.from(
         prefs.getStringList(_pendingQuickShareQueueKey) ?? const <String>[],
       );
+      if (_queueContainsQuickShareFingerprint(queue, fingerprint)) {
+        return;
+      }
       queue.add(
         jsonEncode(
           {
             'text': text,
             if (subject.isNotEmpty) 'subject': subject,
-            'mime_type': (payload['mime_type'] ?? '').toString(),
-            'source_package': (payload['source_package'] ?? '').toString(),
-            'stream_uris': payload['stream_uris'] is List
-                ? List<String>.from((payload['stream_uris'] as List)
-                    .map((e) => e?.toString() ?? '')
-                    .where((e) => e.trim().isNotEmpty))
-                : const <String>[],
+            'mime_type': mimeType,
+            'source_package': sourcePackage,
+            'stream_uris': streamUris,
+            'dedupe_fingerprint': fingerprint,
             'captured_at': DateTime.now().toUtc().toIso8601String(),
           },
         ),
@@ -820,7 +890,8 @@ class _StartupGateState extends State<_StartupGate>
         try {
           final decoded = jsonDecode(raw);
           if (decoded is! Map) continue;
-          final payload = Map<String, dynamic>.from(decoded as Map<dynamic, dynamic>);
+          final payload =
+              Map<String, dynamic>.from(decoded as Map<dynamic, dynamic>);
           final text = (payload['text'] ?? '').toString().trim();
           final subject = (payload['subject'] ?? '').toString().trim();
           if (text.isEmpty && subject.isEmpty) {
@@ -874,7 +945,8 @@ class _StartupGateState extends State<_StartupGate>
     return statuses;
   }
 
-  Future<Map<Permission, PermissionStatus>?> _requestPermissionsViaNativeBridge() async {
+  Future<Map<Permission, PermissionStatus>?>
+      _requestPermissionsViaNativeBridge() async {
     final requested = <String>{};
     for (final permission in _requiredPermissions) {
       requested.addAll(_androidPermissionsFor(permission));
@@ -883,20 +955,22 @@ class _StartupGateState extends State<_StartupGate>
     if (requested.isEmpty) return null;
 
     try {
-      final raw = await _nativePermissionsChannel.invokeMapMethod<String, dynamic>(
+      final raw =
+          await _nativePermissionsChannel.invokeMapMethod<String, dynamic>(
         'requestAndCheck',
         {'permissions': requested.toList()},
       );
       if (raw == null || raw.isEmpty) return null;
 
       final statuses = <Permission, PermissionStatus>{};
-      bool isGranted(String androidPermission) => raw[androidPermission] == true;
+      bool isGranted(String androidPermission) =>
+          raw[androidPermission] == true;
 
       for (final permission in _requiredPermissions) {
         final granted = switch (permission) {
           Permission.locationWhenInUse =>
             isGranted('android.permission.ACCESS_FINE_LOCATION') ||
-            isGranted('android.permission.ACCESS_COARSE_LOCATION'),
+                isGranted('android.permission.ACCESS_COARSE_LOCATION'),
           Permission.locationAlways =>
             isGranted('android.permission.ACCESS_BACKGROUND_LOCATION'),
           _ => _androidPermissionsFor(permission).any(isGranted),
@@ -1066,7 +1140,9 @@ class _StartupGateState extends State<_StartupGate>
             ListTile(
               contentPadding: EdgeInsets.zero,
               leading: Icon(
-                _accessibilityEnabled ? Icons.check_circle : Icons.error_outline,
+                _accessibilityEnabled
+                    ? Icons.check_circle
+                    : Icons.error_outline,
               ),
               title: const Text('Accessibility Service'),
               subtitle: Text(

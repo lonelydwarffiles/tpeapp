@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:collection';
 import 'dart:convert';
 import 'dart:developer' as developer;
+import 'dart:math';
 
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -18,6 +19,8 @@ class NotificationBuzzService {
 
   static const EventChannel _events =
       EventChannel('com.hound.controller/notification_buzz');
+  static const int _pulseGapMinMs = 400;
+  static const int _pulseGapMaxMs = 5000;
   static const _policyPrefsKey = 'notification_command_policy_json';
   static const _policySyncInterval = Duration(minutes: 5);
 
@@ -27,6 +30,7 @@ class NotificationBuzzService {
   final Queue<int> _buzzDurationsMs = Queue<int>();
   final Queue<int> _actuationMs = Queue<int>();
   final Map<String, int> _recentSignatures = <String, int>{};
+  final Random _rng = Random();
 
   SharedPreferences? _prefs;
   ApiService? _api;
@@ -143,11 +147,16 @@ class NotificationBuzzService {
           level: _policy.buzzLevel,
           durationMs: durationMs,
         );
-        await Future<void>.delayed(Duration(milliseconds: _policy.buzzGapMs));
+        await Future<void>.delayed(Duration(milliseconds: _randomPulseGapMs()));
       }
     } finally {
       _running = false;
     }
+  }
+
+  int _randomPulseGapMs() {
+    final span = (_pulseGapMaxMs - _pulseGapMinMs) + 1;
+    return _pulseGapMinMs + _rng.nextInt(span);
   }
 
   Future<void> _initPolicyPipeline() async {

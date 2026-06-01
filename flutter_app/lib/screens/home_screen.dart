@@ -397,8 +397,28 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   Future<void> _loadSessionCounters() async {
     final prefs = context.read<SharedPreferences>();
-    final edgeCount = prefs.getInt(_edgeCountKey) ?? 0;
-    final orgasmCount = prefs.getInt(_orgasmCountKey) ?? 0;
+    var edgeCount = prefs.getInt(_edgeCountKey) ?? 0;
+    var orgasmCount = prefs.getInt(_orgasmCountKey) ?? 0;
+
+    final api = _api;
+    if (api != null) {
+      final remote = await api.fetchPublicStatusCounters();
+      if (remote.isNotEmpty) {
+        final remoteEdge = remote['tasks_completed'];
+        final remoteOrgasm = remote['confessions_posted'];
+        final parsedEdge = remoteEdge is num ? remoteEdge.toInt() : int.tryParse('${remoteEdge ?? ''}');
+        final parsedOrgasm = remoteOrgasm is num ? remoteOrgasm.toInt() : int.tryParse('${remoteOrgasm ?? ''}');
+        if (parsedEdge != null && parsedEdge >= 0) {
+          edgeCount = parsedEdge > edgeCount ? parsedEdge : edgeCount;
+          await prefs.setInt(_edgeCountKey, edgeCount);
+        }
+        if (parsedOrgasm != null && parsedOrgasm >= 0) {
+          orgasmCount = parsedOrgasm > orgasmCount ? parsedOrgasm : orgasmCount;
+          await prefs.setInt(_orgasmCountKey, orgasmCount);
+        }
+      }
+    }
+
     if (!mounted) return;
     setState(() {
       _edgeCount = edgeCount;
@@ -427,6 +447,16 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         'edge_count': edgeCount,
         'orgasm_count': orgasmCount,
       },
+    );
+
+    // The webhook-backed counter update is asynchronous on the backend, so an
+    // immediate reload can race against stale public-status values and snap the
+    // UI back down. Refresh later in the background instead.
+    unawaited(
+      Future<void>.delayed(const Duration(seconds: 3), () async {
+        if (!mounted) return;
+        await _loadSessionCounters();
+      }),
     );
   }
 

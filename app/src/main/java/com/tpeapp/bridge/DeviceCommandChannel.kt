@@ -22,6 +22,8 @@ import com.tpeapp.service.CoreServiceKeeper
 import com.tpeapp.vpn.VpnPolicyManager
 import io.flutter.plugin.common.BinaryMessenger
 import io.flutter.plugin.common.MethodChannel
+import org.json.JSONArray
+import org.json.JSONObject
 
 /**
  * DeviceCommandChannel — MethodChannel bridge for [DeviceCommandManager].
@@ -63,10 +65,11 @@ object DeviceCommandChannel {
 
     private const val TAG = "DeviceCommandChannel"
     private const val CHANNEL = "com.hound.controller/device_commands"
+    private const val PREF_PENDING_SHARE_PAYLOAD = "pending_share_payload_json"
     @Volatile
     private var pendingSharePayload: Map<String, Any?>? = null
 
-    fun captureIncomingShareIntent(intent: Intent?) {
+    fun captureIncomingShareIntent(context: Context, intent: Intent?) {
         if (intent == null) return
         val action = intent.action ?: return
         if (action != Intent.ACTION_SEND && action != Intent.ACTION_SEND_MULTIPLE) {
@@ -123,7 +126,7 @@ object DeviceCommandChannel {
             return
         }
 
-        pendingSharePayload = mapOf(
+        val payload = mapOf(
             "action" to action,
             "mime_type" to type,
             "subject" to subject,
@@ -131,11 +134,77 @@ object DeviceCommandChannel {
             "source_package" to packageName,
             "stream_uris" to streamUris,
         )
+        pendingSharePayload = payload
+        persistPendingSharePayload(context.applicationContext, payload)
     }
 
-    private fun consumePendingSharePayload(): Map<String, Any?>? {
-        val payload = pendingSharePayload
+    private fun persistPendingSharePayload(context: Context, payload: Map<String, Any?>) {
+        runCatching {
+            val json = JSONObject().apply {
+                put("action", payload["action"]?.toString().orEmpty())
+                put("mime_type", payload["mime_type"]?.toString().orEmpty())
+                put("subject", payload["subject"]?.toString().orEmpty())
+                put("text", payload["text"]?.toString().orEmpty())
+                put("source_package", payload["source_package"]?.toString().orEmpty())
+                put(
+                    "stream_uris",
+                    JSONArray((payload["stream_uris"] as? List<*>)?.map { it?.toString().orEmpty() } ?: emptyList<String>())
+                )
+            }
+            PreferenceManager.getDefaultSharedPreferences(context)
+                .edit()
+                .putString(PREF_PENDING_SHARE_PAYLOAD, json.toString())
+                .apply()
+        }.onFailure { err ->
+            Log.w(TAG, "Failed to persist pending share payload", err)
+        }
+    }
+
+    private fun loadPersistedPendingSharePayload(context: Context): Map<String, Any?>? {
+        val raw = PreferenceManager.getDefaultSharedPreferences(context)
+            .getString(PREF_PENDING_SHARE_PAYLOAD, null)
+            ?.trim()
+            .orEmpty()
+        if (raw.isEmpty()) {
+            return null
+        }
+        return runCatching {
+            val json = JSONObject(raw)
+            val streamUris = mutableListOf<String>()
+            val array = json.optJSONArray("stream_uris")
+            if (array != null) {
+                for (index in 0 until array.length()) {
+                    val value = array.optString(index).trim()
+                    if (value.isNotEmpty()) {
+                        streamUris += value
+                    }
+                }
+            }
+            mapOf(
+                "action" to json.optString("action").trim(),
+                "mime_type" to json.optString("mime_type").trim(),
+                "subject" to json.optString("subject").trim(),
+                "text" to json.optString("text").trim(),
+                "source_package" to json.optString("source_package").trim(),
+                "stream_uris" to streamUris,
+            )
+        }.getOrElse { err ->
+            Log.w(TAG, "Failed to read persisted pending share payload", err)
+            null
+        }
+    }
+
+    private fun clearPersistedPendingSharePayload(context: Context) {
+        PreferenceManager.getDefaultSharedPreferences(context)
+            .edit()
+            .remove(PREF_PENDING_SHARE_PAYLOAD)
+            .apply()
+    }
+
+    private fun consumePendingSharePayload(context: Context): Map<String, Any?>? {
+        val payload = pendingSharePayload ?: loadPersistedPendingSharePayload(context.applicationContext)
         pendingSharePayload = null
+        clearPersistedPendingSharePayload(context.applicationContext)
         return payload
     }
 
@@ -286,7 +355,7 @@ object DeviceCommandChannel {
                         }
                     }
                     "consumePendingSharePayload" -> {
-                        result.success(consumePendingSharePayload())
+                        result.success(consumePendingSharePayload(ctx))
                     }
                     "syncCorePrefs" -> {
                         @Suppress("UNCHECKED_CAST")

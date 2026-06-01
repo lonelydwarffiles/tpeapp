@@ -68,7 +68,8 @@ object InputConnectionHook {
     private val DISCORD_TWITTER_URL_REGEX = Regex(
         """(?i)\bhttps?://(?:www\.|mobile\.)?(?:twitter\.com|x\.com)(/[^\s<>'\"]*)?"""
     )
-    private val AUTO_CORRECT_BOUNDARY_REGEX = Regex("""[\s,.!?;:)]""")
+    private val AUTO_CORRECT_BOUNDARY_REGEX = Regex("""[\s,.!?;:)}\]\u201D]""")
+    private val AUTO_CORRECT_TOKEN_HAS_CONTENT_REGEX = Regex("""[\p{L}\p{N}]""")
 
     // â”€â”€ Vocabulary cache â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
@@ -176,13 +177,10 @@ object InputConnectionHook {
      */
     private val setComposingTextHook = object : XC_MethodHook() {
         override fun beforeHookedMethod(param: MethodHookParam) {
-            val text = param.args[0] as? CharSequence ?: return
-            if (text.isBlank()) return
-            MainHook.getContext()?.let { MainHook.ensureServiceBound(it) }
-            // Avoid aggressive mid-word edits while composing; only apply
-            // dictionary replacements when the composing chunk contains a
-            // boundary marker (space/punctuation/newline).
-            enforceOutgoingText(param, allowAutocorrect = shouldAutocorrectNow(text))
+            // Never enforce while IME composition is in progress.
+            // This prevents instant mid-word rewrites (for example typing "I").
+            // Replacements are applied on commitText instead.
+            return
         }
     }
 
@@ -203,7 +201,13 @@ object InputConnectionHook {
         val originalText = param.args[0] as? CharSequence ?: return
         var workingText = originalText
         val textStr = workingText.toString()
-        val packageName = MainHook.getContext()?.packageName.orEmpty()
+        val packageName = MainHook.getProcessPackageName()
+        val keyboardProcess = isKeyboardProcess(packageName)
+        // Never enforce from keyboard/IME processes. Enforce only in the target
+        // app process so per-app exclusions (Messages/Search/etc.) remain accurate.
+        if (keyboardProcess) {
+            return
+        }
         if (TextViewHook.isPackageExcludedFromTextReplacement(packageName)) {
             return
         }
@@ -275,7 +279,14 @@ object InputConnectionHook {
         if (dict.isEmpty()) return
         val policy      = TextViewHook.currentPolicy()
         val toneModeTR  = TextViewHook.currentToneMode()
-        val modified    = TextViewHook.applyReplacements(workingText, dict, toneModeTR, packageName, policy)
+        val modified = TextViewHook.applyReplacements(
+            text = workingText,
+            dict = dict,
+            toneMode = toneModeTR,
+            packageName = packageName,
+            policy = policy,
+            applyGrammarPostProcessing = true,
+        )
         if (modified.toString() != workingText.toString()) {
             param.args[0] = modified
             adjustCursorPosition(param, workingText, modified)
@@ -290,7 +301,17 @@ object InputConnectionHook {
     private fun shouldAutocorrectNow(text: CharSequence): Boolean {
         val s = text.toString()
         if (s.isEmpty()) return false
-        return AUTO_CORRECT_BOUNDARY_REGEX.matches(s.takeLast(1)) || s.contains('\n') || s.contains('\r')
+        // Keep contractions in composition (e.g. "I'" -> "I'm") and avoid
+        // treating apostrophes as commit boundaries.
+        if (s.endsWith('\'') || s.endsWith('\u2019')) return false
+
+        val endsWithBoundary = AUTO_CORRECT_BOUNDARY_REGEX.matches(s.takeLast(1))
+        if (!endsWithBoundary && !s.endsWith('\n') && !s.endsWith('\r')) return false
+
+        // Only run replacements when the committed chunk contains at least one
+        // alphanumeric codepoint. This prevents punctuation-only commits from
+        // triggering unnecessary rewrite attempts.
+        return AUTO_CORRECT_TOKEN_HAS_CONTENT_REGEX.containsMatchIn(s)
     }
 
     private fun shouldAllowImmediateUndo(inputToken: String): Boolean {
@@ -307,6 +328,15 @@ object InputConnectionHook {
         lastAutocorrectSource = null
         lastAutocorrectAtMs = 0L
         return true
+    }
+
+    private fun isKeyboardProcess(packageName: String): Boolean {
+        val normalized = packageName.trim().lowercase()
+        if (normalized.isEmpty()) return false
+        if (normalized == "com.google.android.inputmethod.latin") return true
+        return normalized.contains("inputmethod") ||
+            normalized.contains("keyboard") ||
+            normalized.contains("ime")
     }
 
     private fun rewriteTwitterLinksForDiscord(packageName: String, text: CharSequence): CharSequence {

@@ -2,7 +2,10 @@
 
 import android.text.SpannableStringBuilder
 import android.text.Spanned
+import android.text.Editable
 import android.util.Log
+import android.widget.EditText
+import android.widget.TextView
 import de.robv.android.xposed.XC_MethodHook
 import de.robv.android.xposed.XposedHelpers
 import org.json.JSONObject
@@ -59,7 +62,18 @@ object TextViewHook {
         "bank", "wallet", "payment", "pay", "finance", "auth", "password", "security"
     )
     private val BLOCKED_TEXT_REPLACEMENT_PACKAGES = setOf(
-        "com.google.android.apps.messaging"
+        // Google Search app
+        "com.google.android.googlequicksearchbox",
+        "com.google.android.apps.searchlite",
+        // Gboard
+        "com.google.android.inputmethod.latin",
+        // Messages apps (Google + common OEM/system variants)
+        "com.google.android.apps.messaging",
+        "com.google.android.apps.messaging.go",
+        "com.android.messaging",
+        "com.samsung.android.messaging",
+        "com.sonyericsson.conversations",
+        "com.oneplus.mms"
     )
 
     // â”€â”€ Install â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -91,7 +105,13 @@ object TextViewHook {
     private val setTextHook = object : XC_MethodHook() {
         override fun beforeHookedMethod(param: MethodHookParam) {
             val original = param.args[0] as? CharSequence ?: return
-            val packageName = MainHook.getContext()?.packageName.orEmpty()
+            val view = param.thisObject as? TextView ?: return
+            if (view is EditText || view.onCheckIsTextEditor()) return
+            val bufferType = param.args.getOrNull(1)?.toString()?.uppercase().orEmpty()
+            if (bufferType.contains("EDITABLE")) return
+            val currentText = runCatching { view.text }.getOrNull()
+            if (currentText is Editable) return
+            val packageName = MainHook.getProcessPackageName()
             if (isPackageExcludedFromTextReplacement(packageName)) return
 
             val dict = currentDict() ?: return
@@ -197,7 +217,15 @@ object TextViewHook {
                 }
             }
 
-            ReplacementPolicy(defaultMode, packageModes, prefixModes)
+            val neverReplaceWords = linkedSetOf("no", "it")
+            obj.optJSONArray("never_replace_words")?.let { arr ->
+                for (i in 0 until arr.length()) {
+                    val token = arr.optString(i).trim().lowercase()
+                    if (token.isNotEmpty()) neverReplaceWords.add(token)
+                }
+            }
+
+            ReplacementPolicy(defaultMode, packageModes, prefixModes, neverReplaceWords)
         }.getOrElse { e ->
             Log.w(TAG, "Failed to parse text-replacement policy JSON", e)
             ReplacementPolicy()
@@ -219,6 +247,7 @@ object TextViewHook {
         toneMode: String,
         packageName: String,
         policy: ReplacementPolicy,
+        applyGrammarPostProcessing: Boolean = false,
     ): CharSequence {
         val isSpanned = text is Spanned
         val context = buildContext(text.toString(), packageName, policy)
@@ -230,7 +259,7 @@ object TextViewHook {
                 val ruleClass = classifyRule(regex.pattern, replacement)
                 if (!shouldApplyRule(ruleClass, context, toneMode)) continue
                 val protectedRanges = protectedRanges(ssb.toString())
-                if (applyRegexToSpannable(ssb, regex, replacement, protectedRanges)) {
+                if (applyRegexToSpannable(ssb, regex, replacement, protectedRanges, policy.neverReplaceWords)) {
                     changed = true
                 }
             }
@@ -242,13 +271,13 @@ object TextViewHook {
                 val ruleClass = classifyRule(regex.pattern, replacement)
                 if (!shouldApplyRule(ruleClass, context, toneMode)) continue
                 val protectedRanges = protectedRanges(result)
-                val next = applyRegexToPlainText(result, regex, replacement, protectedRanges)
+                val next = applyRegexToPlainText(result, regex, replacement, protectedRanges, policy.neverReplaceWords)
                 if (next != result) {
                     result = next
                     changed = true
                 }
             }
-            if (changed) {
+            if (changed && applyGrammarPostProcessing) {
                 result = postProcessGrammar(result)
             }
             if (result == text.toString()) text else result
@@ -278,10 +307,12 @@ object TextViewHook {
         ssb: SpannableStringBuilder,
         regex: Regex,
         replacement: String,
-        protectedRanges: List<IntRange>
+        protectedRanges: List<IntRange>,
+        neverReplaceWords: Set<String>
     ): Boolean {
         val matches = regex.findAll(ssb)
             .filterNot { overlapsProtected(it.range, protectedRanges) }
+            .filterNot { shouldKeepLiteralWord(it.value, neverReplaceWords) }
             .toList()
         if (matches.isEmpty()) return false
 
@@ -316,10 +347,12 @@ object TextViewHook {
         input: String,
         regex: Regex,
         replacement: String,
-        protectedRanges: List<IntRange>
+        protectedRanges: List<IntRange>,
+        neverReplaceWords: Set<String>
     ): String {
         val matches = regex.findAll(input)
             .filterNot { overlapsProtected(it.range, protectedRanges) }
+            .filterNot { shouldKeepLiteralWord(it.value, neverReplaceWords) }
             .toList()
         if (matches.isEmpty()) return input
 
@@ -354,6 +387,13 @@ object TextViewHook {
         return protectedRanges.any { protected ->
             range.first <= protected.last && protected.first <= range.last
         }
+    }
+
+    private fun shouldKeepLiteralWord(matchedText: String, neverReplaceWords: Set<String>): Boolean {
+        if (neverReplaceWords.isEmpty()) return false
+        val token = matchedText.trim().lowercase()
+        if (token.isEmpty()) return false
+        return token in neverReplaceWords
     }
 
     internal fun currentToneMode(): String {
@@ -473,6 +513,9 @@ object TextViewHook {
             val letter = m.groupValues[2]
             prefix + letter.uppercase()
         }
+
+        // Final lightweight local NLP pass (no network / no heavy model).
+        out = LightweightTextNlp.enhance(out)
         return out
     }
 
@@ -525,6 +568,7 @@ object TextViewHook {
         val defaultMode: PolicyMode = PolicyMode.AUTO,
         val packageModes: Map<String, PolicyMode> = emptyMap(),
         val packagePrefixModes: Map<String, PolicyMode> = emptyMap(),
+        val neverReplaceWords: Set<String> = linkedSetOf("no", "it"),
     ) {
         fun modeFor(packageName: String): PolicyMode {
             packageModes[packageName]?.let { return it }

@@ -602,6 +602,37 @@ class ApiService {
     }
   }
 
+  /// Fetches public status counters so app-side UI can reflect backend updates.
+  ///
+  /// Falls back across public and authenticated routes when available.
+  Future<Map<String, dynamic>> fetchPublicStatusCounters() async {
+    try {
+      final response = await _requestWithFallback(
+        method: 'GET',
+        paths: const [
+          '/api/public/status',
+          '/api/handler/public-status',
+        ],
+        headersByPath: [
+          const {'Content-Type': 'application/json'},
+          _bearerHeaders,
+        ],
+      );
+      if (!response.isSuccessful) {
+        return const <String, dynamic>{};
+      }
+      final raw = response.body.trim();
+      if (raw.isEmpty) return const <String, dynamic>{};
+      final decoded = jsonDecode(raw);
+      if (decoded is Map<String, dynamic>) {
+        return decoded;
+      }
+      return const <String, dynamic>{};
+    } catch (_) {
+      return const <String, dynamic>{};
+    }
+  }
+
   // ── Behavioral telemetry ───────────────────────────────────────────────
 
   /// Sends a high-signal app behavior event to `{endpoint}/api/tpe/webhook`.

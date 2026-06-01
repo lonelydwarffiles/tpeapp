@@ -36,6 +36,8 @@ class MainHook : IXposedHookLoadPackage {
         @Volatile var filterService: IFilterService? = null
             private set
 
+        @Volatile private var hookedProcessPackageName: String = ""
+
         private var serviceContext: Context? = null
 
         /**
@@ -53,6 +55,12 @@ class MainHook : IXposedHookLoadPackage {
             } catch (_: Throwable) {
                 null
             }
+        }
+
+        fun getProcessPackageName(): String {
+            val fromContext = getContext()?.packageName?.trim().orEmpty()
+            if (fromContext.isNotEmpty()) return fromContext
+            return hookedProcessPackageName
         }
 
         /**
@@ -104,6 +112,7 @@ class MainHook : IXposedHookLoadPackage {
 
     override fun handleLoadPackage(lpparam: XC_LoadPackage.LoadPackageParam) {
         val pkg = lpparam.packageName
+        hookedProcessPackageName = pkg
         if (pkg in EXCLUDED_PACKAGES) return
 
         Log.d(TAG, "Hooking package: $pkg")

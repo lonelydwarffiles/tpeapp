@@ -43,20 +43,16 @@ class TpeFlutterActivity : FlutterFragmentActivity() {
         return action == Intent.ACTION_SEND || action == Intent.ACTION_SEND_MULTIPLE
     }
 
-    private fun captureShareAndReturnToSource(intent: Intent?): Boolean {
+    private fun captureShareIntent(intent: Intent?): Boolean {
         if (!isShareIntent(intent)) return false
-        DeviceCommandChannel.captureIncomingShareIntent(intent)
-        // For quick-share launches, avoid keeping the host UI in the foreground.
-        moveTaskToBack(true)
-        finish()
+        DeviceCommandChannel.captureIncomingShareIntent(applicationContext, intent)
+        Log.d(TAG, "Captured quick-share intent for Flutter handoff")
         return true
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        if (captureShareAndReturnToSource(intent)) {
-            return
-        }
+        captureShareIntent(intent)
         // Re-assert critical services whenever the host UI opens.
         CoreServiceKeeper.ensureCoreServicesRunning(this, "flutter_activity_on_create")
         CoreServiceKeeper.scheduleWatchdog(this)
@@ -66,7 +62,7 @@ class TpeFlutterActivity : FlutterFragmentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
-        captureShareAndReturnToSource(intent)
+        captureShareIntent(intent)
     }
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
