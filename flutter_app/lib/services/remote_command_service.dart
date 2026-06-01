@@ -1,4 +1,5 @@
 ﻿import 'dart:async';
+import 'dart:convert';
 import 'dart:developer' as developer;
 
 import 'package:shared_preferences/shared_preferences.dart';
@@ -23,6 +24,14 @@ typedef CommandMessageHandler = void Function(String message);
 class RemoteCommandService {
   static const _kRemoteControlConsentGranted =
       'screen_share_remote_control_consent_granted';
+  static const _orgasmPermissionTokensKey = 'home_orgasm_permission_tokens';
+  static const _orgasmDeniedCyclesKey = 'home_orgasm_denied_cycles';
+  static const _edgeSafetyProfileKey = 'edge_safety_profile';
+  static const _edgeBypassCooldownUntilMsKey = 'edge_bypass_cooldown_until_ms';
+  static const _edgeTimelineKey = 'edge_timeline_events_json';
+  static const int _edgeTimelineRetentionMs = 7 * 24 * 60 * 60 * 1000;
+  static const int _edgeTimelineMaxEvents = 1200;
+  static const int _edgeBypassCooldownMs = 2 * 60 * 1000;
 
   RemoteCommandService({
     required SharedPreferences prefs,
@@ -129,6 +138,21 @@ class RemoteCommandService {
           break;
         case 'toy.pavlok.command':
           _lastTelemetry = await _handlePavlokCommand(command);
+          break;
+        case 'orgasm.permission.grant':
+          _lastTelemetry = await _handleOrgasmPermissionGrant(command);
+          break;
+        case 'orgasm.permission.revoke':
+          _lastTelemetry = await _handleOrgasmPermissionRevoke(command);
+          break;
+        case 'edge.safety_profile.set':
+          _lastTelemetry = await _handleEdgeSafetyProfileSet(command);
+          break;
+        case 'edge.bypass_cooldown.arm':
+          _lastTelemetry = await _handleEdgeBypassCooldownArm(command);
+          break;
+        case 'edge.bypass_cooldown.clear':
+          _lastTelemetry = await _handleEdgeBypassCooldownClear(command);
           break;
         default:
           await _ack(
@@ -980,6 +1004,100 @@ class RemoteCommandService {
     };
   }
 
+  Future<Map<String, dynamic>> _handleOrgasmPermissionGrant(RemoteCommand command) async {
+    final requested = _intValue(command.params, const ['tokens', 'count', 'value']) ?? 1;
+    final grant = requested.clamp(1, 1000);
+    final current = (_prefs.getInt(_orgasmPermissionTokensKey) ?? 0).clamp(0, 1000000);
+    final next = (current + grant).clamp(0, 1000000);
+    await _prefs.setInt(_orgasmPermissionTokensKey, next);
+    await _prefs.setInt(_orgasmDeniedCyclesKey, 0);
+    await _appendEdgeTimelineEvent(
+      'orgasm_permission_granted',
+      payload: {
+        'granted_tokens': grant,
+        'permission_tokens': next,
+      },
+    );
+    _onMessage?.call('Orgasm permission granted (+$grant).');
+    return {
+      'granted_tokens': grant,
+      'permission_tokens': next,
+      'denied_cycles_reset': true,
+    };
+  }
+
+  Future<Map<String, dynamic>> _handleOrgasmPermissionRevoke(RemoteCommand command) async {
+    final hard = _boolValue(command.params, const ['hard', 'reset'], defaultValue: false);
+    await _prefs.setInt(_orgasmPermissionTokensKey, 0);
+    if (hard) {
+      await _prefs.setInt(_orgasmDeniedCyclesKey, 0);
+    }
+    await _appendEdgeTimelineEvent(
+      'orgasm_permission_revoked',
+      payload: {
+        'hard': hard,
+        'permission_tokens': 0,
+      },
+    );
+    _onMessage?.call('Orgasm permission revoked.');
+    return {
+      'permission_tokens': 0,
+      'denied_cycles_reset': hard,
+    };
+  }
+
+  Future<Map<String, dynamic>> _handleEdgeSafetyProfileSet(RemoteCommand command) async {
+    final requested = _stringValue(command.params, const ['profile', 'value', 'name']);
+    final profile = _sanitizeSafetyProfile(requested);
+    await _prefs.setString(_edgeSafetyProfileKey, profile);
+    await _appendEdgeTimelineEvent(
+      'edge_safety_profile_changed',
+      payload: {
+        'profile': profile,
+        'source': 'remote_command',
+      },
+    );
+    _onMessage?.call('Edge safety profile set to $profile.');
+    return {
+      'edge_safety_profile': profile,
+    };
+  }
+
+  Future<Map<String, dynamic>> _handleEdgeBypassCooldownArm(RemoteCommand command) async {
+    final durationMs = (_intValue(command.params, const ['duration_ms', 'durationMs', 'ms']) ??
+            _edgeBypassCooldownMs)
+        .clamp(5000, 15 * 60 * 1000);
+    final untilMs = DateTime.now().millisecondsSinceEpoch + durationMs;
+    await _prefs.setInt(_edgeBypassCooldownUntilMsKey, untilMs);
+    await _appendEdgeTimelineEvent(
+      'edge_bypass_cooldown_armed',
+      payload: {
+        'source': 'remote_command',
+        'duration_ms': durationMs,
+        'cooldown_until_ms': untilMs,
+      },
+    );
+    _onMessage?.call('Edge bypass cooldown armed.');
+    return {
+      'edge_bypass_cooldown_until_ms': untilMs,
+      'duration_ms': durationMs,
+    };
+  }
+
+  Future<Map<String, dynamic>> _handleEdgeBypassCooldownClear(RemoteCommand command) async {
+    await _prefs.setInt(_edgeBypassCooldownUntilMsKey, 0);
+    await _appendEdgeTimelineEvent(
+      'edge_bypass_cooldown_cleared',
+      payload: {
+        'source': 'remote_command',
+      },
+    );
+    _onMessage?.call('Edge bypass cooldown cleared.');
+    return {
+      'edge_bypass_cooldown_until_ms': 0,
+    };
+  }
+
   void _startToyPattern({
     required String mode,
     required String pattern,
@@ -1210,5 +1328,57 @@ class RemoteCommandService {
       }
     }
     return null;
+  }
+
+  static String _sanitizeSafetyProfile(String? raw) {
+    switch ('${raw ?? ''}'.trim().toLowerCase()) {
+      case 'strict_handler':
+      case 'recovery_heavy':
+      case 'training':
+      case 'chaos':
+        return '${raw ?? ''}'.trim().toLowerCase();
+      default:
+        return 'strict_handler';
+    }
+  }
+
+  Future<void> _appendEdgeTimelineEvent(String event, {Map<String, dynamic>? payload}) async {
+    final nowMs = DateTime.now().millisecondsSinceEpoch;
+    final cutoffMs = nowMs - _edgeTimelineRetentionMs;
+    final raw = _prefs.getString(_edgeTimelineKey);
+    final events = <Map<String, dynamic>>[];
+
+    if (raw != null && raw.trim().isNotEmpty) {
+      try {
+        final decoded = jsonDecode(raw);
+        if (decoded is List) {
+          for (final item in decoded) {
+            if (item is Map) {
+              final map = <String, dynamic>{};
+              for (final entry in item.entries) {
+                map['${entry.key}'] = entry.value;
+              }
+              final at = map['at_ms'];
+              final atMs = at is num ? at.toInt() : int.tryParse('${at ?? ''}');
+              if (atMs != null && atMs >= cutoffMs) {
+                events.add(map);
+              }
+            }
+          }
+        }
+      } catch (_) {
+        // Best-effort timeline parsing.
+      }
+    }
+
+    events.add({
+      'event': event,
+      'at_ms': nowMs,
+      if (payload != null) 'payload': payload,
+    });
+    if (events.length > _edgeTimelineMaxEvents) {
+      events.removeRange(0, events.length - _edgeTimelineMaxEvents);
+    }
+    await _prefs.setString(_edgeTimelineKey, jsonEncode(events));
   }
 }

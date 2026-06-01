@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -36,9 +37,16 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   static const String _edgeCountOffsetKey = 'home_edge_count_offset';
   static const String _orgasmCountOffsetKey = 'home_orgasm_count_offset';
   static const String _orgasmManualOverrideKey = 'home_orgasm_manual_override';
+  static const String _orgasmPermissionTokensKey = 'home_orgasm_permission_tokens';
+  static const String _orgasmDeniedCyclesKey = 'home_orgasm_denied_cycles';
+  static const String _edgeTimelineKey = 'edge_timeline_events_json';
+  static const String _edgeSafetyProfileKey = 'edge_safety_profile';
+  static const String _edgeBypassCooldownUntilMsKey = 'edge_bypass_cooldown_until_ms';
   static const String _edgePendingCountKey = 'home_edge_pending_count';
   static const String _orgasmPendingCountKey = 'home_orgasm_pending_count';
   static const String _edgeTargetShockAtPeakKey = 'edge_target_shock_at_peak';
+  static const String _lastEdgeSourceKey = 'edge_last_source';
+  static const String _lastEdgeAtMsKey = 'edge_last_at_ms';
   static const String _lovenseBatteryAlertMaskKey = 'lovense_battery_alert_mask';
   static const String _pavlokBatteryAlertMaskKey = 'pavlok_battery_alert_mask';
   static const int _edgeHrSafetyMarginBpm = 2;
@@ -47,6 +55,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   static const int _edgeResumeStableMs = 6000;
   static const int _edgeResumeWaitMaxMs = 20000;
   static const int _edgeStatusNotifyMinGapMs = 7000;
+  static const int _recoveryLowBuzzLevel = 1;
+  static const int _edgeTimelineRetentionMs = 7 * 24 * 60 * 60 * 1000;
+  static const int _edgeTimelineMaxEvents = 1200;
+  static const int _edgeBypassCooldownMs = 2 * 60 * 1000;
 
   String _enrollmentState = 'enrolling';
   String _enrollmentError = '';
@@ -68,11 +80,22 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   bool _edgeTargetStepInFlight = false;
   int _edgeCount = 0;
   int _orgasmCount = 0;
+  int _orgasmPermissionTokens = 0;
+  int _orgasmDeniedCycles = 0;
+  String _orgasmPleadTier = 'neutral';
+  int _edgeTimelineEventCount = 0;
+  String _edgeTimelineLastEvent = 'none';
   int _edgePendingCount = 0;
   int _orgasmPendingCount = 0;
   int _edgeTargetCount = 0;
   bool _edgeTargetShockAtPeak = true;
+  String _edgeSafetyProfile = 'strict_handler';
+  int _edgeBypassCooldownUntilMs = 0;
   bool _manualBuzzHoldUntilLowHr = false;
+  String _lastEdgeSource = 'none';
+  int _lastEdgeAtMs = 0;
+  int _buzzSessionEdgeCount = 0;
+  bool _outOfItAutoTriggered = false;
   bool? _lastEdgeStatusActive;
   int _lastEdgeStatusNotifyAtMs = 0;
   bool _toyBatteryAlertStateLoaded = false;
@@ -127,6 +150,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     _refreshEnrollmentState();
     _enrollmentStatusTimer = Timer.periodic(const Duration(seconds: 5), (_) {
       _refreshEnrollmentState();
+      unawaited(_syncOrgasmPermissionStateFromPrefs());
     });
     _toyStatusTimer = Timer.periodic(const Duration(seconds: 30), (_) {
       unawaited(_refreshToyStatus());
@@ -136,6 +160,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     });
     WidgetsBinding.instance.addPostFrameCallback((_) {
       unawaited(_refreshToyStatus());
+      unawaited(_syncOrgasmPermissionStateFromPrefs());
       unawaited(_runEdgeTargetStepIfNeeded());
     });
   }
@@ -515,10 +540,22 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     final orgasmCountOffset = (prefs.getInt(_orgasmCountOffsetKey) ?? 0).clamp(-1000000, 1000000);
     var edgeTargetCount = prefs.getInt('edge_target_count') ?? 0;
     var edgeTargetShockAtPeak = prefs.getBool(_edgeTargetShockAtPeakKey) ?? true;
+    final lastEdgeSource = (prefs.getString(_lastEdgeSourceKey) ?? 'none').trim().toLowerCase();
+    final lastEdgeAtMs = (prefs.getInt(_lastEdgeAtMsKey) ?? 0).clamp(0, 9223372036854775807);
     final edgePendingCount =
       (prefs.getInt(_edgePendingCountKey) ?? 0).clamp(0, 1000000);
     final orgasmPendingCount =
       (prefs.getInt(_orgasmPendingCountKey) ?? 0).clamp(0, 1000000);
+    final orgasmPermissionTokens =
+      (prefs.getInt(_orgasmPermissionTokensKey) ?? 0).clamp(0, 1000000);
+    final orgasmDeniedCycles =
+      (prefs.getInt(_orgasmDeniedCyclesKey) ?? 0).clamp(0, 1000000);
+    final timelineSummary = _timelineSummaryFromJson(prefs.getString(_edgeTimelineKey));
+    final edgeSafetyProfile = _sanitizeSafetyProfile(
+      prefs.getString(_edgeSafetyProfileKey),
+    );
+    final edgeBypassCooldownUntilMs =
+      (prefs.getInt(_edgeBypassCooldownUntilMsKey) ?? 0).clamp(0, 9223372036854775807);
 
     final api = _api;
     if (api != null) {
@@ -573,11 +610,316 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       _orgasmCount = orgasmCount;
       _edgePendingCount = edgePendingCount;
       _orgasmPendingCount = orgasmPendingCount;
+      _orgasmPermissionTokens = orgasmPermissionTokens;
+      _orgasmDeniedCycles = orgasmDeniedCycles;
+      _orgasmPleadTier = _orgasmPleadTierForDeniedCycles(orgasmDeniedCycles);
+      _edgeTimelineEventCount = timelineSummary.item1;
+      _edgeTimelineLastEvent = timelineSummary.item2;
       _edgeTargetCount = edgeTargetCount;
       _edgeTargetShockAtPeak = edgeTargetShockAtPeak;
+      _edgeSafetyProfile = edgeSafetyProfile;
+      _edgeBypassCooldownUntilMs = edgeBypassCooldownUntilMs;
+      _lastEdgeSource = lastEdgeSource;
+      _lastEdgeAtMs = lastEdgeAtMs;
     });
 
     unawaited(_runEdgeTargetStepIfNeeded());
+  }
+
+  Future<void> _syncOrgasmPermissionStateFromPrefs() async {
+    final prefs = context.read<SharedPreferences>();
+    final tokens = (prefs.getInt(_orgasmPermissionTokensKey) ?? 0).clamp(0, 1000000);
+    final denied = (prefs.getInt(_orgasmDeniedCyclesKey) ?? 0).clamp(0, 1000000);
+    final tier = _orgasmPleadTierForDeniedCycles(denied);
+    final edgeSafetyProfile = _sanitizeSafetyProfile(
+      prefs.getString(_edgeSafetyProfileKey),
+    );
+    final edgeBypassCooldownUntilMs =
+      (prefs.getInt(_edgeBypassCooldownUntilMsKey) ?? 0).clamp(0, 9223372036854775807);
+    final timelineSummary = _timelineSummaryFromJson(prefs.getString(_edgeTimelineKey));
+    if (!mounted) return;
+    if (tokens == _orgasmPermissionTokens &&
+        denied == _orgasmDeniedCycles &&
+        tier == _orgasmPleadTier &&
+        edgeSafetyProfile == _edgeSafetyProfile &&
+        edgeBypassCooldownUntilMs == _edgeBypassCooldownUntilMs &&
+        timelineSummary.item1 == _edgeTimelineEventCount &&
+        timelineSummary.item2 == _edgeTimelineLastEvent) {
+      return;
+    }
+    setState(() {
+      _orgasmPermissionTokens = tokens;
+      _orgasmDeniedCycles = denied;
+      _orgasmPleadTier = tier;
+      _edgeSafetyProfile = edgeSafetyProfile;
+      _edgeBypassCooldownUntilMs = edgeBypassCooldownUntilMs;
+      _edgeTimelineEventCount = timelineSummary.item1;
+      _edgeTimelineLastEvent = timelineSummary.item2;
+    });
+  }
+
+  ({int item1, String item2}) _timelineSummaryFromJson(String? rawJson) {
+    if (rawJson == null || rawJson.trim().isEmpty) {
+      return (item1: 0, item2: 'none');
+    }
+    try {
+      final decoded = jsonDecode(rawJson);
+      if (decoded is! List) {
+        return (item1: 0, item2: 'none');
+      }
+      if (decoded.isEmpty) {
+        return (item1: 0, item2: 'none');
+      }
+      final last = decoded.last;
+      if (last is Map) {
+        final event = '${last['event'] ?? 'event'}'.trim();
+        return (item1: decoded.length, item2: event.isEmpty ? 'event' : event);
+      }
+      return (item1: decoded.length, item2: 'event');
+    } catch (_) {
+      return (item1: 0, item2: 'none');
+    }
+  }
+
+  Future<void> _appendEdgeTimelineEvent(String event, {Map<String, dynamic>? payload}) async {
+    final prefs = context.read<SharedPreferences>();
+    final nowMs = DateTime.now().millisecondsSinceEpoch;
+    final cutoffMs = nowMs - _edgeTimelineRetentionMs;
+    final raw = prefs.getString(_edgeTimelineKey);
+    final events = <Map<String, dynamic>>[];
+
+    if (raw != null && raw.trim().isNotEmpty) {
+      try {
+        final decoded = jsonDecode(raw);
+        if (decoded is List) {
+          for (final item in decoded) {
+            if (item is Map) {
+              final map = Map<String, dynamic>.from(item.cast<String, dynamic>());
+              final at = map['at_ms'];
+              final atMs = at is num ? at.toInt() : int.tryParse('${at ?? ''}');
+              if (atMs != null && atMs >= cutoffMs) {
+                events.add(map);
+              }
+            }
+          }
+        }
+      } catch (_) {
+        // Best-effort timeline parsing.
+      }
+    }
+
+    events.add({
+      'event': event,
+      'at_ms': nowMs,
+      if (payload != null) 'payload': payload,
+    });
+
+    if (events.length > _edgeTimelineMaxEvents) {
+      events.removeRange(0, events.length - _edgeTimelineMaxEvents);
+    }
+
+    await prefs.setString(_edgeTimelineKey, jsonEncode(events));
+    if (!mounted) return;
+    setState(() {
+      _edgeTimelineEventCount = events.length;
+      _edgeTimelineLastEvent = event;
+    });
+  }
+
+  String _orgasmPleadTierForDeniedCycles(int deniedCycles) {
+    if (deniedCycles >= 6) {
+      return 'pleading';
+    }
+    if (deniedCycles >= 2) {
+      return 'needy';
+    }
+    return 'neutral';
+  }
+
+  String _sanitizeSafetyProfile(String? raw) {
+    switch ('${raw ?? ''}'.trim().toLowerCase()) {
+      case 'strict_handler':
+      case 'recovery_heavy':
+      case 'training':
+      case 'chaos':
+        return '${raw ?? ''}'.trim().toLowerCase();
+      default:
+        return 'strict_handler';
+    }
+  }
+
+  int _recoveryLowBuzzLevelForProfile(String profile) {
+    switch (profile) {
+      case 'recovery_heavy':
+        return 1;
+      case 'training':
+        return 2;
+      case 'chaos':
+        return 3;
+      default:
+        return _recoveryLowBuzzLevel;
+    }
+  }
+
+  int _edgeBuzzLevelForProfile(String profile) {
+    switch (profile) {
+      case 'recovery_heavy':
+        return 10;
+      case 'training':
+        return 12;
+      case 'chaos':
+        return 14;
+      default:
+        return 11;
+    }
+  }
+
+  int _remainingBypassCooldownMs() {
+    final nowMs = DateTime.now().millisecondsSinceEpoch;
+    final remaining = _edgeBypassCooldownUntilMs - nowMs;
+    return remaining > 0 ? remaining : 0;
+  }
+
+  Future<void> _setEdgeSafetyProfile(String profile) async {
+    final next = _sanitizeSafetyProfile(profile);
+    final prefs = context.read<SharedPreferences>();
+    await prefs.setString(_edgeSafetyProfileKey, next);
+    await _appendEdgeTimelineEvent(
+      'edge_safety_profile_changed',
+      payload: {'profile': next},
+    );
+    if (!mounted) return;
+    setState(() {
+      _edgeSafetyProfile = next;
+    });
+    await _trackBehavior(
+      'edge_safety_profile_changed',
+      reason: 'edge_controls_screen',
+      payload: {'profile': next},
+    );
+  }
+
+  Future<void> _armBypassCooldown({required String reason}) async {
+    final prefs = context.read<SharedPreferences>();
+    final untilMs = DateTime.now().millisecondsSinceEpoch + _edgeBypassCooldownMs;
+    await prefs.setInt(_edgeBypassCooldownUntilMsKey, untilMs);
+    if (mounted) {
+      setState(() {
+        _edgeBypassCooldownUntilMs = untilMs;
+      });
+    }
+    await _appendEdgeTimelineEvent(
+      'edge_bypass_cooldown_armed',
+      payload: {
+        'reason': reason,
+        'cooldown_until_ms': untilMs,
+      },
+    );
+  }
+
+  String _orgasmRequestMessageForTier(String tier) {
+    switch (tier) {
+      case 'pleading':
+        return 'Please, may this mutt have permission to orgasm?';
+      case 'needy':
+        return 'Mutt needs permission first. Please ask clearly.';
+      default:
+        return 'Orgasm is locked. Ask for permission.';
+    }
+  }
+
+  Future<void> _requestOrgasmPermissionOrLog() async {
+    final prefs = context.read<SharedPreferences>();
+
+    if (_orgasmPermissionTokens > 0) {
+      final remainingTokens = (_orgasmPermissionTokens - 1).clamp(0, 1000000);
+      await prefs.setInt(_orgasmPermissionTokensKey, remainingTokens);
+      await prefs.setInt(_orgasmDeniedCyclesKey, 0);
+      if (mounted) {
+        setState(() {
+          _orgasmPermissionTokens = remainingTokens;
+          _orgasmDeniedCycles = 0;
+          _orgasmPleadTier = 'neutral';
+        });
+      }
+
+      await _queueSessionCounter(orgasm: true);
+      await _approvePendingCounters(includeEdge: false, includeOrgasm: true);
+      await _appendEdgeTimelineEvent(
+        'orgasm_permission_consumed',
+        payload: {
+          'remaining_permission_tokens': remainingTokens,
+        },
+      );
+      await _trackBehavior(
+        'orgasm_permission_consumed',
+        reason: 'edge_controls_screen',
+        payload: {
+          'remaining_permission_tokens': remainingTokens,
+        },
+      );
+      return;
+    }
+
+    final nextDeniedCycles = (_orgasmDeniedCycles + 1).clamp(0, 1000000);
+    final nextTier = _orgasmPleadTierForDeniedCycles(nextDeniedCycles);
+    await prefs.setInt(_orgasmDeniedCyclesKey, nextDeniedCycles);
+    await _appendEdgeTimelineEvent(
+      'orgasm_permission_required',
+      payload: {
+        'denied_cycles': nextDeniedCycles,
+        'plead_tier': nextTier,
+      },
+    );
+    if (mounted) {
+      setState(() {
+        _orgasmDeniedCycles = nextDeniedCycles;
+        _orgasmPleadTier = nextTier;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(_orgasmRequestMessageForTier(nextTier))),
+      );
+    }
+
+    await _trackBehavior(
+      'orgasm_permission_required',
+      reason: 'edge_controls_screen',
+      payload: {
+        'denied_cycles': nextDeniedCycles,
+        'plead_tier': nextTier,
+      },
+    );
+  }
+
+  Future<void> _markEdgeLogged({required String source}) async {
+    final normalized = source.trim().toLowerCase();
+    final nowMs = DateTime.now().millisecondsSinceEpoch;
+    final prefs = context.read<SharedPreferences>();
+    await prefs.setString(_lastEdgeSourceKey, normalized);
+    await prefs.setInt(_lastEdgeAtMsKey, nowMs);
+    await _appendEdgeTimelineEvent(
+      'edge_logged',
+      payload: {
+        'source': normalized,
+        'edge_count': _edgeCount,
+        'orgasm_count': _orgasmCount,
+      },
+    );
+    if (!mounted) return;
+    setState(() {
+      _lastEdgeSource = normalized;
+      _lastEdgeAtMs = nowMs;
+    });
+  }
+
+  void _recordEdgeInBuzzSession() {
+    if (!mounted) return;
+    setState(() {
+      _buzzSessionEdgeCount = (_buzzSessionEdgeCount + 1).clamp(0, 1000000);
+      if (_buzzSessionEdgeCount >= 3) {
+        _outOfItAutoTriggered = true;
+      }
+    });
   }
 
   Future<void> _queueSessionCounter({required bool orgasm}) async {
@@ -984,6 +1326,61 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     }
   }
 
+  Future<void> _setRecoveryLowBuzzNow() async {
+    final ble = context.read<BleService>();
+    final lowBuzzLevel = _recoveryLowBuzzLevelForProfile(_edgeSafetyProfile);
+    try {
+      await ble.lovenseVibrate(lowBuzzLevel);
+    } catch (_) {
+      // Keep low-buzz hold best-effort.
+    }
+    try {
+      await ble.pavlokStopAll();
+    } catch (_) {
+      // Keep safety stop best-effort.
+    }
+    try {
+      await BleChannel.pavlokStopAll();
+    } catch (_) {
+      // Keep safety stop best-effort.
+    }
+  }
+
+  Future<void> _enterRecoveryLowBuzzHold({
+    required String reason,
+    bool forceStatus = true,
+    String statusBody = 'Recovery low-buzz hold is active (2%) until HR is back in range.',
+    Map<String, dynamic>? payload,
+    bool armBypassCooldown = false,
+  }) async {
+    if (armBypassCooldown) {
+      await _armBypassCooldown(reason: reason);
+    }
+    if (mounted) {
+      setState(() => _manualBuzzHoldUntilLowHr = true);
+    }
+    await _appendEdgeTimelineEvent(
+      'edge_recovery_started',
+      payload: {
+        'reason': reason,
+        'profile': _edgeSafetyProfile,
+        if (armBypassCooldown)
+          'cooldown_until_ms': _edgeBypassCooldownUntilMs,
+      },
+    );
+    await _setRecoveryLowBuzzNow();
+    await _notifyEdgeSystemStatus(
+      active: false,
+      body: statusBody,
+      force: forceStatus,
+    );
+    await _trackBehavior(
+      'edge_recovery_low_buzz_started',
+      reason: reason,
+      payload: payload,
+    );
+  }
+
   Future<void> _notifyEdgeSystemStatus({
     required bool active,
     required String body,
@@ -1024,31 +1421,65 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   Future<void> _activateManualBuzzHoldUntilLowHr() async {
     if (_manualBuzzHoldUntilLowHr) {
-      await _stopBuzzOutputNow();
+      await _setRecoveryLowBuzzNow();
       await _notifyEdgeSystemStatus(
         active: false,
-        body: 'Buzz output stopped. Waiting for HR to return to the resume range.',
+        body: 'Recovery low-buzz hold active (2%). Waiting for HR to return to resume range.',
       );
       return;
     }
-    if (mounted) {
-      setState(() => _manualBuzzHoldUntilLowHr = true);
-    }
-    await _stopBuzzOutputNow();
-    await _notifyEdgeSystemStatus(
-      active: false,
-      body: 'Manual hold enabled. Edge automation is paused until HR is back in range.',
-      force: true,
-    );
-    await _trackBehavior(
-      'manual_buzz_hold_enabled',
+    await _enterRecoveryLowBuzzHold(
       reason: 'home_button',
+      statusBody: 'Manual recovery enabled. Holding low buzz (2%) until HR is back in range.',
+      armBypassCooldown: true,
+      payload: {
+        'edge_count': _edgeCount,
+        'orgasm_count': _orgasmCount,
+      },
+    );
+  }
+
+  Future<void> _addEdgeFromControlsWithSafety() async {
+    if (!mounted) {
+      return;
+    }
+
+    final status = await _fetchRealtimeEdgeStatus();
+    final hrFresh = _isEdgeHrFresh(status);
+    final aboveSoftStop = _hrAtOrAboveSoftStopForEdge(status);
+    final manualHoldWasActive = _manualBuzzHoldUntilLowHr;
+
+    // Manual self-report is always accepted and acts as a recovery trigger.
+    await _queueSessionCounter(orgasm: false);
+    await _approvePendingCounters(includeEdge: true, includeOrgasm: false);
+    await _markEdgeLogged(source: 'manual');
+    _recordEdgeInBuzzSession();
+
+    await _enterRecoveryLowBuzzHold(
+      reason: 'edge_controls_screen',
+      statusBody: 'Edge logged. Recovery low-buzz hold is active (2%) until HR is back in range.',
+      armBypassCooldown: true,
+      payload: {
+        'edge_hr_state': '${status['edge_hr_state'] ?? ''}',
+        'hr_fresh': hrFresh,
+        'above_soft_stop': aboveSoftStop,
+        'manual_hold_already_active': manualHoldWasActive,
+        'edge_count': _edgeCount,
+        'orgasm_count': _orgasmCount,
+        'edge_target_count': _edgeTargetCount,
+        'edge_hr_last': _intFromAny(status['edge_hr_last']) ?? _intFromAny(status['latest_heart_rate']),
+        'edge_hr_pause_bpm': _intFromAny(status['edge_hr_pause_bpm']),
+        'edge_hr_resume_bpm': _intFromAny(status['edge_hr_resume_bpm']),
+      },
     );
   }
 
   Future<bool> _manualBuzzHoldReadyToRelease() async {
     if (!_manualBuzzHoldUntilLowHr) {
       return true;
+    }
+    if (_remainingBypassCooldownMs() > 0) {
+      return false;
     }
     final status = await _fetchRealtimeEdgeStatus();
     final ready = _isEdgeHrFresh(status) && _isEdgeHrBelowResume(status);
@@ -1058,6 +1489,14 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     if (mounted) {
       setState(() => _manualBuzzHoldUntilLowHr = false);
     }
+    await _appendEdgeTimelineEvent(
+      'edge_recovery_released',
+      payload: {
+        'profile': _edgeSafetyProfile,
+        'edge_hr_last': _intFromAny(status['edge_hr_last']) ?? _intFromAny(status['latest_heart_rate']),
+        'edge_hr_resume_bpm': _intFromAny(status['edge_hr_resume_bpm']),
+      },
+    );
     await _trackBehavior(
       'manual_buzz_hold_released',
       reason: 'hr_low_end_reached',
@@ -1120,28 +1559,30 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       var remainingMs = 12000;
       var didBuzz = false;
       var stopReason = 'cycle complete';
+      final buzzLevel = _edgeBuzzLevelForProfile(_edgeSafetyProfile);
       await _notifyEdgeSystemStatus(
         active: true,
         body: 'Edge automation buzz cycle started (${_edgeCount + 1}/$target).',
         includeStopAction: true,
         includeEdgeDownOnTap: true,
       );
-      await ble.lovenseVibrate(12);
+      await ble.lovenseVibrate(buzzLevel);
       didBuzz = true;
-      var edgeDownMode = false;
       try {
         while (remainingMs > 0) {
           if (await _consumeEdgeDownRequest()) {
-            edgeDownMode = true;
             stopReason = 'edge down requested from notification';
-            await ble.lovenseVibrate(1);
-            await _notifyEdgeSystemStatus(
-              active: true,
-              body: 'Edge-down requested. Lowering output to 2% (minimum device level).',
-              includeStopAction: true,
-              includeEdgeDownOnTap: true,
-              force: true,
+            await _enterRecoveryLowBuzzHold(
+              reason: 'edge_down_notification',
+              statusBody: 'Edge-down requested. Recovery low-buzz hold is active (2%).',
+              armBypassCooldown: true,
+              payload: {
+                'edge_count': _edgeCount,
+                'orgasm_count': _orgasmCount,
+                'edge_target_count': _edgeTargetCount,
+              },
             );
+            break;
           }
 
           if (_manualBuzzHoldUntilLowHr) {
@@ -1157,9 +1598,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             break;
           }
 
-          if (edgeDownMode) {
-            await ble.lovenseVibrate(1);
-          }
         }
         if (remainingMs <= 0) {
           stopReason = 'buzz cycle finished';
@@ -1194,6 +1632,19 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
       await _queueSessionCounter(orgasm: false);
       await _approvePendingCounters(includeEdge: true, includeOrgasm: false);
+      await _markEdgeLogged(source: 'auto');
+      _recordEdgeInBuzzSession();
+
+      // Enforce edge -> recovery cadence after every edge.
+      await _enterRecoveryLowBuzzHold(
+        reason: 'edge_target_automation',
+        statusBody: 'Edge logged. Recovery low-buzz hold is active (2%) until HR is back in range.',
+        payload: {
+          'edge_count': _edgeCount,
+          'orgasm_count': _orgasmCount,
+          'edge_target_count': _edgeTargetCount,
+        },
+      );
     } catch (_) {
       // Keep automation best-effort and retry on next tick.
     } finally {
@@ -1260,6 +1711,13 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           readState: () => EdgeControlsViewData(
             edgeCount: _edgeCount,
             orgasmCount: _orgasmCount,
+            orgasmPermissionTokens: _orgasmPermissionTokens,
+            orgasmDeniedCycles: _orgasmDeniedCycles,
+            orgasmPleadTier: _orgasmPleadTier,
+            edgeTimelineEventCount: _edgeTimelineEventCount,
+            edgeTimelineLastEvent: _edgeTimelineLastEvent,
+            edgeSafetyProfile: _edgeSafetyProfile,
+            edgeBypassCooldownRemainingMs: _remainingBypassCooldownMs(),
             edgePendingCount: _edgePendingCount,
             orgasmPendingCount: _orgasmPendingCount,
             edgeTargetCount: _edgeTargetCount,
@@ -1267,15 +1725,20 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             manualBuzzHoldUntilLowHr: _manualBuzzHoldUntilLowHr,
             counterApproveInFlight: _counterApproveInFlight,
             edgeTargetStepInFlight: _edgeTargetStepInFlight,
+            lastEdgeSource: _lastEdgeSource,
+            lastEdgeAtMs: _lastEdgeAtMs,
+            buzzSessionEdgeCount: _buzzSessionEdgeCount,
+            outOfItAutoTriggered: _outOfItAutoTriggered,
           ),
-          onQueueEdge: () => _queueSessionCounter(orgasm: false),
-          onQueueOrgasm: () => _queueSessionCounter(orgasm: true),
+          onQueueEdge: _addEdgeFromControlsWithSafety,
+          onQueueOrgasm: _requestOrgasmPermissionOrLog,
           onHoldBuzzUntilLowHr: _activateManualBuzzHoldUntilLowHr,
           onApprovePending: _approvePendingCounters,
           onUndoEdge: () => _undoSessionCounter(orgasm: false),
           onUndoOrgasm: () => _undoSessionCounter(orgasm: true),
           onSetEdgeTargetCount: _setEdgeTargetCount,
           onSetPeakShockEnabled: _setEdgeTargetShockAtPeak,
+          onSetSafetyProfile: _setEdgeSafetyProfile,
           onRefreshState: _loadSessionCounters,
           onStopActuationNow: _stopBuzzOutputNow,
         ),

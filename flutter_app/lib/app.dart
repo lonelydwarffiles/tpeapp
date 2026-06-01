@@ -503,6 +503,25 @@ class _StartupGateState extends State<_StartupGate>
           await BleChannel.lovenseIsConnectedNative();
       final nativePavlokConnected = await BleChannel.pavlokIsConnectedNative();
 
+      // Force a best-effort battery refresh before heartbeat publish so
+      // handler dashboards receive explicit LV/PV battery percentages.
+      if (nativeLovenseConnected) {
+        try {
+          await BleChannel.lovenseReadBatteryLevel();
+        } catch (_) {
+          // Keep status heartbeat resilient if battery read is unavailable.
+        }
+      }
+      if (nativePavlokConnected) {
+        try {
+          await BleChannel.pavlokReadBatteryLevel();
+        } catch (_) {
+          // Keep status heartbeat resilient if battery read is unavailable.
+        }
+      }
+
+      final bleService = context.read<BleService>();
+
       final mergedToyInfo = <String, dynamic>{...toyInfo};
       final currentLovense = (toyInfo['lovense'] is Map)
           ? Map<String, dynamic>.from(toyInfo['lovense'] as Map)
@@ -515,6 +534,14 @@ class _StartupGateState extends State<_StartupGate>
           (currentLovense['connected'] == true) || nativeLovenseConnected;
       currentPavlok['connected'] =
           (currentPavlok['connected'] == true) || nativePavlokConnected;
+      final lovenseBattery = bleService.lovenseBatteryPct;
+      final pavlokBattery = bleService.pavlokBatteryPct;
+      if (lovenseBattery != null) {
+        currentLovense['battery_pct'] = lovenseBattery;
+      }
+      if (pavlokBattery != null) {
+        currentPavlok['battery_pct'] = pavlokBattery;
+      }
       mergedToyInfo['lovense'] = currentLovense;
       mergedToyInfo['pavlok'] = currentPavlok;
 

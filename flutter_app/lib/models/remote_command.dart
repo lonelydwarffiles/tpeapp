@@ -74,6 +74,17 @@ class RemoteCommand {
         return 'toy.lovense.command';
       case 'PAVLOK_COMMAND':
         return 'toy.pavlok.command';
+      case 'ALLOW_ORGASM':
+      case 'GRANT_ORGASM_PERMISSION':
+        return 'orgasm.permission.grant';
+      case 'REVOKE_ORGASM_PERMISSION':
+        return 'orgasm.permission.revoke';
+      case 'SET_EDGE_SAFETY_PROFILE':
+        return 'edge.safety_profile.set';
+      case 'ARM_EDGE_BYPASS_COOLDOWN':
+        return 'edge.bypass_cooldown.arm';
+      case 'CLEAR_EDGE_BYPASS_COOLDOWN':
+        return 'edge.bypass_cooldown.clear';
 
       // All other MQTT UPPERCASE actions are fully handled by
       // PartnerMqttService (Kotlin-native). Flutter maps them to
