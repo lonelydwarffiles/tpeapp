@@ -2,6 +2,7 @@
 
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.app.PendingIntent
 import android.Manifest
 import android.content.ComponentName
 import android.content.pm.PackageManager
@@ -61,6 +62,10 @@ private const val HEALTH_CONNECT_CHANNEL = "com.hound.controller/health"
 private const val SCREEN_SHARE_TAG = "StandaloneScreenShare"
 private const val DEVICE_COMMANDS_CHANNEL = "com.hound.controller/device_commands"
 private const val DEVICE_COMMANDS_NOTIFICATION_CHANNEL = "tpe_device_commands"
+private const val SAFETY_STOP_NOTIFICATION_CHANNEL = "tpe_safety_stop"
+private const val STOP_ACTUATION_ACTION = "com.hound.controller.ACTION_STOP_ACTUATION"
+private const val STOP_ACTUATION_PREFS = "tpe_runtime_flags"
+private const val STOP_ACTUATION_AT_KEY = "stop_actuation_requested_at"
 private const val ACCESSIBILITY_SETUP_CHANNEL = "com.hound.controller/accessibility_setup"
 private const val NOTIFICATION_BUZZ_EVENTS_CHANNEL = "com.hound.controller/notification_buzz"
 private const val ACCESSIBILITY_PREFS = "tpe_accessibility_service"
@@ -70,6 +75,38 @@ private const val REMOTE_FILTER_SERVICE_ACTION = "com.hound.controller.BIND_FILT
 private const val REMOTE_FILTER_SERVICE_PACKAGE = "com.hound.controller"
 private const val HEALTH_PERMISSION_READ_HEART_RATE = "android.permission.health.READ_HEART_RATE"
 private const val HEALTH_PERMISSION_READ_STEPS = "android.permission.health.READ_STEPS"
+private const val HEALTH_PERMISSION_READ_RESTING_HEART_RATE = "android.permission.health.READ_RESTING_HEART_RATE"
+private const val HEALTH_PERMISSION_READ_HEART_RATE_VARIABILITY = "android.permission.health.READ_HEART_RATE_VARIABILITY"
+private const val HEALTH_PERMISSION_READ_RESPIRATORY_RATE = "android.permission.health.READ_RESPIRATORY_RATE"
+private const val HEALTH_PERMISSION_READ_OXYGEN_SATURATION = "android.permission.health.READ_OXYGEN_SATURATION"
+private const val HEALTH_PERMISSION_READ_SLEEP = "android.permission.health.READ_SLEEP"
+private const val HEALTH_PERMISSION_READ_DISTANCE = "android.permission.health.READ_DISTANCE"
+private const val HEALTH_PERMISSION_READ_TOTAL_CALORIES_BURNED = "android.permission.health.READ_TOTAL_CALORIES_BURNED"
+private const val HEALTH_PERMISSION_READ_ACTIVE_CALORIES_BURNED = "android.permission.health.READ_ACTIVE_CALORIES_BURNED"
+private const val HEALTH_PERMISSION_READ_FLOORS_CLIMBED = "android.permission.health.READ_FLOORS_CLIMBED"
+private const val HEALTH_PERMISSION_READ_SPEED = "android.permission.health.READ_SPEED"
+private const val HEALTH_PERMISSION_READ_WEIGHT = "android.permission.health.READ_WEIGHT"
+private const val HEALTH_PERMISSION_READ_HEIGHT = "android.permission.health.READ_HEIGHT"
+private const val HEALTH_PERMISSION_READ_BODY_FAT = "android.permission.health.READ_BODY_FAT"
+private const val HEALTH_PERMISSION_READ_BODY_TEMPERATURE = "android.permission.health.READ_BODY_TEMPERATURE"
+private val HEALTH_PERMISSION_REQUEST_SET = setOf(
+    HEALTH_PERMISSION_READ_HEART_RATE,
+    HEALTH_PERMISSION_READ_STEPS,
+    HEALTH_PERMISSION_READ_RESTING_HEART_RATE,
+    HEALTH_PERMISSION_READ_HEART_RATE_VARIABILITY,
+    HEALTH_PERMISSION_READ_RESPIRATORY_RATE,
+    HEALTH_PERMISSION_READ_OXYGEN_SATURATION,
+    HEALTH_PERMISSION_READ_SLEEP,
+    HEALTH_PERMISSION_READ_DISTANCE,
+    HEALTH_PERMISSION_READ_TOTAL_CALORIES_BURNED,
+    HEALTH_PERMISSION_READ_ACTIVE_CALORIES_BURNED,
+    HEALTH_PERMISSION_READ_FLOORS_CLIMBED,
+    HEALTH_PERMISSION_READ_SPEED,
+    HEALTH_PERMISSION_READ_WEIGHT,
+    HEALTH_PERMISSION_READ_HEIGHT,
+    HEALTH_PERMISSION_READ_BODY_FAT,
+    HEALTH_PERMISSION_READ_BODY_TEMPERATURE,
+)
 private var cachedRootAvailable: Boolean? = null
 private var deviceMediaPlayer: MediaPlayer? = null
 private var deviceTts: TextToSpeech? = null
@@ -226,10 +263,7 @@ object StandaloneTpeHost {
                         return@setMethodCallHandler
                     }
 
-                    pendingHealthPermissions = setOf(
-                        HEALTH_PERMISSION_READ_HEART_RATE,
-                        HEALTH_PERMISSION_READ_STEPS,
-                    )
+                    pendingHealthPermissions = HEALTH_PERMISSION_REQUEST_SET
                     pendingHealthPermissionsResult = result
                     launcher.launch(pendingHealthPermissions)
                 }
@@ -467,8 +501,35 @@ object StandaloneTpeHost {
                     val title = call.argument<String>("title")?.takeIf { it.isNotBlank() } ?: "Handler Notice"
                     val body = call.argument<String>("body")?.takeIf { it.isNotBlank() } ?: "New command received."
                     val channelId = call.argument<String>("channelId")?.takeIf { it.isNotBlank() }
-                    postCommandNotification(context, title, body, channelId = channelId)
+                    val includeStopAction = call.argument<Boolean>("includeStopAction") ?: false
+                    postCommandNotification(
+                        context,
+                        title,
+                        body,
+                        channelId = channelId,
+                        includeStopAction = includeStopAction,
+                    )
                     result.success(null)
+                }
+                "showStopActuationNotification" -> {
+                    postCommandNotification(
+                        context,
+                        "Safety Stop Ready",
+                        "Tap STOP to halt active stimulation immediately.",
+                        channelId = SAFETY_STOP_NOTIFICATION_CHANNEL,
+                        includeStopAction = true,
+                    )
+                    result.success(null)
+                }
+                "consumeStopActuationRequest" -> {
+                    val prefs = context.getSharedPreferences(STOP_ACTUATION_PREFS, Context.MODE_PRIVATE)
+                    val requestedAt = prefs.getLong(STOP_ACTUATION_AT_KEY, 0L)
+                    if (requestedAt > 0L) {
+                        prefs.edit().putLong(STOP_ACTUATION_AT_KEY, 0L).apply()
+                        result.success(true)
+                    } else {
+                        result.success(false)
+                    }
                 }
                 "setDnd" -> {
                     val policy = (call.argument<String>("policy") ?: "all").lowercase()
@@ -525,29 +586,60 @@ object StandaloneTpeHost {
         title: String,
         body: String,
         channelId: String? = null,
+        includeStopAction: Boolean = false,
     ) {
         val nm = context.getSystemService(NotificationManager::class.java)
         val effectiveChannel = channelId ?: DEVICE_COMMANDS_NOTIFICATION_CHANNEL
+        val importance = if (effectiveChannel == SAFETY_STOP_NOTIFICATION_CHANNEL) {
+            NotificationManager.IMPORTANCE_HIGH
+        } else {
+            NotificationManager.IMPORTANCE_DEFAULT
+        }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             if (nm.getNotificationChannel(effectiveChannel) == null) {
                 nm.createNotificationChannel(
                     NotificationChannel(
                         effectiveChannel,
-                        "Remote Commands",
-                        NotificationManager.IMPORTANCE_DEFAULT,
+                        if (effectiveChannel == SAFETY_STOP_NOTIFICATION_CHANNEL) "Safety Controls" else "Remote Commands",
+                        importance,
                     )
                 )
             }
         }
-        val notif = NotificationCompat.Builder(context, effectiveChannel)
+        val notificationId = (System.currentTimeMillis() and 0x7fffffff).toInt()
+        val builder = NotificationCompat.Builder(context, effectiveChannel)
             .setSmallIcon(android.R.drawable.ic_dialog_info)
             .setContentTitle(title)
             .setContentText(body)
             .setStyle(NotificationCompat.BigTextStyle().bigText(body))
-            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+            .setPriority(
+                if (effectiveChannel == SAFETY_STOP_NOTIFICATION_CHANNEL) {
+                    NotificationCompat.PRIORITY_HIGH
+                } else {
+                    NotificationCompat.PRIORITY_DEFAULT
+                }
+            )
             .setAutoCancel(true)
-            .build()
-        nm.notify((System.currentTimeMillis() and 0x7fffffff).toInt(), notif)
+
+        if (includeStopAction) {
+            val stopIntent = Intent(context, StopActuationReceiver::class.java).apply {
+                action = STOP_ACTUATION_ACTION
+                putExtra("notification_id", notificationId)
+            }
+            val stopPendingIntent = PendingIntent.getBroadcast(
+                context,
+                notificationId xor 0x5A5A,
+                stopIntent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+            )
+            builder.addAction(
+                android.R.drawable.ic_media_pause,
+                "Stop",
+                stopPendingIntent,
+            )
+        }
+
+        nm.notify(notificationId, builder.build())
     }
 
     private fun playAudio(url: String, loop: Boolean) {

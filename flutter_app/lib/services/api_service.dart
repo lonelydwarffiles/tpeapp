@@ -6,6 +6,7 @@ import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/task.dart';
+import 'health_service.dart';
 
 /// Central HTTP client for all partner-backend API calls.
 ///
@@ -614,7 +615,7 @@ class ApiService {
           '/api/handler/public-status',
         ],
         headersByPath: [
-          const {'Content-Type': 'application/json'},
+          _bearerHeaders,
           _bearerHeaders,
         ],
       );
@@ -630,6 +631,44 @@ class ApiService {
       return const <String, dynamic>{};
     } catch (_) {
       return const <String, dynamic>{};
+    }
+  }
+
+  /// Forces a foreground Health Connect pull and pushes the latest vitals to
+  /// `/api/vitals/sync` for near-realtime HR-aware control decisions.
+  ///
+  /// Returns true when at least one sample was uploaded successfully.
+  Future<bool> syncRealtimeVitals({
+    Duration window = const Duration(seconds: 20),
+  }) async {
+    if (_endpoint.isEmpty) {
+      return false;
+    }
+    try {
+      final health = HealthService.instance;
+      final hasPermissions = await health.hasPermissions();
+      if (!hasPermissions) {
+        return false;
+      }
+
+      final records = await health.queryVitals(
+        endTime: DateTime.now(),
+        window: window,
+      );
+      if (records.isEmpty) {
+        return false;
+      }
+
+      final response = await http
+          .post(
+            Uri.parse('$_endpoint/api/vitals/sync'),
+            headers: _bearerHeaders,
+            body: jsonEncode({'vitals': records}),
+          )
+          .timeout(_timeout);
+      return response.statusCode >= 200 && response.statusCode < 300;
+    } catch (_) {
+      return false;
     }
   }
 

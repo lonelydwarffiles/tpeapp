@@ -20,8 +20,8 @@ class BleChannel {
   static Timer? _lovenseTimedStopTimer;
 
   // A/B switch for Lovense path: native bridge (SDK-ready) vs Dart BLE.
-  static bool _useNativeLovense = true;
-  static bool _useNativePavlok = true;
+  static bool _useNativeLovense = false;
+  static bool _useNativePavlok = false;
 
   static bool get useNativeLovense => _useNativeLovense;
   static bool get useNativePavlok => _useNativePavlok;

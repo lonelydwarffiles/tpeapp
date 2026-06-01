@@ -7,30 +7,46 @@ import 'package:health/health.dart';
 
 /// Wraps the Health Connect SDK for reading biometric vitals.
 ///
-/// Supports [HealthDataType.HEART_RATE] and [HealthDataType.STEPS].
-/// Requires the Health Connect permissions declared in AndroidManifest.xml:
-///   android.permission.health.READ_HEART_RATE
-///   android.permission.health.READ_STEPS
+/// Resolves and requests all supported vitals from a preferred set
+/// (heart, activity, respiratory, oxygen, sleep, and body metrics).
 class HealthService {
   HealthService._();
 
   static final HealthService instance = HealthService._();
 
-  static const _types = [
-    HealthDataType.HEART_RATE,
-    HealthDataType.STEPS,
-  ];
+  static const Set<String> _preferredTypeNames = <String>{
+    'HEART_RATE',
+    'RESTING_HEART_RATE',
+    'HEART_RATE_VARIABILITY_SDNN',
+    'RESPIRATORY_RATE',
+    'BLOOD_OXYGEN',
+    'OXYGEN_SATURATION',
+    'STEPS',
+    'DISTANCE_DELTA',
+    'FLIGHTS_CLIMBED',
+    'TOTAL_CALORIES_BURNED',
+    'ACTIVE_ENERGY_BURNED',
+    'BASAL_ENERGY_BURNED',
+    'SLEEP_ASLEEP',
+    'SLEEP_AWAKE',
+    'SLEEP_IN_BED',
+    'SLEEP_SESSION',
+    'WEIGHT',
+    'HEIGHT',
+    'BODY_FAT_PERCENTAGE',
+    'BODY_TEMPERATURE',
+  };
 
-  static const _permissions = [
-    HealthDataAccess.READ,
-    HealthDataAccess.READ,
-  ];
+  static final List<HealthDataType> _types = _resolveSupportedTypes();
+
+  static final List<HealthDataAccess> _permissions =
+      List<HealthDataAccess>.filled(_types.length, HealthDataAccess.READ);
 
   final _health = Health();
   static const MethodChannel _nativeHealth =
       MethodChannel('com.hound.controller/health');
 
-  /// Requests Read access for HeartRate and Steps from Health Connect.
+  /// Requests read access for all configured Health Connect vitals.
   ///
   /// Returns true if all requested permissions were granted.
   Future<bool> requestPermissions() async {
@@ -76,7 +92,7 @@ class HealthService {
     }
   }
 
-  /// Queries HeartRate and Steps data for the [window] ending at [endTime].
+  /// Queries configured vitals data for the [window] ending at [endTime].
   ///
   /// Returns a JSON-serialisable list shaped as:
   /// ```json
@@ -123,28 +139,29 @@ class HealthService {
     }
 
     return deduplicated.map((point) {
-      final typeKey = switch (point.type) {
-        HealthDataType.HEART_RATE => 'heart_rate',
-        HealthDataType.STEPS => 'steps',
-        _ => point.type.name.toLowerCase(),
-      };
-      final unit = switch (point.type) {
-        HealthDataType.HEART_RATE => 'bpm',
-        HealthDataType.STEPS => 'count',
-        _ => point.unit.name.toLowerCase(),
-      };
-      // Both HEART_RATE and STEPS always produce NumericHealthValue records;
-      // guard against unexpected types from future health package versions.
-      if (point.value is! NumericHealthValue) return null;
-      final value = (point.value as NumericHealthValue).numericValue.toDouble();
-
-      return <String, dynamic>{
+      final typeName = point.type.name;
+      final typeKey = _canonicalTypeKey(typeName);
+      var unit = _canonicalUnit(typeName, point.unit.name);
+      final value = _numericValueFromPoint(point.value);
+      final payload = <String, dynamic>{
         'type': typeKey,
-        'value': value,
         'unit': unit,
         'start_ms': point.dateFrom.millisecondsSinceEpoch,
         'end_ms': point.dateTo.millisecondsSinceEpoch,
+        'source': point.sourceName,
       };
+
+      if (value != null) {
+        payload['value'] = value;
+      } else if (typeKey == 'sleep_session') {
+        final minutes = point.dateTo.difference(point.dateFrom).inMinutes;
+        payload['value'] = minutes.toDouble();
+        payload['unit'] = 'minutes';
+      } else {
+        payload['raw_value'] = '${point.value}';
+      }
+
+      return payload;
     }).whereType<Map<String, dynamic>>().toList();
   }
 
@@ -155,5 +172,109 @@ class HealthService {
   }) async {
     final records = await queryVitals(endTime: endTime, window: window);
     return jsonEncode(records);
+  }
+
+  static List<HealthDataType> _resolveSupportedTypes() {
+    final byName = <String, HealthDataType>{
+      for (final type in HealthDataType.values) type.name: type,
+    };
+
+    final resolved = <HealthDataType>[];
+    for (final name in _preferredTypeNames) {
+      final type = byName[name];
+      if (type != null) {
+        resolved.add(type);
+      }
+    }
+
+    if (resolved.isEmpty) {
+      final fallbackHeartRate = byName['HEART_RATE'];
+      final fallbackSteps = byName['STEPS'];
+      if (fallbackHeartRate != null) {
+        resolved.add(fallbackHeartRate);
+      }
+      if (fallbackSteps != null) {
+        resolved.add(fallbackSteps);
+      }
+    }
+    return resolved;
+  }
+
+  static String _canonicalTypeKey(String healthTypeName) {
+    switch (healthTypeName) {
+      case 'HEART_RATE':
+        return 'heart_rate';
+      case 'RESTING_HEART_RATE':
+        return 'resting_heart_rate';
+      case 'HEART_RATE_VARIABILITY_SDNN':
+        return 'heart_rate_variability_sdnn';
+      case 'RESPIRATORY_RATE':
+        return 'respiratory_rate';
+      case 'BLOOD_OXYGEN':
+      case 'OXYGEN_SATURATION':
+        return 'oxygen_saturation';
+      case 'DISTANCE_DELTA':
+        return 'distance';
+      case 'TOTAL_CALORIES_BURNED':
+        return 'total_calories_burned';
+      case 'ACTIVE_ENERGY_BURNED':
+        return 'active_energy_burned';
+      case 'BASAL_ENERGY_BURNED':
+        return 'basal_energy_burned';
+      case 'FLIGHTS_CLIMBED':
+        return 'floors_climbed';
+      case 'SLEEP_ASLEEP':
+      case 'SLEEP_AWAKE':
+      case 'SLEEP_IN_BED':
+      case 'SLEEP_SESSION':
+        return 'sleep_session';
+      case 'BODY_FAT_PERCENTAGE':
+        return 'body_fat_percentage';
+      default:
+        return healthTypeName.toLowerCase();
+    }
+  }
+
+  static String _canonicalUnit(String healthTypeName, String unitName) {
+    switch (healthTypeName) {
+      case 'HEART_RATE':
+      case 'RESTING_HEART_RATE':
+      case 'RESPIRATORY_RATE':
+        return 'bpm';
+      case 'HEART_RATE_VARIABILITY_SDNN':
+        return 'ms';
+      case 'BLOOD_OXYGEN':
+      case 'OXYGEN_SATURATION':
+      case 'BODY_FAT_PERCENTAGE':
+        return 'percent';
+      case 'STEPS':
+      case 'FLIGHTS_CLIMBED':
+        return 'count';
+      case 'DISTANCE_DELTA':
+        return 'meters';
+      case 'TOTAL_CALORIES_BURNED':
+      case 'ACTIVE_ENERGY_BURNED':
+      case 'BASAL_ENERGY_BURNED':
+        return 'kcal';
+      case 'SLEEP_ASLEEP':
+      case 'SLEEP_AWAKE':
+      case 'SLEEP_IN_BED':
+      case 'SLEEP_SESSION':
+        return 'minutes';
+      default:
+        return unitName.toLowerCase();
+    }
+  }
+
+  static double? _numericValueFromPoint(HealthValue value) {
+    if (value is NumericHealthValue) {
+      return value.numericValue.toDouble();
+    }
+    final raw = '$value';
+    final match = RegExp(r'-?\d+(?:\.\d+)?').firstMatch(raw);
+    if (match == null) {
+      return null;
+    }
+    return double.tryParse(match.group(0)!);
   }
 }

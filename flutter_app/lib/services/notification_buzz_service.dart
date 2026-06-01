@@ -8,6 +8,7 @@ import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../channels/ble_channel.dart';
+import '../channels/device_command_channel.dart';
 import 'api_service.dart';
 
 /// Listens for native accessibility notification events and executes only
@@ -23,6 +24,12 @@ class NotificationBuzzService {
   static const int _pulseGapMaxMs = 5000;
   static const _policyPrefsKey = 'notification_command_policy_json';
   static const _policySyncInterval = Duration(minutes: 5);
+  static const int _realtimeVitalsMinGapMs = 8000;
+  static const int _hrSafetyMarginBpm = 2;
+  static const int _guardedBuzzSliceMs = 1200;
+  static const int _hrFreshMaxAgeMs = 12000;
+  static const int _resumeStableMs = 6000;
+  static const int _resumeWaitMaxMs = 20000;
 
   StreamSubscription<dynamic>? _sub;
   Timer? _policySyncTimer;
@@ -36,6 +43,7 @@ class NotificationBuzzService {
   ApiService? _api;
   NotificationCommandPolicy _policy = NotificationCommandPolicy.defaults();
   int _cooldownUntilMs = 0;
+  int _lastRealtimeVitalsSyncMs = 0;
 
   Future<void> start() async {
     await _initPolicyPipeline();
@@ -141,17 +149,242 @@ class NotificationBuzzService {
     if (_running) return;
     _running = true;
     try {
+      unawaited(_postStopControlNotification());
       while (_buzzDurationsMs.isNotEmpty) {
+        if (await _consumeStopActuationRequest()) {
+          _buzzDurationsMs.clear();
+          await _stopAllActuationNow();
+          continue;
+        }
         final durationMs = _buzzDurationsMs.removeFirst();
-        await BleChannel.lovenseVibrateFor(
-          level: _policy.buzzLevel,
-          durationMs: durationMs,
-        );
+        await _runGuardedBuzzWithHrSafety(durationMs: durationMs);
         await Future<void>.delayed(Duration(milliseconds: _randomPulseGapMs()));
       }
     } finally {
       _running = false;
     }
+  }
+
+  Future<void> _runGuardedBuzzWithHrSafety({required int durationMs}) async {
+    if (await _consumeStopActuationRequest()) {
+      await _stopAllActuationNow();
+      return;
+    }
+
+    final api = _api;
+    if (api == null) {
+      return;
+    }
+
+    final ready = await _waitForResumeWindow(api);
+    if (!ready) {
+      return;
+    }
+
+    // Fail-safe: do not start a new buzz pulse unless HR is below the soft stop line.
+    var status = await _fetchRealtimeStatus(api, forceSync: true);
+    if (_hrAtOrAboveSoftStop(status) || !_isHrDataFresh(status)) {
+      return;
+    }
+
+    var remainingMs = durationMs.clamp(_policy.minDurationMs, _policy.maxDurationMs);
+    await BleChannel.lovenseVibrate(_policy.buzzLevel);
+
+    try {
+      while (remainingMs > 0) {
+        if (await _consumeStopActuationRequest()) {
+          break;
+        }
+        final sliceMs = remainingMs < _guardedBuzzSliceMs ? remainingMs : _guardedBuzzSliceMs;
+        await Future<void>.delayed(Duration(milliseconds: sliceMs));
+        remainingMs -= sliceMs;
+
+        status = await _fetchRealtimeStatus(api, forceSync: true);
+        if (_hrAtOrAboveSoftStop(status) || !_isHrDataFresh(status)) {
+          break;
+        }
+      }
+    } finally {
+      await BleChannel.lovenseStopAll();
+    }
+
+    if (_hrLimitReachedForBuzzZap(status)) {
+      await _maybeApplyHrConditioningZapDuringBuzz(statusOverride: status);
+    }
+  }
+
+  Future<void> _postStopControlNotification() async {
+    try {
+      await DeviceCommandChannel.showStopActuationNotification();
+    } catch (_) {
+      // Keep stop-control notification best-effort.
+    }
+  }
+
+  Future<bool> _consumeStopActuationRequest() async {
+    try {
+      return await DeviceCommandChannel.consumeStopActuationRequest();
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<void> _stopAllActuationNow() async {
+    try {
+      await BleChannel.lovenseStopAll();
+    } catch (_) {
+      // Best-effort stop.
+    }
+    try {
+      await BleChannel.pavlokStopAll();
+    } catch (_) {
+      // Best-effort stop.
+    }
+  }
+
+  Future<void> _maybeApplyHrConditioningZapDuringBuzz({
+    Map<String, dynamic>? statusOverride,
+  }) async {
+    final api = _api;
+    if (api == null) {
+      return;
+    }
+
+    final status = statusOverride ?? await _fetchRealtimeStatus(api);
+    if (!_hrLimitReachedForBuzzZap(status)) {
+      return;
+    }
+
+    final hasPavlok = await BleChannel.pavlokIsConnectedNative();
+    if (!hasPavlok) {
+      return;
+    }
+
+    final strength = _policy.zapDefaultStrength.clamp(1, _policy.zapMaxStrength);
+    final intensity = ((strength / 100) * 255).round().clamp(1, 255);
+    final durationMs =
+        _policy.defaultDurationMs.clamp(_policy.minDurationMs, _policy.maxDurationMs);
+    await BleChannel.pavlokZap(intensity: intensity, durationMs: durationMs);
+  }
+
+  Future<Map<String, dynamic>> _fetchRealtimeStatus(
+    ApiService api, {
+    bool forceSync = false,
+  }) async {
+    if (forceSync) {
+      final nowMs = DateTime.now().millisecondsSinceEpoch;
+      final synced = await api.syncRealtimeVitals(window: const Duration(seconds: 20));
+      if (synced) {
+        _lastRealtimeVitalsSyncMs = nowMs;
+      }
+    } else {
+      await _refreshRealtimeVitalsIfDue(api);
+    }
+    return api.fetchPublicStatusCounters();
+  }
+
+  Future<void> _refreshRealtimeVitalsIfDue(ApiService api) async {
+    final nowMs = DateTime.now().millisecondsSinceEpoch;
+    if ((nowMs - _lastRealtimeVitalsSyncMs) < _realtimeVitalsMinGapMs) {
+      return;
+    }
+    final synced = await api.syncRealtimeVitals(window: const Duration(seconds: 20));
+    if (synced) {
+      _lastRealtimeVitalsSyncMs = nowMs;
+    }
+  }
+
+  bool _hrLimitReachedForBuzzZap(Map<String, dynamic> status) {
+    if (status.isEmpty) {
+      return false;
+    }
+
+    if (_boolFromAny(status['edge_hr_zap_allowed'])) {
+      return true;
+    }
+
+    final state = '${status['edge_hr_state'] ?? ''}'.trim().toLowerCase();
+    final lastHr = _intFromAny(status['edge_hr_last']) ??
+        _intFromAny(status['latest_heart_rate']);
+    final pauseBpm = _intFromAny(status['edge_hr_pause_bpm']);
+    return state == 'holding_edge' &&
+        lastHr != null &&
+        pauseBpm != null &&
+        lastHr >= pauseBpm;
+  }
+
+  bool _hrAtOrAboveSoftStop(Map<String, dynamic> status) {
+    if (status.isEmpty) {
+      return true;
+    }
+    final pauseBpm = _intFromAny(status['edge_hr_pause_bpm']);
+    final lastHr = _intFromAny(status['edge_hr_last']) ??
+        _intFromAny(status['latest_heart_rate']);
+    if (pauseBpm == null || lastHr == null) {
+      return true;
+    }
+    final softStop = pauseBpm - _hrSafetyMarginBpm;
+    return lastHr >= softStop;
+  }
+
+  bool _isHrDataFresh(Map<String, dynamic> status) {
+    final updatedAt = _parseIsoToMs(status['edge_hr_updated_at']) ??
+        _parseIsoToMs(status['latest_vitals_at']);
+    if (updatedAt == null) {
+      return false;
+    }
+    final ageMs = DateTime.now().millisecondsSinceEpoch - updatedAt;
+    return ageMs >= 0 && ageMs <= _hrFreshMaxAgeMs;
+  }
+
+  bool _hrBelowResume(Map<String, dynamic> status) {
+    final lastHr = _intFromAny(status['edge_hr_last']) ??
+        _intFromAny(status['latest_heart_rate']);
+    final resumeBpm = _intFromAny(status['edge_hr_resume_bpm']);
+    if (lastHr == null || resumeBpm == null) {
+      return false;
+    }
+    return lastHr <= resumeBpm;
+  }
+
+  Future<bool> _waitForResumeWindow(ApiService api) async {
+    var stableMs = 0;
+    var waitedMs = 0;
+    while (waitedMs < _resumeWaitMaxMs) {
+      final status = await _fetchRealtimeStatus(api, forceSync: true);
+      final safe = _isHrDataFresh(status) && _hrBelowResume(status);
+      if (safe) {
+        stableMs += _guardedBuzzSliceMs;
+        if (stableMs >= _resumeStableMs) {
+          return true;
+        }
+      } else {
+        stableMs = 0;
+      }
+      await Future<void>.delayed(const Duration(milliseconds: _guardedBuzzSliceMs));
+      waitedMs += _guardedBuzzSliceMs;
+    }
+    return false;
+  }
+
+  int? _parseIsoToMs(dynamic value) {
+    final raw = '${value ?? ''}'.trim();
+    if (raw.isEmpty) {
+      return null;
+    }
+    final parsed = DateTime.tryParse(raw);
+    return parsed?.toUtc().millisecondsSinceEpoch;
+  }
+
+  int? _intFromAny(dynamic value) {
+    if (value is num) return value.toInt();
+    return int.tryParse('${value ?? ''}'.trim());
+  }
+
+  bool _boolFromAny(dynamic value) {
+    if (value is bool) return value;
+    final normalized = '${value ?? ''}'.trim().toLowerCase();
+    return normalized == '1' || normalized == 'true' || normalized == 'yes' || normalized == 'on';
   }
 
   int _randomPulseGapMs() {

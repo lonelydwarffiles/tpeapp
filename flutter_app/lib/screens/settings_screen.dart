@@ -675,7 +675,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     SwitchListTile(
                       title: const Text('Enable Vitals Sync'),
                       subtitle: const Text(
-                          'Syncs HeartRate & Steps to your partner server '
+                          'Syncs all available Health Connect vitals '
+                          '(heart, steps, sleep, oxygen, respiratory, and more) '
+                          'to your partner server '
                           'every 15 minutes.'),
                       value: _healthConnectEnabled,
                       onChanged: _toggleHealthConnect,

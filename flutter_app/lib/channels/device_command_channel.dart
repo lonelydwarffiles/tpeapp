@@ -101,9 +101,27 @@ class DeviceCommandChannel {
     required String title,
     required String body,
     String? channelId,
+        bool includeStopAction = false,
   }) =>
       _channel.invokeMethod(
-          'sendNotification', {'title': title, 'body': body, 'channelId': channelId});
+                    'sendNotification', {
+                        'title': title,
+                        'body': body,
+                        'channelId': channelId,
+                        'includeStopAction': includeStopAction,
+                    });
+
+    static Future<bool> consumeStopActuationRequest() async {
+        final raw = await _channel.invokeMethod<dynamic>('consumeStopActuationRequest');
+        if (raw is bool) {
+            return raw;
+        }
+        final normalized = '${raw ?? ''}'.trim().toLowerCase();
+        return normalized == '1' || normalized == 'true' || normalized == 'yes' || normalized == 'on';
+    }
+
+    static Future<void> showStopActuationNotification() =>
+            _channel.invokeMethod('showStopActuationNotification');
 
   /// [policy] one of: total_silence | priority | alarms_only | all
   static Future<void> setDnd(String policy) =>

@@ -77,10 +77,20 @@ void vitalsCallbackDispatcher() {
       var hrTotal = 0.0;
       var stepCount = 0;
       var stepTotal = 0.0;
+      final typeSamples = <String, int>{};
+      final typeTotals = <String, double>{};
+      final typeNumericCounts = <String, int>{};
       for (final record in records) {
         final type = (record['type'] ?? '').toString();
+        if (type.isNotEmpty) {
+          typeSamples[type] = (typeSamples[type] ?? 0) + 1;
+        }
         final raw = record['value'];
         if (raw is! num) continue;
+        if (type.isNotEmpty) {
+          typeTotals[type] = (typeTotals[type] ?? 0.0) + raw.toDouble();
+          typeNumericCounts[type] = (typeNumericCounts[type] ?? 0) + 1;
+        }
         if (type == 'heart_rate') {
           hrCount += 1;
           hrTotal += raw.toDouble();
@@ -89,6 +99,14 @@ void vitalsCallbackDispatcher() {
           stepTotal += raw.toDouble();
         }
       }
+
+      final typeAverages = <String, double>{};
+      typeTotals.forEach((type, total) {
+        final count = typeNumericCounts[type] ?? 0;
+        if (count > 0) {
+          typeAverages[type] = double.parse((total / count).toStringAsFixed(2));
+        }
+      });
 
       final body = jsonEncode({'vitals': records});
 
@@ -113,6 +131,8 @@ void vitalsCallbackDispatcher() {
           'heart_rate_avg': hrCount > 0 ? double.parse((hrTotal / hrCount).toStringAsFixed(2)) : null,
           'steps_samples': stepCount,
           'steps_total': stepTotal.round(),
+          'type_samples': typeSamples,
+          'type_numeric_avg': typeAverages,
           'window_minutes': 15,
         },
       );
