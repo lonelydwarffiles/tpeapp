@@ -217,6 +217,8 @@ class _StartupGate extends StatefulWidget {
 
 class _StartupGateState extends State<_StartupGate>
     with WidgetsBindingObserver {
+  static const EventChannel _nativeBleEvents =
+      EventChannel('com.hound.controller/ble_events');
   static const String _defaultEndpoint = String.fromEnvironment(
       'TPE_DEFAULT_ENDPOINT',
       defaultValue: 'https://mochii.live');
@@ -236,12 +238,15 @@ class _StartupGateState extends State<_StartupGate>
   DateTime? _lastVpnConnectAttemptAt;
   Timer? _autoEnrollTimer;
   Timer? _deviceStatusTimer;
+  StreamSubscription<dynamic>? _nativeBleSub;
   StreamSubscription<Map<String, String>>? _mqttSub;
   RemoteCommandService? _remoteCommands;
   WebSocketService? _webSocketService;
   final Map<Permission, PermissionStatus> _statuses = {};
   static const Duration _deviceStatusInterval = Duration(seconds: 75);
   static const Duration _vpnConnectAttemptCooldown = Duration(seconds: 15);
+  int? _nativeLovenseBatteryPct;
+  int? _nativePavlokBatteryPct;
 
   static const _requiredPermissions = [
     Permission.camera,
@@ -257,7 +262,44 @@ class _StartupGateState extends State<_StartupGate>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _nativeBleSub = _nativeBleEvents.receiveBroadcastStream().listen(
+      _onNativeBleEvent,
+      onError: (_) {
+        // Optional stream; ignore when native channel is unavailable.
+      },
+    );
     WidgetsBinding.instance.addPostFrameCallback((_) => _bootstrap());
+  }
+
+  void _onNativeBleEvent(dynamic raw) {
+    if (raw is! Map) return;
+    final event = Map<Object?, Object?>.from(raw);
+    final device = (event['device'] ?? '').toString();
+    final type = (event['type'] ?? '').toString();
+    final batteryPct = event['battery_pct'] is num
+        ? (event['battery_pct'] as num).toInt().clamp(0, 100)
+        : null;
+
+    if (device == 'lovense') {
+      if (type == 'disconnected') {
+        _nativeLovenseBatteryPct = null;
+        return;
+      }
+      if (batteryPct != null) {
+        _nativeLovenseBatteryPct = batteryPct;
+      }
+      return;
+    }
+
+    if (device == 'pavlok') {
+      if (type == 'disconnected') {
+        _nativePavlokBatteryPct = null;
+        return;
+      }
+      if (batteryPct != null) {
+        _nativePavlokBatteryPct = batteryPct;
+      }
+    }
   }
 
   @override
@@ -534,8 +576,8 @@ class _StartupGateState extends State<_StartupGate>
           (currentLovense['connected'] == true) || nativeLovenseConnected;
       currentPavlok['connected'] =
           (currentPavlok['connected'] == true) || nativePavlokConnected;
-      final lovenseBattery = bleService.lovenseBatteryPct;
-      final pavlokBattery = bleService.pavlokBatteryPct;
+      final lovenseBattery = _nativeLovenseBatteryPct ?? bleService.lovenseBatteryPct;
+      final pavlokBattery = _nativePavlokBatteryPct ?? bleService.pavlokBatteryPct;
       if (lovenseBattery != null) {
         currentLovense['battery_pct'] = lovenseBattery;
       }
@@ -1066,6 +1108,7 @@ class _StartupGateState extends State<_StartupGate>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _nativeBleSub?.cancel();
     _mqttSub?.cancel();
     if (_webSocketService != null) {
       _webSocketService!.onCommandEvent = null;
