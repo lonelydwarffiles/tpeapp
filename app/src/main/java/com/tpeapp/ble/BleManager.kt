@@ -121,6 +121,7 @@ class BleManager(
     @Volatile private var eventListener: EventListener? = null
     @Volatile private var autoReconnectEnabled = true
     @Volatile private var reconnectAttempts = 0
+    @Volatile private var batteryReplyWindowUntilMs: Long = 0L
 
     private val reconnectRunnable = Runnable {
         reconnectToLastKnownDevice(reason = "scheduled_retry")
@@ -756,6 +757,7 @@ class BleManager(
      * running Android version.
      */
     private fun writeCharacteristic(characteristic: BluetoothGattCharacteristic, data: ByteArray) {
+        markBatteryQueryWindow(data)
         if (!hasPermission(Manifest.permission.BLUETOOTH_CONNECT)) {
             Log.w(TAG, "Missing BLUETOOTH_CONNECT — cannot write characteristic")
             emit("connect_permission_missing")
@@ -948,6 +950,7 @@ class BleManager(
 
         val batteryFromText = parseBatteryPctFromText(ascii)
         if (batteryFromText != null) {
+            batteryReplyWindowUntilMs = 0L
             emit(
                 "battery_level",
                 mapOf(
@@ -957,12 +960,66 @@ class BleManager(
                     "text" to ascii,
                 ),
             )
+            return
         }
+
+        if (isAwaitingBatteryReply()) {
+            val pendingReplyPct = parsePendingBatteryReply(ascii)
+            if (pendingReplyPct != null) {
+                batteryReplyWindowUntilMs = 0L
+                emit(
+                    "battery_level",
+                    mapOf(
+                        "battery_pct" to pendingReplyPct,
+                        "source" to "notification_text_pending_query",
+                        "characteristic_uuid" to characteristic.uuid.toString(),
+                        "text" to ascii,
+                    ),
+                )
+            }
+        }
+    }
+
+    private fun isAwaitingBatteryReply(): Boolean =
+        System.currentTimeMillis() <= batteryReplyWindowUntilMs
+
+    private fun parsePendingBatteryReply(text: String): Int? {
+        val trimmed = text.trim()
+        if (trimmed.isEmpty()) return null
+
+        val direct = Regex("^\\s*(\\d{1,3})(?:\\.\\d+)?\\s*;?\\s*$")
+            .find(trimmed)
+            ?.groupValues
+            ?.getOrNull(1)
+            ?.toIntOrNull()
+        if (direct != null) {
+            return direct.coerceIn(0, 100)
+        }
+
+        val prefixed = Regex("^(?:bat|batt|battery)?\\s*[:=]?\\s*(\\d{1,3})(?:\\.\\d+)?\\s*;?\\s*$", RegexOption.IGNORE_CASE)
+            .find(trimmed)
+            ?.groupValues
+            ?.getOrNull(1)
+            ?.toIntOrNull()
+        if (prefixed != null) {
+            return prefixed.coerceIn(0, 100)
+        }
+
+        return null
     }
 
     private fun parseBatteryPctFromText(text: String): Int? {
         val trimmed = text.trim()
         if (trimmed.isEmpty()) return null
+
+        val decimalBattery = Regex("(?i)(?:get_battery|battery)\\s*[:=]?\\s*(\\d{1,3}(?:\\.\\d+)?)")
+            .find(trimmed)
+            ?.groupValues
+            ?.getOrNull(1)
+            ?.toDoubleOrNull()
+        if (decimalBattery != null) {
+            return decimalBattery.toInt().coerceIn(0, 100)
+        }
 
         val prefixed = Regex("(?i)(?:get_battery|battery)\\s*[:=]\\s*(\\d{1,3})")
             .find(trimmed)
@@ -995,6 +1052,13 @@ class BleManager(
             ?.toIntOrNull()
         if (jsonLike != null) {
             return jsonLike.coerceIn(0, 100)
+        }
+
+        if (Regex("(?i)battery").containsMatchIn(trimmed)) {
+            val firstNumber = Regex("(\\d{1,3})").find(trimmed)?.groupValues?.getOrNull(1)?.toIntOrNull()
+            if (firstNumber != null) {
+                return firstNumber.coerceIn(0, 100)
+            }
         }
 
         return null
@@ -1102,6 +1166,7 @@ class BleManager(
         }
         val raw = bytes.first().toInt() and 0xFF
         val batteryPct = raw.coerceIn(0, 100)
+        batteryReplyWindowUntilMs = 0L
         emit(
             "battery_level",
             mapOf(
@@ -1115,6 +1180,14 @@ class BleManager(
 
     private fun ByteArray.toHexString(): String =
         joinToString(separator = "") { "%02X".format(it) }
+
+    private fun markBatteryQueryWindow(data: ByteArray) {
+        val text = runCatching { data.toString(Charsets.UTF_8).trim() }.getOrNull().orEmpty()
+        if (text.contains("battery", ignoreCase = true)) {
+            batteryReplyWindowUntilMs = System.currentTimeMillis() + 15_000L
+            emit("battery_query_sent", mapOf("text" to text))
+        }
+    }
 
     /** Returns true if [permission] has been granted. */
     private fun hasPermission(permission: String): Boolean =

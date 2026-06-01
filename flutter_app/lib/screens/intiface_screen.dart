@@ -22,13 +22,10 @@ class IntifaceScreen extends StatefulWidget {
 }
 
 class _IntifaceScreenState extends State<IntifaceScreen> {
-  static const EventChannel _nativeBleEvents =
-      EventChannel('com.hound.controller/ble_events');
-
+  static const EventChannel _nativeBleEvents = EventChannel('com.hound.controller/ble_events');
   double _testIntensity = 0.0;
   late final TextEditingController _endpointController;
-  bool _useNativeLovense = BleChannel.useNativeLovense;
-  bool _useNativePavlok = BleChannel.useNativePavlok;
+  StreamSubscription<dynamic>? _nativeBleSub;
   bool _nativeLovenseReady = false;
   bool _nativePavlokReady = false;
   int _nativeLovenseWriteOkCount = 0;
@@ -41,7 +38,26 @@ class _IntifaceScreenState extends State<IntifaceScreen> {
   String? _nativePavlokLastError;
   int? _nativeLovenseBatteryPct;
   int? _nativePavlokBatteryPct;
-  StreamSubscription<dynamic>? _nativeBleSubscription;
+  DateTime? _lastLovenseBatteryRequestAt;
+  DateTime? _lastPavlokBatteryRequestAt;
+
+  int? _parseBatteryFromNotificationText(String text) {
+    final trimmed = text.trim();
+    if (trimmed.isEmpty) return null;
+
+    final direct = RegExp(r'^\s*(\d{1,3})(?:\.\d+)?\s*;?\s*$').firstMatch(trimmed);
+    if (direct != null) {
+      return int.tryParse(direct.group(1) ?? '')?.clamp(0, 100).toInt();
+    }
+
+    final withKeyword = RegExp(r'(?i)(?:get_battery|battery|bat)\s*[:=]?\s*(\d{1,3})(?:\.\d+)?')
+        .firstMatch(trimmed);
+    if (withKeyword != null) {
+      return int.tryParse(withKeyword.group(1) ?? '')?.clamp(0, 100).toInt();
+    }
+
+    return null;
+  }
 
   Future<bool> _confirmNativePairMode({required String deviceName}) async {
     final useAutoSelect = await showDialog<bool>(
@@ -77,6 +93,45 @@ class _IntifaceScreenState extends State<IntifaceScreen> {
     return 'Unnamed device';
   }
 
+  bool _nativeLooksLikeLovense(Map<String, dynamic> device) {
+    final name = _nativeDeviceLabel(device).toLowerCase();
+    if (name.isEmpty) return false;
+
+    if (name.contains('lovense')) return true;
+    if (RegExp(r'(^|[^a-z0-9])lv([\s_-]|$)').hasMatch(name)) return true;
+
+    const modelHints = <String>[
+      'lush',
+      'hush',
+      'dolce',
+      'nora',
+      'osci',
+      'ferri',
+      'domi',
+      'hyphy',
+    ];
+
+    return modelHints.any(
+      (hint) => RegExp('(^|[^a-z0-9])$hint([\\s_-]|\$)').hasMatch(name),
+    );
+  }
+
+  bool _nativeLooksLikePavlok(Map<String, dynamic> device) {
+    final name = _nativeDeviceLabel(device).toLowerCase();
+    final address = (device['address'] ?? '').toString().toLowerCase();
+    return name.contains('pavlok') ||
+        address == 'ca:98:6a:5c:fa:68' ||
+        address == 'ca:9b:6a:5c:fa:68';
+  }
+
+  List<Map<String, dynamic>> _filterLovenseNativeDevices(List<Map<String, dynamic>> devices) {
+    return devices.where(_nativeLooksLikeLovense).toList(growable: false);
+  }
+
+  List<Map<String, dynamic>> _filterPavlokNativeDevices(List<Map<String, dynamic>> devices) {
+    return devices.where(_nativeLooksLikePavlok).toList(growable: false);
+  }
+
   Future<Map<String, dynamic>?> _pickNativeDeviceModal({
     required String title,
     required List<Map<String, dynamic>> devices,
@@ -85,6 +140,7 @@ class _IntifaceScreenState extends State<IntifaceScreen> {
       context: context,
       showDragHandle: true,
       builder: (context) {
+        final maxHeight = MediaQuery.of(context).size.height * 0.62;
         return SafeArea(
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -96,9 +152,9 @@ class _IntifaceScreenState extends State<IntifaceScreen> {
                   child: Text(title, style: Theme.of(context).textTheme.titleMedium),
                 ),
               ),
-              Flexible(
+              SizedBox(
+                height: maxHeight,
                 child: ListView.builder(
-                  shrinkWrap: true,
                   itemCount: devices.length,
                   itemBuilder: (context, index) {
                     final device = devices[index];
@@ -214,6 +270,7 @@ class _IntifaceScreenState extends State<IntifaceScreen> {
       context: context,
       showDragHandle: true,
       builder: (context) {
+        final maxHeight = MediaQuery.of(context).size.height * 0.62;
         return SafeArea(
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -225,9 +282,9 @@ class _IntifaceScreenState extends State<IntifaceScreen> {
                   child: Text(title, style: Theme.of(context).textTheme.titleMedium),
                 ),
               ),
-              Flexible(
+              SizedBox(
+                height: maxHeight,
                 child: ListView.builder(
-                  shrinkWrap: true,
                   itemCount: devices.length,
                   itemBuilder: (context, index) {
                     final device = devices[index];
@@ -263,7 +320,9 @@ class _IntifaceScreenState extends State<IntifaceScreen> {
         return;
       }
       await _runLovenseAction('selector scan', () async {
-        final devices = await BleChannel.lovenseScanCandidatesNative();
+        final devices = _filterLovenseNativeDevices(
+          await BleChannel.lovenseScanCandidatesNative(),
+        );
         if (!mounted) return;
         if (devices.isEmpty) {
           ScaffoldMessenger.of(context).showSnackBar(
@@ -328,7 +387,9 @@ class _IntifaceScreenState extends State<IntifaceScreen> {
         return;
       }
       await _runToyAction('Pavlok selector scan', () async {
-        final devices = await BleChannel.pavlokScanCandidatesNative();
+        final devices = _filterPavlokNativeDevices(
+          await BleChannel.pavlokScanCandidatesNative(),
+        );
         if (!mounted) return;
         if (devices.isEmpty) {
           ScaffoldMessenger.of(context).showSnackBar(
@@ -401,10 +462,12 @@ class _IntifaceScreenState extends State<IntifaceScreen> {
   void initState() {
     super.initState();
     _endpointController = TextEditingController();
-    _nativeBleSubscription = _nativeBleEvents.receiveBroadcastStream().listen(
+    BleChannel.setLovensePath(useNative: true);
+    BleChannel.setPavlokPath(useNative: true);
+    _nativeBleSub = _nativeBleEvents.receiveBroadcastStream().listen(
       _onNativeBleEvent,
       onError: (_) {
-        // Optional stream; ignore if unavailable.
+        // Optional stream; the native bridge can still pair without it.
       },
     );
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -427,7 +490,7 @@ class _IntifaceScreenState extends State<IntifaceScreen> {
 
   @override
   void dispose() {
-    _nativeBleSubscription?.cancel();
+    unawaited(_nativeBleSub?.cancel());
     _endpointController.dispose();
     super.dispose();
   }
@@ -448,8 +511,20 @@ class _IntifaceScreenState extends State<IntifaceScreen> {
       : null;
 
     if (device == 'lovense') {
+      if (type == 'notification') {
+        final text = (payload['text'] ?? '').toString();
+        final requestedRecently = _lastLovenseBatteryRequestAt != null &&
+            DateTime.now().difference(_lastLovenseBatteryRequestAt!) < const Duration(seconds: 20);
+        if (requestedRecently) {
+          final parsed = _parseBatteryFromNotificationText(text);
+          if (parsed != null) {
+            setState(() => _nativeLovenseBatteryPct = parsed);
+          }
+        }
+      }
       if (isReady && !_nativeLovenseReady) {
         setState(() => _nativeLovenseReady = true);
+        unawaited(_refreshLovenseBattery(context.read<BleService>(), silent: true));
       } else if (isDisconnected && _nativeLovenseReady) {
         setState(() {
           _nativeLovenseReady = false;
@@ -462,7 +537,9 @@ class _IntifaceScreenState extends State<IntifaceScreen> {
       if (type == 'service_missing' ||
           type == 'characteristic_missing' ||
           type == 'services_discovery_failed' ||
-          type == 'connect_permission_missing') {
+          type == 'connect_permission_missing' ||
+          type == 'battery_unavailable' ||
+          type == 'battery_read_failed') {
         _nativeLovenseLastError = '$type: $payload';
       }
       if (type == 'write_ok') {
@@ -473,8 +550,20 @@ class _IntifaceScreenState extends State<IntifaceScreen> {
         _nativeLovenseLastError = 'write_failed: $payload';
       }
     } else if (device == 'pavlok') {
+      if (type == 'notification') {
+        final text = (payload['text'] ?? '').toString();
+        final requestedRecently = _lastPavlokBatteryRequestAt != null &&
+            DateTime.now().difference(_lastPavlokBatteryRequestAt!) < const Duration(seconds: 20);
+        if (requestedRecently) {
+          final parsed = _parseBatteryFromNotificationText(text);
+          if (parsed != null) {
+            setState(() => _nativePavlokBatteryPct = parsed);
+          }
+        }
+      }
       if (isReady && !_nativePavlokReady) {
         setState(() => _nativePavlokReady = true);
+        unawaited(_refreshPavlokBattery(context.read<BleService>(), silent: true));
       } else if (isDisconnected && _nativePavlokReady) {
         setState(() {
           _nativePavlokReady = false;
@@ -487,7 +576,9 @@ class _IntifaceScreenState extends State<IntifaceScreen> {
       if (type == 'service_missing' ||
           type == 'characteristic_missing' ||
           type == 'services_discovery_failed' ||
-          type == 'connect_permission_missing') {
+          type == 'connect_permission_missing' ||
+          type == 'battery_unavailable' ||
+          type == 'battery_read_failed') {
         _nativePavlokLastError = '$type: $payload';
       }
       if (type == 'write_ok') {
@@ -556,6 +647,7 @@ class _IntifaceScreenState extends State<IntifaceScreen> {
   Future<void> _refreshLovenseBattery(BleService ble, {bool silent = false}) async {
     try {
       if (BleChannel.useNativeLovense) {
+        _lastLovenseBatteryRequestAt = DateTime.now();
         await BleChannel.lovenseBattery();
         await BleChannel.lovenseReadBatteryLevel();
       } else {
@@ -576,6 +668,7 @@ class _IntifaceScreenState extends State<IntifaceScreen> {
   Future<void> _refreshPavlokBattery(BleService ble, {bool silent = false}) async {
     try {
       if (BleChannel.useNativePavlok) {
+        _lastPavlokBatteryRequestAt = DateTime.now();
         await BleChannel.pavlokReadBatteryLevel();
       } else {
         await ble.refreshPavlokBatteryLevel();
@@ -613,7 +706,7 @@ class _IntifaceScreenState extends State<IntifaceScreen> {
             child: Padding(
               padding: const EdgeInsets.all(14),
               child: Text(
-                'We-Vibe devices pair through Buttplug / Intiface. Pavlok uses direct Bluetooth. Lovense can use native bridge (SDK-ready) or direct Bluetooth fallback.',
+                'Lovense and Pavlok pair through the native bridge here. Battery status is pulled from the bridge and the device battery service when available.',
                 style: Theme.of(context).textTheme.bodyMedium,
               ),
             ),
@@ -625,47 +718,13 @@ class _IntifaceScreenState extends State<IntifaceScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Text(
-                          'Lovense native bridge path',
-                          style: Theme.of(context).textTheme.bodyMedium,
-                        ),
-                      ),
-                      Switch(
-                        value: _useNativeLovense,
-                        onChanged: (value) {
-                          setState(() => _useNativeLovense = value);
-                          BleChannel.setLovensePath(useNative: value);
-                        },
-                      ),
-                    ],
-                  ),
                   Text(
-                    'Active Lovense path: ${BleChannel.lovensePathLabel}',
+                    'Lovense path: native bridge',
                     style: Theme.of(context).textTheme.bodySmall,
                   ),
                   const SizedBox(height: 10),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Text(
-                          'Pavlok native bridge path',
-                          style: Theme.of(context).textTheme.bodyMedium,
-                        ),
-                      ),
-                      Switch(
-                        value: _useNativePavlok,
-                        onChanged: (value) {
-                          setState(() => _useNativePavlok = value);
-                          BleChannel.setPavlokPath(useNative: value);
-                        },
-                      ),
-                    ],
-                  ),
                   Text(
-                    'Active Pavlok path: ${BleChannel.pavlokPathLabel}',
+                    'Pavlok path: native bridge',
                     style: Theme.of(context).textTheme.bodySmall,
                   ),
                 ],
@@ -730,7 +789,7 @@ class _IntifaceScreenState extends State<IntifaceScreen> {
           const SizedBox(height: 28),
           _ToyPairingCard(
             title: 'Lovense',
-            subtitle: 'Pair a Lovense toy directly over Bluetooth. Device stays persisted and auto-repaired.',
+            subtitle: 'Pair a Lovense toy through the native bridge. Device stays persisted and auto-repaired.',
             paired: ble.lovenseConnected || _nativeLovenseReady,
             batteryPct: lovenseBatteryPct,
             error: ble.lovenseError,
@@ -743,7 +802,7 @@ class _IntifaceScreenState extends State<IntifaceScreen> {
           const SizedBox(height: 16),
           _ToyPairingCard(
             title: 'Pavlok',
-            subtitle: 'Pair a Pavlok wristband directly over Bluetooth. Device stays persisted and auto-repaired.',
+            subtitle: 'Pair a Pavlok wristband through the native bridge. Device stays persisted and auto-repaired.',
             paired: ble.pavlokConnected || _nativePavlokReady,
             batteryPct: pavlokBatteryPct,
             error: ble.pavlokError,
@@ -1013,7 +1072,9 @@ class _ToyPairingCard extends StatelessWidget {
             Text(paired ? 'Paired' : 'Not paired'),
             const SizedBox(height: 4),
             Text(
-              batteryPct == null ? 'Battery: Unknown' : 'Battery: $batteryPct%',
+              batteryPct == null
+                  ? (paired ? 'Battery: checking…' : 'Battery: unavailable')
+                  : 'Battery: $batteryPct%',
             ),
             if (error != null && error!.trim().isNotEmpty) ...[
               const SizedBox(height: 8),

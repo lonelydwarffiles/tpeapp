@@ -94,6 +94,10 @@ object PavlokManager {
     private const val LEGACY_CMD_VIBRATE: Int = 0x01
     private const val LEGACY_CMD_BEEP: Int = 0x02
     private val PAVLOK_NAME_HINTS = listOf("pavlok")
+    private val PAVLOK_KNOWN_MACS = setOf(
+        "ca:98:6a:5c:fa:68",
+        "ca:9b:6a:5c:fa:68",
+    )
 
     // ------------------------------------------------------------------
     //  State
@@ -135,7 +139,7 @@ object PavlokManager {
                     return@scanCandidates
                 }
             }
-            ble!!.startScan()
+            Log.w(TAG, "No Pavlok candidates matched strict filter; refusing non-Pavlok auto-connect")
         }
     }
 
@@ -146,12 +150,16 @@ object PavlokManager {
     ) {
         checkInit("scanCandidates")
         ble!!.scanCandidates(timeoutMs) { candidates ->
-            val preferred = candidates.filter { candidate ->
-                val name = (candidate["name"]?.toString() ?: "").lowercase()
-                PAVLOK_NAME_HINTS.any { hint -> name.contains(hint) }
-            }
-            onComplete(if (preferred.isNotEmpty()) preferred else candidates)
+            val preferred = candidates.filter(::looksLikePavlok)
+            onComplete(preferred)
         }
+    }
+
+    private fun looksLikePavlok(candidate: Map<String, Any?>): Boolean {
+        val name = (candidate["name"]?.toString() ?: "").lowercase()
+        val address = (candidate["address"]?.toString() ?: "").lowercase()
+        if (PAVLOK_NAME_HINTS.any { hint -> name.contains(hint) }) return true
+        return PAVLOK_KNOWN_MACS.contains(address)
     }
 
     /** Connects to a Pavlok device by BLE MAC address. */

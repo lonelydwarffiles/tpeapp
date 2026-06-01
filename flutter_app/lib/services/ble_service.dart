@@ -2,8 +2,8 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
-import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 /// Pure-Dart BLE layer for Lovense and Pavlok devices.
@@ -86,6 +86,8 @@ class BleService extends ChangeNotifier {
 
   static const _prefLovenseId = 'ble_saved_lovense_id';
   static const _prefPavlokId = 'ble_saved_pavlok_id';
+  static const MethodChannel _nativePermissionsChannel =
+      MethodChannel('com.hound.controller/permissions');
 
   static final _deviceInfoServiceUuid =
       Guid('0000180a-0000-1000-8000-00805f9b34fb');
@@ -1132,40 +1134,34 @@ class BleService extends ChangeNotifier {
   }
 
   Future<void> _ensureScanPermissions() async {
-    final statuses = <Permission, PermissionStatus>{
-      Permission.bluetoothScan: await Permission.bluetoothScan.status,
-      Permission.bluetoothConnect: await Permission.bluetoothConnect.status,
-      Permission.locationWhenInUse: await Permission.locationWhenInUse.status,
-    };
-
-    final needsRequest = statuses.entries
-        .where((entry) => !entry.value.isGranted)
-        .map((entry) => entry.key)
-        .toList(growable: false);
-    if (needsRequest.isEmpty) {
-      return;
-    }
-
-    final requested = await needsRequest.request();
-    final denied = requested.entries
-        .where((entry) => !entry.value.isGranted)
-        .map((entry) => entry.key)
-        .toList(growable: false);
-    if (denied.isEmpty) {
-      return;
-    }
-
-    final permanentlyDenied = requested.entries
-        .where((entry) => entry.value.isPermanentlyDenied)
-        .map((entry) => entry.key)
-        .toList(growable: false);
-    if (permanentlyDenied.isNotEmpty) {
-      throw StateError(
-        'Bluetooth permissions are permanently denied. Open app settings and allow Bluetooth + Location.',
+    try {
+      final raw = await _nativePermissionsChannel.invokeMapMethod<String, dynamic>(
+        'requestAndCheck',
+        {
+          'permissions': <String>[
+            'android.permission.BLUETOOTH_SCAN',
+            'android.permission.BLUETOOTH_CONNECT',
+            'android.permission.ACCESS_FINE_LOCATION',
+          ],
+        },
       );
-    }
+      if (raw == null || raw.isEmpty) {
+        return;
+      }
 
-    throw StateError('Bluetooth scan requires Bluetooth + Location permissions.');
+      final granted = raw['android.permission.BLUETOOTH_SCAN'] == true ||
+          raw['android.permission.ACCESS_FINE_LOCATION'] == true ||
+          raw['android.permission.ACCESS_COARSE_LOCATION'] == true;
+      if (!granted) {
+        throw StateError('Bluetooth scan requires Bluetooth + Location permissions.');
+      }
+    } on MissingPluginException {
+      // Keep the direct-BLE path usable even when the permission plugin is not
+      // registered in this standalone build.
+      return;
+    } on PlatformException {
+      return;
+    }
   }
 
   String _readableDeviceName(BluetoothDevice device) {

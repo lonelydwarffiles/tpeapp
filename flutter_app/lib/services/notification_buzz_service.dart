@@ -442,7 +442,8 @@ class NotificationBuzzService {
     if (packageName.isEmpty) return null;
 
     final raw = (event['raw']?.toString() ?? '').trim();
-    final parsedFromRaw = _parseRawCommand(raw);
+    final commandText = _composeCommandText(event);
+    final parsedFromRaw = _parseRawCommand(commandText);
 
     final command = (parsedFromRaw?.command ??
             event['command']?.toString().trim().toLowerCase() ??
@@ -490,8 +491,42 @@ class NotificationBuzzService {
       strength: strength,
       durationMs: durationMs,
       confidence: confidence,
-      raw: raw,
+      raw: raw.isNotEmpty ? raw : commandText,
     );
+  }
+
+  String _composeCommandText(Map<String, dynamic> event) {
+    final pieces = <String>[];
+
+    void addAny(dynamic value) {
+      if (value == null) return;
+      if (value is Iterable) {
+        for (final item in value) {
+          addAny(item);
+        }
+        return;
+      }
+      final text = value.toString().trim();
+      if (text.isNotEmpty) {
+        pieces.add(text);
+      }
+    }
+
+    addAny(event['raw']);
+    addAny(event['title']);
+    addAny(event['text']);
+    addAny(event['big']);
+    addAny(event['sub']);
+    addAny(event['summary']);
+    addAny(event['content']);
+    addAny(event['message']);
+    addAny(event['content_description']);
+    addAny(event['actions']);
+    addAny(event['action_labels']);
+    addAny(event['buttons']);
+    addAny(event['button_labels']);
+
+    return pieces.join(' ').trim();
   }
 
   _ParsedRawCommand? _parseRawCommand(String raw) {

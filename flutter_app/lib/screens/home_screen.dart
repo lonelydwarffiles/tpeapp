@@ -13,6 +13,7 @@ import '../services/ble_service.dart';
 import '../services/websocket_service.dart';
 import 'check_in_screen.dart';
 import 'chat_screen.dart';
+import 'edge_controls_screen.dart';
 import 'intiface_screen.dart';
 import 'questions_screen.dart';
 import 'settings_screen.dart';
@@ -32,14 +33,20 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       EventChannel('com.hound.controller/ble_events');
   static const String _edgeCountKey = 'home_edge_count';
   static const String _orgasmCountKey = 'home_orgasm_count';
+  static const String _edgeCountOffsetKey = 'home_edge_count_offset';
+  static const String _orgasmCountOffsetKey = 'home_orgasm_count_offset';
+  static const String _orgasmManualOverrideKey = 'home_orgasm_manual_override';
   static const String _edgePendingCountKey = 'home_edge_pending_count';
   static const String _orgasmPendingCountKey = 'home_orgasm_pending_count';
   static const String _edgeTargetShockAtPeakKey = 'edge_target_shock_at_peak';
+  static const String _lovenseBatteryAlertMaskKey = 'lovense_battery_alert_mask';
+  static const String _pavlokBatteryAlertMaskKey = 'pavlok_battery_alert_mask';
   static const int _edgeHrSafetyMarginBpm = 2;
   static const int _edgeGuardSliceMs = 1200;
   static const int _edgeHrFreshMaxAgeMs = 12000;
   static const int _edgeResumeStableMs = 6000;
   static const int _edgeResumeWaitMaxMs = 20000;
+  static const int _edgeStatusNotifyMinGapMs = 7000;
 
   String _enrollmentState = 'enrolling';
   String _enrollmentError = '';
@@ -66,6 +73,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   int _edgeTargetCount = 0;
   bool _edgeTargetShockAtPeak = true;
   bool _manualBuzzHoldUntilLowHr = false;
+  bool? _lastEdgeStatusActive;
+  int _lastEdgeStatusNotifyAtMs = 0;
+  bool _toyBatteryAlertStateLoaded = false;
+  int _lovenseBatteryAlertMask = 0;
+  int _pavlokBatteryAlertMask = 0;
+  int _sessionCountersLoadGeneration = 0;
 
   @override
   void didChangeDependencies() {
@@ -90,6 +103,14 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     if (!_countersLoaded) {
       _countersLoaded = true;
       unawaited(_loadSessionCounters());
+    }
+    if (!_toyBatteryAlertStateLoaded) {
+      _toyBatteryAlertStateLoaded = true;
+      final prefs = context.read<SharedPreferences>();
+      _lovenseBatteryAlertMask =
+          (prefs.getInt(_lovenseBatteryAlertMaskKey) ?? 0).clamp(0, 15);
+      _pavlokBatteryAlertMask =
+          (prefs.getInt(_pavlokBatteryAlertMaskKey) ?? 0).clamp(0, 15);
     }
   }
 
@@ -210,6 +231,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       }
       if (batteryPct != null) {
         setState(() => _nativeLovenseBatteryPct = batteryPct);
+        unawaited(_maybeNotifyToyBatteryLevel(device: 'lovense', batteryPct: batteryPct));
       }
       return;
     }
@@ -225,7 +247,74 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       }
       if (batteryPct != null) {
         setState(() => _nativePavlokBatteryPct = batteryPct);
+        unawaited(_maybeNotifyToyBatteryLevel(device: 'pavlok', batteryPct: batteryPct));
       }
+    }
+  }
+
+  Future<void> _maybeNotifyToyBatteryLevel({
+    required String device,
+    required int batteryPct,
+  }) async {
+    final safePct = batteryPct.clamp(0, 100);
+    final prefs = context.read<SharedPreferences>();
+
+    final isLovense = device == 'lovense';
+    var mask = isLovense ? _lovenseBatteryAlertMask : _pavlokBatteryAlertMask;
+
+    // Recovery clears deeper-level alert bits so future discharge can notify again.
+    if (safePct > 50) {
+      mask = 0;
+    } else if (safePct > 25) {
+      mask &= 0x01;
+    } else if (safePct > 10) {
+      mask &= 0x03;
+    } else if (safePct > 1) {
+      mask &= 0x07;
+    }
+
+    var thresholdLabel = '';
+    var severityBit = 0;
+    var fillMask = 0;
+    if (safePct <= 1) {
+      thresholdLabel = 'dead';
+      severityBit = 0x08;
+      fillMask = 0x0F;
+    } else if (safePct <= 10) {
+      thresholdLabel = '10%';
+      severityBit = 0x04;
+      fillMask = 0x07;
+    } else if (safePct <= 25) {
+      thresholdLabel = '25%';
+      severityBit = 0x02;
+      fillMask = 0x03;
+    } else if (safePct <= 50) {
+      thresholdLabel = '50%';
+      severityBit = 0x01;
+      fillMask = 0x01;
+    }
+
+    if (severityBit != 0 && (mask & severityBit) == 0) {
+      try {
+        await DeviceCommandChannel.sendNotification(
+          title: '${isLovense ? 'Lovense' : 'Pavlok'} Battery Low',
+          body: thresholdLabel == 'dead'
+              ? 'Battery is nearly dead ($safePct%).'
+              : 'Battery hit $thresholdLabel ($safePct%).',
+          channelId: 'tpe_toy_battery',
+        );
+      } catch (_) {
+        // Keep battery notifications best-effort.
+      }
+      mask |= fillMask;
+    }
+
+    if (isLovense) {
+      _lovenseBatteryAlertMask = mask;
+      await prefs.setInt(_lovenseBatteryAlertMaskKey, mask);
+    } else {
+      _pavlokBatteryAlertMask = mask;
+      await prefs.setInt(_pavlokBatteryAlertMaskKey, mask);
     }
   }
 
@@ -417,9 +506,13 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }
 
   Future<void> _loadSessionCounters() async {
+    final generation = ++_sessionCountersLoadGeneration;
     final prefs = context.read<SharedPreferences>();
     var edgeCount = prefs.getInt(_edgeCountKey) ?? 0;
     var orgasmCount = prefs.getInt(_orgasmCountKey) ?? 0;
+    final orgasmManualOverride = prefs.getInt(_orgasmManualOverrideKey);
+    final edgeCountOffset = (prefs.getInt(_edgeCountOffsetKey) ?? 0).clamp(-1000000, 1000000);
+    final orgasmCountOffset = (prefs.getInt(_orgasmCountOffsetKey) ?? 0).clamp(-1000000, 1000000);
     var edgeTargetCount = prefs.getInt('edge_target_count') ?? 0;
     var edgeTargetShockAtPeak = prefs.getBool(_edgeTargetShockAtPeakKey) ?? true;
     final edgePendingCount =
@@ -430,6 +523,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     final api = _api;
     if (api != null) {
       final remote = await api.fetchPublicStatusCounters();
+      if (generation != _sessionCountersLoadGeneration) {
+        return;
+      }
       if (remote.isNotEmpty) {
         final remoteEdge = remote['tasks_completed'];
         final remoteOrgasm = remote['confessions_posted'];
@@ -444,11 +540,15 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             ? <String>{'1', 'true', 'yes', 'on'}.contains('${remoteShock}'.trim().toLowerCase())
             : null);
         if (parsedEdge != null && parsedEdge >= 0) {
-          edgeCount = parsedEdge > edgeCount ? parsedEdge : edgeCount;
+          final latestEdgeOffset =
+              (prefs.getInt(_edgeCountOffsetKey) ?? 0).clamp(-1000000, 1000000);
+          edgeCount = (parsedEdge + latestEdgeOffset).clamp(0, 1000000);
           await prefs.setInt(_edgeCountKey, edgeCount);
         }
         if (parsedOrgasm != null && parsedOrgasm >= 0) {
-          orgasmCount = parsedOrgasm > orgasmCount ? parsedOrgasm : orgasmCount;
+          final latestOrgasmOffset =
+              (prefs.getInt(_orgasmCountOffsetKey) ?? 0).clamp(-1000000, 1000000);
+          orgasmCount = (parsedOrgasm + latestOrgasmOffset).clamp(0, 1000000);
           await prefs.setInt(_orgasmCountKey, orgasmCount);
         }
         if (parsedTarget != null && parsedTarget >= 0) {
@@ -462,7 +562,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       }
     }
 
-    if (!mounted) return;
+    if (orgasmManualOverride != null) {
+      orgasmCount = orgasmManualOverride.clamp(0, 1000000);
+      await prefs.setInt(_orgasmCountKey, orgasmCount);
+    }
+
+    if (!mounted || generation != _sessionCountersLoadGeneration) return;
     setState(() {
       _edgeCount = edgeCount;
       _orgasmCount = orgasmCount;
@@ -499,11 +604,107 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     );
   }
 
-  Future<void> _approvePendingCounters() async {
+  Future<void> _undoSessionCounter({required bool orgasm}) async {
+    // Invalidate any in-flight counter refresh that may still be using stale pre-undo values.
+    _sessionCountersLoadGeneration++;
+    final prefs = context.read<SharedPreferences>();
+
+    var edgePendingCount = _edgePendingCount;
+    var orgasmPendingCount = _orgasmPendingCount;
+    var edgeCount = _edgeCount;
+    var orgasmCount = _orgasmCount;
+    var edgeCountOffset = (prefs.getInt(_edgeCountOffsetKey) ?? 0).clamp(-1000000, 1000000);
+    var orgasmCountOffset = (prefs.getInt(_orgasmCountOffsetKey) ?? 0).clamp(-1000000, 1000000);
+    var removedFromPending = false;
+
+    if (orgasm) {
+      if (orgasmCount > 0) {
+        orgasmCount -= 1;
+        orgasmCountOffset = (orgasmCountOffset - 1).clamp(-1000000, 1000000);
+      } else if (orgasmPendingCount > 0) {
+        orgasmPendingCount -= 1;
+        removedFromPending = true;
+      } else {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('No orgasm counter to remove.')),
+          );
+        }
+        return;
+      }
+    } else {
+      if (edgeCount > 0) {
+        edgeCount -= 1;
+        edgeCountOffset = (edgeCountOffset - 1).clamp(-1000000, 1000000);
+      } else if (edgePendingCount > 0) {
+        edgePendingCount -= 1;
+        removedFromPending = true;
+      } else {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('No edge counter to remove.')),
+          );
+        }
+        return;
+      }
+    }
+
+    await prefs.setInt(_edgePendingCountKey, edgePendingCount);
+    await prefs.setInt(_orgasmPendingCountKey, orgasmPendingCount);
+    await prefs.setInt(_edgeCountKey, edgeCount);
+    await prefs.setInt(_orgasmCountKey, orgasmCount);
+    await prefs.setInt(_edgeCountOffsetKey, edgeCountOffset);
+    await prefs.setInt(_orgasmCountOffsetKey, orgasmCountOffset);
+    if (orgasm && !removedFromPending) {
+      await prefs.setInt(_orgasmManualOverrideKey, orgasmCount);
+    }
+
+    if (!mounted) return;
+    setState(() {
+      _edgePendingCount = edgePendingCount;
+      _orgasmPendingCount = orgasmPendingCount;
+      _edgeCount = edgeCount;
+      _orgasmCount = orgasmCount;
+    });
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            orgasm
+                ? (removedFromPending
+                      ? 'Removed 1 pending orgasm.'
+                      : 'Removed 1 approved orgasm.')
+                : (removedFromPending
+                      ? 'Removed 1 pending edge.'
+                      : 'Removed 1 approved edge.'),
+          ),
+        ),
+      );
+    }
+
+    await _trackBehavior(
+      orgasm ? 'orgasm_counter_removed' : 'edge_counter_removed',
+      reason: 'home_counter_button_undo',
+      payload: {
+        'edge_count': edgeCount,
+        'orgasm_count': orgasmCount,
+        'edge_pending_count': edgePendingCount,
+        'orgasm_pending_count': orgasmPendingCount,
+        'edge_count_offset': edgeCountOffset,
+        'orgasm_count_offset': orgasmCountOffset,
+      },
+    );
+  }
+
+  Future<void> _approvePendingCounters({
+    bool includeEdge = true,
+    bool includeOrgasm = true,
+  }) async {
     if (_counterApproveInFlight) return;
 
-    final edgeDelta = _edgePendingCount;
-    final orgasmDelta = _orgasmPendingCount;
+    final edgeDelta = includeEdge ? _edgePendingCount : 0;
+    final orgasmDelta = includeOrgasm ? _orgasmPendingCount : 0;
     if (edgeDelta <= 0 && orgasmDelta <= 0) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -560,15 +761,25 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       final prefs = context.read<SharedPreferences>();
       await prefs.setInt(_edgeCountKey, nextEdge);
       await prefs.setInt(_orgasmCountKey, nextOrgasm);
-      await prefs.setInt(_edgePendingCountKey, 0);
-      await prefs.setInt(_orgasmPendingCountKey, 0);
+      await prefs.setInt(_edgePendingCountKey, includeEdge ? 0 : _edgePendingCount);
+      await prefs.setInt(
+        _orgasmPendingCountKey,
+        includeOrgasm ? 0 : _orgasmPendingCount,
+      );
+      if (orgasmDelta > 0) {
+        await prefs.remove(_orgasmManualOverrideKey);
+      }
 
       if (!mounted) return;
       setState(() {
         _edgeCount = nextEdge;
         _orgasmCount = nextOrgasm;
-        _edgePendingCount = 0;
-        _orgasmPendingCount = 0;
+        if (includeEdge) {
+          _edgePendingCount = 0;
+        }
+        if (includeOrgasm) {
+          _orgasmPendingCount = 0;
+        }
       });
 
       await _trackBehavior(
@@ -612,6 +823,43 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         });
       }
     }
+  }
+
+  Future<void> _setEdgeTargetCount(int targetCount) async {
+    final safeTarget = targetCount.clamp(0, 1000000);
+    final prefs = context.read<SharedPreferences>();
+    await prefs.setInt('edge_target_count', safeTarget);
+    if (!mounted) return;
+    setState(() {
+      _edgeTargetCount = safeTarget;
+    });
+
+    await _trackBehavior(
+      'edge_target_updated',
+      reason: 'edge_controls_screen',
+      payload: {
+        'edge_target_count': safeTarget,
+        'current_edge_count': _edgeCount,
+      },
+    );
+
+    unawaited(_runEdgeTargetStepIfNeeded());
+  }
+
+  Future<void> _setEdgeTargetShockAtPeak(bool enabled) async {
+    final prefs = context.read<SharedPreferences>();
+    await prefs.setBool(_edgeTargetShockAtPeakKey, enabled);
+    if (!mounted) return;
+    setState(() {
+      _edgeTargetShockAtPeak = enabled;
+    });
+    await _trackBehavior(
+      'edge_target_peak_shock_updated',
+      reason: 'edge_controls_screen',
+      payload: {
+        'edge_target_shock_at_peak': enabled,
+      },
+    );
   }
 
   int? _intFromAny(dynamic value) {
@@ -736,15 +984,62 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     }
   }
 
+  Future<void> _notifyEdgeSystemStatus({
+    required bool active,
+    required String body,
+    bool includeStopAction = false,
+    bool includeEdgeDownOnTap = false,
+    bool force = false,
+  }) async {
+    final nowMs = DateTime.now().millisecondsSinceEpoch;
+    final recentlyNotified = (nowMs - _lastEdgeStatusNotifyAtMs) < _edgeStatusNotifyMinGapMs;
+    final sameState = _lastEdgeStatusActive != null && _lastEdgeStatusActive == active;
+    if (!force && sameState && recentlyNotified) {
+      return;
+    }
+
+    _lastEdgeStatusActive = active;
+    _lastEdgeStatusNotifyAtMs = nowMs;
+
+    try {
+      await DeviceCommandChannel.sendNotification(
+        title: active ? 'Edge System Active' : 'Edge System Inactive',
+        body: body,
+        channelId: 'tpe_edge_status',
+        includeStopAction: includeStopAction,
+        includeEdgeDownOnTap: includeEdgeDownOnTap,
+      );
+    } catch (_) {
+      // Keep edge status notifications best-effort.
+    }
+  }
+
+  Future<bool> _consumeEdgeDownRequest() async {
+    try {
+      return await DeviceCommandChannel.consumeEdgeDownRequest();
+    } catch (_) {
+      return false;
+    }
+  }
+
   Future<void> _activateManualBuzzHoldUntilLowHr() async {
     if (_manualBuzzHoldUntilLowHr) {
       await _stopBuzzOutputNow();
+      await _notifyEdgeSystemStatus(
+        active: false,
+        body: 'Buzz output stopped. Waiting for HR to return to the resume range.',
+      );
       return;
     }
     if (mounted) {
       setState(() => _manualBuzzHoldUntilLowHr = true);
     }
     await _stopBuzzOutputNow();
+    await _notifyEdgeSystemStatus(
+      active: false,
+      body: 'Manual hold enabled. Edge automation is paused until HR is back in range.',
+      force: true,
+    );
     await _trackBehavior(
       'manual_buzz_hold_enabled',
       reason: 'home_button',
@@ -771,6 +1066,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         'latest_heart_rate': _intFromAny(status['latest_heart_rate']),
         'edge_hr_resume_bpm': _intFromAny(status['edge_hr_resume_bpm']),
       },
+    );
+    await _notifyEdgeSystemStatus(
+      active: true,
+      body: 'HR recovered. Edge automation can buzz again when target conditions are met.',
+      force: true,
     );
     return true;
   }
@@ -818,10 +1118,34 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       }
 
       var remainingMs = 12000;
+      var didBuzz = false;
+      var stopReason = 'cycle complete';
+      await _notifyEdgeSystemStatus(
+        active: true,
+        body: 'Edge automation buzz cycle started (${_edgeCount + 1}/$target).',
+        includeStopAction: true,
+        includeEdgeDownOnTap: true,
+      );
       await ble.lovenseVibrate(12);
+      didBuzz = true;
+      var edgeDownMode = false;
       try {
         while (remainingMs > 0) {
+          if (await _consumeEdgeDownRequest()) {
+            edgeDownMode = true;
+            stopReason = 'edge down requested from notification';
+            await ble.lovenseVibrate(1);
+            await _notifyEdgeSystemStatus(
+              active: true,
+              body: 'Edge-down requested. Lowering output to 2% (minimum device level).',
+              includeStopAction: true,
+              includeEdgeDownOnTap: true,
+              force: true,
+            );
+          }
+
           if (_manualBuzzHoldUntilLowHr) {
+            stopReason = 'manual hold enabled';
             break;
           }
           final sliceMs = remainingMs < _edgeGuardSliceMs ? remainingMs : _edgeGuardSliceMs;
@@ -829,11 +1153,26 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           remainingMs -= sliceMs;
           status = await _fetchRealtimeEdgeStatus();
           if (_hrAtOrAboveSoftStopForEdge(status) || !_isEdgeHrFresh(status)) {
+            stopReason = 'heart-rate safety threshold reached';
             break;
           }
+
+          if (edgeDownMode) {
+            await ble.lovenseVibrate(1);
+          }
+        }
+        if (remainingMs <= 0) {
+          stopReason = 'buzz cycle finished';
         }
       } finally {
         await ble.lovenseVibrate(0);
+        if (didBuzz) {
+          await _notifyEdgeSystemStatus(
+            active: false,
+            body: 'Edge automation buzz stopped: $stopReason.',
+            includeStopAction: false,
+          );
+        }
       }
 
       if (_edgeTargetShockAtPeak) {
@@ -854,7 +1193,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       }
 
       await _queueSessionCounter(orgasm: false);
-      await _approvePendingCounters();
+      await _approvePendingCounters(includeEdge: true, includeOrgasm: false);
     } catch (_) {
       // Keep automation best-effort and retry on next tick.
     } finally {
@@ -870,8 +1209,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     final pavlokConnected = _nativePavlokConnected || ble.pavlokConnected;
     final lovenseBattery = _nativeLovenseBatteryPct ?? ble.lovenseBatteryPct;
     final pavlokBattery = _nativePavlokBatteryPct ?? ble.pavlokBatteryPct;
-    final buzzControlsVisible =
-        _edgeTargetCount > 0 || _manualBuzzHoldUntilLowHr || _edgeTargetStepInFlight;
     final width = MediaQuery.sizeOf(context).width;
     final crossAxisCount = width >= 900
         ? 4
@@ -916,6 +1253,33 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         icon: Icons.vibration_outlined,
         screenBuilder: () => const IntifaceScreen(),
       ),
+      _DashboardFeature(
+        title: 'Edge Controls',
+        icon: Icons.tune,
+        screenBuilder: () => EdgeControlsScreen(
+          readState: () => EdgeControlsViewData(
+            edgeCount: _edgeCount,
+            orgasmCount: _orgasmCount,
+            edgePendingCount: _edgePendingCount,
+            orgasmPendingCount: _orgasmPendingCount,
+            edgeTargetCount: _edgeTargetCount,
+            edgeTargetShockAtPeak: _edgeTargetShockAtPeak,
+            manualBuzzHoldUntilLowHr: _manualBuzzHoldUntilLowHr,
+            counterApproveInFlight: _counterApproveInFlight,
+            edgeTargetStepInFlight: _edgeTargetStepInFlight,
+          ),
+          onQueueEdge: () => _queueSessionCounter(orgasm: false),
+          onQueueOrgasm: () => _queueSessionCounter(orgasm: true),
+          onHoldBuzzUntilLowHr: _activateManualBuzzHoldUntilLowHr,
+          onApprovePending: _approvePendingCounters,
+          onUndoEdge: () => _undoSessionCounter(orgasm: false),
+          onUndoOrgasm: () => _undoSessionCounter(orgasm: true),
+          onSetEdgeTargetCount: _setEdgeTargetCount,
+          onSetPeakShockEnabled: _setEdgeTargetShockAtPeak,
+          onRefreshState: _loadSessionCounters,
+          onStopActuationNow: _stopBuzzOutputNow,
+        ),
+      ),
     ];
 
     return Scaffold(
@@ -939,119 +1303,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             icon: const Icon(Icons.link_outlined),
           ),
         ],
-      ),
-      floatingActionButtonLocation: FloatingActionButtonLocation.centerFloat,
-      floatingActionButton: SafeArea(
-        minimum: const EdgeInsets.fromLTRB(12, 0, 12, 10),
-        child: Card(
-          margin: EdgeInsets.zero,
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Backend counters: $_edgeCount edges • $_orgasmCount orgasms',
-                  style: Theme.of(context).textTheme.bodyMedium,
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  'Pending in app: $_edgePendingCount edges • $_orgasmPendingCount orgasms',
-                  style: Theme.of(context).textTheme.bodySmall,
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  _edgeTargetCount > 0
-                      ? (_edgeCount >= _edgeTargetCount
-                          ? 'Edge target reached: $_edgeCount/$_edgeTargetCount'
-                          : lovenseConnected
-                              ? 'Edge target: $_edgeCount/$_edgeTargetCount (auto-running)'
-                              : 'Edge target: $_edgeCount/$_edgeTargetCount (waiting for toy)')
-                      : 'Edge target: off',
-                  style: Theme.of(context).textTheme.bodySmall,
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  'Peak shock: ${_edgeTargetShockAtPeak ? 'on' : 'off'}',
-                  style: Theme.of(context).textTheme.bodySmall,
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  _manualBuzzHoldUntilLowHr
-                      ? 'Buzz hold: active until HR is at low-end threshold'
-                      : 'Buzz hold: off',
-                  style: Theme.of(context).textTheme.bodySmall,
-                ),
-                if (buzzControlsVisible) ...[
-                  const SizedBox(height: 8),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: FilledButton.icon(
-                          onPressed: () => unawaited(
-                            _queueSessionCounter(orgasm: false),
-                          ),
-                          icon: const Icon(Icons.trending_up),
-                          label: const Text('Queue Edge'),
-                        ),
-                      ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: FilledButton.tonalIcon(
-                          onPressed: () => unawaited(
-                            _queueSessionCounter(orgasm: true),
-                          ),
-                          icon: const Icon(Icons.favorite),
-                          label: const Text('Queue Orgasm'),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 8),
-                  SizedBox(
-                    width: double.infinity,
-                    child: OutlinedButton.icon(
-                      onPressed: () => unawaited(_activateManualBuzzHoldUntilLowHr()),
-                      icon: Icon(
-                        _manualBuzzHoldUntilLowHr
-                            ? Icons.pause_circle_filled
-                            : Icons.pause_circle_outline,
-                      ),
-                      label: Text(
-                        _manualBuzzHoldUntilLowHr
-                            ? 'Buzz Hold Active (Tap to Re-stop)'
-                            : 'Hold Buzz Until HR Low',
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  SizedBox(
-                    width: double.infinity,
-                    child: OutlinedButton.icon(
-                      onPressed: (_counterApproveInFlight ||
-                              (_edgePendingCount <= 0 && _orgasmPendingCount <= 0))
-                          ? null
-                          : () => unawaited(_approvePendingCounters()),
-                      icon: _counterApproveInFlight
-                          ? const SizedBox(
-                              width: 16,
-                              height: 16,
-                              child: CircularProgressIndicator(strokeWidth: 2),
-                            )
-                          : const Icon(Icons.cloud_upload_outlined),
-                      label: Text(
-                        _counterApproveInFlight
-                            ? 'Approving...'
-                            : 'Approve Pending Counters',
-                      ),
-                    ),
-                  ),
-                ],
-              ],
-            ),
-          ),
-        ),
       ),
       body: CustomScrollView(
         slivers: [
@@ -1135,6 +1386,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                       ),
                       const SizedBox(height: 6),
                       Text('Edges: $_edgeCount • Orgasms: $_orgasmCount'),
+                      const SizedBox(height: 4),
+                      Text(
+                        'Pending: $_edgePendingCount edges • $_orgasmPendingCount orgasms',
+                        style: Theme.of(context).textTheme.bodySmall,
+                      ),
                     ],
                   ),
                 ),

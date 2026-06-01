@@ -102,6 +102,7 @@ class DeviceCommandChannel {
     required String body,
     String? channelId,
         bool includeStopAction = false,
+        bool includeEdgeDownOnTap = false,
   }) =>
       _channel.invokeMethod(
                     'sendNotification', {
@@ -109,10 +110,20 @@ class DeviceCommandChannel {
                         'body': body,
                         'channelId': channelId,
                         'includeStopAction': includeStopAction,
+                        'includeEdgeDownOnTap': includeEdgeDownOnTap,
                     });
 
     static Future<bool> consumeStopActuationRequest() async {
         final raw = await _channel.invokeMethod<dynamic>('consumeStopActuationRequest');
+        if (raw is bool) {
+            return raw;
+        }
+        final normalized = '${raw ?? ''}'.trim().toLowerCase();
+        return normalized == '1' || normalized == 'true' || normalized == 'yes' || normalized == 'on';
+    }
+
+    static Future<bool> consumeEdgeDownRequest() async {
+        final raw = await _channel.invokeMethod<dynamic>('consumeEdgeDownRequest');
         if (raw is bool) {
             return raw;
         }

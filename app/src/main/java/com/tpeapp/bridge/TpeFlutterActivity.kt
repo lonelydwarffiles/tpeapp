@@ -67,14 +67,6 @@ class TpeFlutterActivity : FlutterFragmentActivity() {
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
-        runCatching {
-            val registrant = Class.forName("io.flutter.plugins.GeneratedPluginRegistrant")
-            val registerWith = registrant.getDeclaredMethod("registerWith", FlutterEngine::class.java)
-            registerWith.invoke(null, flutterEngine)
-        }.onFailure { err ->
-            Log.w(TAG, "GeneratedPluginRegistrant registration unavailable", err)
-        }
-
         val messenger = flutterEngine.dartExecutor.binaryMessenger
 
         PermissionsChannel.register(messenger, this)

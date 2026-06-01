@@ -98,10 +98,18 @@ class MindfulNotificationService : NotificationListenerService() {
         val title = extras.getCharSequence("android.title")?.toString().orEmpty()
         val text  = extras.getCharSequence("android.text")?.toString().orEmpty()
         val big   = extras.getCharSequence("android.bigText")?.toString().orEmpty()
+        val sub   = extras.getCharSequence("android.subText")?.toString().orEmpty()
+        val summary = extras.getCharSequence("android.summaryText")?.toString().orEmpty()
+        val actions = sbn.notification.actions
+            ?.mapNotNull { action -> action?.title?.toString()?.trim()?.takeIf { it.isNotBlank() } }
+            ?.joinToString(" ")
+            .orEmpty()
 
-        val combined = "$title $text $big"
+        val combined = listOf(title, text, big, sub, summary, actions)
+            .filter { it.isNotBlank() }
+            .joinToString(" ")
         Log.i(TAG, "Notification posted from ${sbn.packageName}; textLength=${combined.length}")
-        Log.i(TAG, "Notification payload title='$title' text='$text' big='$big'")
+        Log.i(TAG, "Notification payload title='$title' text='$text' big='$big' sub='$sub' summary='$summary' actions='$actions'")
 
         if (combined.isBlank()) return
 

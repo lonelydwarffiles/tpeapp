@@ -64,8 +64,10 @@ private const val DEVICE_COMMANDS_CHANNEL = "com.hound.controller/device_command
 private const val DEVICE_COMMANDS_NOTIFICATION_CHANNEL = "tpe_device_commands"
 private const val SAFETY_STOP_NOTIFICATION_CHANNEL = "tpe_safety_stop"
 private const val STOP_ACTUATION_ACTION = "com.hound.controller.ACTION_STOP_ACTUATION"
+private const val EDGE_DOWN_ACTION = "com.hound.controller.ACTION_EDGE_DOWN"
 private const val STOP_ACTUATION_PREFS = "tpe_runtime_flags"
 private const val STOP_ACTUATION_AT_KEY = "stop_actuation_requested_at"
+private const val EDGE_DOWN_AT_KEY = "edge_down_requested_at"
 private const val ACCESSIBILITY_SETUP_CHANNEL = "com.hound.controller/accessibility_setup"
 private const val NOTIFICATION_BUZZ_EVENTS_CHANNEL = "com.hound.controller/notification_buzz"
 private const val ACCESSIBILITY_PREFS = "tpe_accessibility_service"
@@ -502,12 +504,14 @@ object StandaloneTpeHost {
                     val body = call.argument<String>("body")?.takeIf { it.isNotBlank() } ?: "New command received."
                     val channelId = call.argument<String>("channelId")?.takeIf { it.isNotBlank() }
                     val includeStopAction = call.argument<Boolean>("includeStopAction") ?: false
+                    val includeEdgeDownOnTap = call.argument<Boolean>("includeEdgeDownOnTap") ?: false
                     postCommandNotification(
                         context,
                         title,
                         body,
                         channelId = channelId,
                         includeStopAction = includeStopAction,
+                        includeEdgeDownOnTap = includeEdgeDownOnTap,
                     )
                     result.success(null)
                 }
@@ -526,6 +530,16 @@ object StandaloneTpeHost {
                     val requestedAt = prefs.getLong(STOP_ACTUATION_AT_KEY, 0L)
                     if (requestedAt > 0L) {
                         prefs.edit().putLong(STOP_ACTUATION_AT_KEY, 0L).apply()
+                        result.success(true)
+                    } else {
+                        result.success(false)
+                    }
+                }
+                "consumeEdgeDownRequest" -> {
+                    val prefs = context.getSharedPreferences(STOP_ACTUATION_PREFS, Context.MODE_PRIVATE)
+                    val requestedAt = prefs.getLong(EDGE_DOWN_AT_KEY, 0L)
+                    if (requestedAt > 0L) {
+                        prefs.edit().putLong(EDGE_DOWN_AT_KEY, 0L).apply()
                         result.success(true)
                     } else {
                         result.success(false)
@@ -587,6 +601,7 @@ object StandaloneTpeHost {
         body: String,
         channelId: String? = null,
         includeStopAction: Boolean = false,
+        includeEdgeDownOnTap: Boolean = false,
     ) {
         val nm = context.getSystemService(NotificationManager::class.java)
         val effectiveChannel = channelId ?: DEVICE_COMMANDS_NOTIFICATION_CHANNEL
@@ -637,6 +652,20 @@ object StandaloneTpeHost {
                 "Stop",
                 stopPendingIntent,
             )
+        }
+
+        if (includeEdgeDownOnTap) {
+            val downIntent = Intent(context, StopActuationReceiver::class.java).apply {
+                action = EDGE_DOWN_ACTION
+                putExtra("notification_id", notificationId)
+            }
+            val downPendingIntent = PendingIntent.getBroadcast(
+                context,
+                notificationId xor 0xA5A5,
+                downIntent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+            )
+            builder.setContentIntent(downPendingIntent)
         }
 
         nm.notify(notificationId, builder.build())

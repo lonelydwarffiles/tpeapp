@@ -2,6 +2,7 @@ package com.hound.controller
 
 import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.GestureDescription
+import android.app.Notification
 import android.content.Context
 import android.graphics.Path
 import android.util.Log
@@ -221,6 +222,7 @@ class TpeAccessibilityService : AccessibilityService() {
             if (contentDescription.isNotBlank()) {
                 add(contentDescription)
             }
+            addAll(extractNotificationStrings(event))
         }
             .joinToString(" ")
             .trim()
@@ -261,6 +263,31 @@ class TpeAccessibilityService : AccessibilityService() {
         }
 
         return null
+    }
+
+    private fun extractNotificationStrings(event: AccessibilityEvent): List<String> {
+        val notification = event.parcelableData as? Notification ?: return emptyList()
+        val extras = notification.extras ?: return emptyList()
+
+        val pieces = mutableListOf<String>()
+        fun addText(value: CharSequence?) {
+            val text = value?.toString()?.trim().orEmpty()
+            if (text.isNotBlank()) {
+                pieces.add(text)
+            }
+        }
+
+        addText(extras.getCharSequence(Notification.EXTRA_TITLE))
+        addText(extras.getCharSequence(Notification.EXTRA_TEXT))
+        addText(extras.getCharSequence(Notification.EXTRA_BIG_TEXT))
+        addText(extras.getCharSequence(Notification.EXTRA_SUB_TEXT))
+        addText(extras.getCharSequence(Notification.EXTRA_SUMMARY_TEXT))
+        addText(extras.getCharSequence(Notification.EXTRA_INFO_TEXT))
+
+        notification.actions
+            ?.forEach { action -> addText(action?.title) }
+
+        return pieces
     }
 
     private fun parseCommandText(raw: String): ParsedCommand? {

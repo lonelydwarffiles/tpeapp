@@ -51,18 +51,13 @@ object LovenseManager {
         UUID.fromString("52300003-0023-4bd4-bbd5-a6920e4c5653"),
     )
 
-    private val LOVENSE_NAME_HINTS = listOf(
-        "lv",
-        "lovense",
+    private val LOVENSE_MODEL_HINTS = listOf(
         "lush",
         "hush",
         "dolce",
         "nora",
-        "max",
-        "edge",
         "osci",
         "ferri",
-        "ambra",
         "domi",
         "hyphy",
     )
@@ -103,7 +98,7 @@ object LovenseManager {
                     return@scanCandidates
                 }
             }
-            ble!!.startScan()
+            Log.w(TAG, "No Lovense candidates matched strict filter; refusing non-Lovense auto-connect")
         }
     }
 
@@ -114,12 +109,22 @@ object LovenseManager {
     ) {
         checkInit("scanCandidates")
         ble!!.scanCandidates(timeoutMs) { candidates ->
-            val preferred = candidates.filter { candidate ->
-                val name = (candidate["name"]?.toString() ?: "").lowercase()
-                LOVENSE_NAME_HINTS.any { hint -> name.contains(hint) }
-            }
-            onComplete(if (preferred.isNotEmpty()) preferred else candidates)
+            val preferred = candidates.filter(::looksLikeLovense)
+            onComplete(preferred)
         }
+    }
+
+    private fun looksLikeLovense(candidate: Map<String, Any?>): Boolean {
+        val name = (candidate["name"]?.toString() ?: "").lowercase()
+        if (name.isBlank()) return false
+
+        if (name.contains("lovense")) return true
+        if (Regex("(^|[^a-z0-9])lv([\\s_-]|$)").containsMatchIn(name)) return true
+        if (LOVENSE_MODEL_HINTS.any { hint -> Regex("(^|[^a-z0-9])$hint([\\s_-]|$)").containsMatchIn(name) }) {
+            return true
+        }
+
+        return false
     }
 
     /** Connects to a Lovense device by BLE MAC address. */
