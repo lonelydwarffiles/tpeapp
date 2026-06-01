@@ -26,6 +26,10 @@ class WebSocketService {
 
   static const Duration _initialReconnectDelay = Duration(seconds: 2);
   static const Duration _maxReconnectDelay = Duration(seconds: 30);
+  static const Duration _pingInterval = Duration(seconds: 20);
+  static const Duration _pongTimeout = Duration(seconds: 60);
+  static const int _wsCloseAuthFailed = 4001;
+  static const int _wsClosePolicyViolation = 1008;
 
   final SharedPreferences _prefs;
 
@@ -34,10 +38,14 @@ class WebSocketService {
   AudioRecorder? _recorder;
   StreamSubscription<List<int>>? _audioSub;
   Timer? _reconnectTimer;
+  Timer? _pingTimer;
   Duration _reconnectDelay = _initialReconnectDelay;
   bool _manualDisconnect = false;
   bool _connecting = false;
   bool _closingSocket = false;
+  DateTime _lastPongAt = DateTime.fromMillisecondsSinceEpoch(0);
+  bool _suspendAutoReconnect = false;
+  String _lastCredentialFingerprint = '';
   // Guards against concurrent _startHotMic() calls before _recorder is assigned.
   bool _startingHotMic = false;
 
@@ -81,6 +89,16 @@ class WebSocketService {
       await _closeSocket();
       final token = (_prefs.getString('webhook_bearer_token') ?? '').trim();
       final deviceId = (_prefs.getString('device_id') ?? '').trim();
+      final credentialFingerprint = '$token|$deviceId';
+      if (_suspendAutoReconnect && credentialFingerprint == _lastCredentialFingerprint) {
+        developer.log(
+          'Skipping websocket connect after auth/policy close until credentials change',
+          name: 'WebSocketService',
+        );
+        return;
+      }
+      _lastCredentialFingerprint = credentialFingerprint;
+      _suspendAutoReconnect = false;
       final query = <String>[];
       if (token.isNotEmpty) query.add('secret=${Uri.encodeQueryComponent(token)}');
       if (deviceId.isNotEmpty) query.add('device_id=${Uri.encodeQueryComponent(deviceId)}');
@@ -94,6 +112,9 @@ class WebSocketService {
         onDone: _onDone,
       );
       developer.log('Websocket connected', name: 'WebSocketService');
+      unawaited(_prefs.setBool('ws_auth_failed', false));
+      _lastPongAt = DateTime.now();
+      _startPingLoop();
       _reconnectDelay = _initialReconnectDelay;
     } catch (error) {
       developer.log(
@@ -109,8 +130,11 @@ class WebSocketService {
   /// Stops any active recording, disposes TTS, and closes the WebSocket.
   Future<void> disconnect({bool disposeTts = true}) async {
     _manualDisconnect = true;
+    _suspendAutoReconnect = false;
     _reconnectTimer?.cancel();
     _reconnectTimer = null;
+    _pingTimer?.cancel();
+    _pingTimer = null;
     await _stopHotMic();
     if (disposeTts) {
       await _tts.dispose();
@@ -137,6 +161,10 @@ class WebSocketService {
       return;
     }
     final command = _commandFromPayload(payload);
+    if (command == 'PONG') {
+      _lastPongAt = DateTime.now();
+      return;
+    }
     switch (command) {
       case 'START_HOT_MIC':
         _startHotMic();
@@ -254,10 +282,26 @@ class WebSocketService {
   }
 
   void _onDone() {
+    final closeCode = _socket?.closeCode;
+    final closeReason = _socket?.closeReason;
     _stopHotMic();
+    _pingTimer?.cancel();
+    _pingTimer = null;
     _socket = null;
     _socketSub = null;
-    developer.log('WebSocket closed', name: 'WebSocketService');
+    developer.log(
+      'WebSocket closed (code=$closeCode reason=$closeReason)',
+      name: 'WebSocketService',
+    );
+    if (closeCode == _wsCloseAuthFailed || closeCode == _wsClosePolicyViolation) {
+      unawaited(_prefs.setBool('ws_auth_failed', true));
+      _suspendAutoReconnect = true;
+      developer.log(
+        'Suspending auto-reconnect due to auth/policy close. Update pairing/credentials, then reconnect.',
+        name: 'WebSocketService',
+      );
+      return;
+    }
     if (!_manualDisconnect && !_closingSocket) {
       _scheduleReconnect();
     }
@@ -285,6 +329,8 @@ class WebSocketService {
   Future<void> _closeSocket() async {
     _closingSocket = true;
     try {
+      _pingTimer?.cancel();
+      _pingTimer = null;
       await _socketSub?.cancel();
       _socketSub = null;
       await _socket?.close();
@@ -292,6 +338,36 @@ class WebSocketService {
     } finally {
       _closingSocket = false;
     }
+  }
+
+  void _startPingLoop() {
+    _pingTimer?.cancel();
+    _pingTimer = Timer.periodic(_pingInterval, (_) {
+      final socket = _socket;
+      if (socket == null || socket.readyState != WebSocket.open) {
+        return;
+      }
+
+      final now = DateTime.now();
+      if (now.difference(_lastPongAt) > _pongTimeout) {
+        developer.log(
+          'No pong received within timeout; recycling websocket connection',
+          name: 'WebSocketService',
+        );
+        unawaited(_closeSocket().then((_) {
+          if (!_manualDisconnect && !_closingSocket) {
+            _scheduleReconnect();
+          }
+        }));
+        return;
+      }
+
+      try {
+        socket.add(jsonEncode({'type': 'ping', 'ts': now.millisecondsSinceEpoch}));
+      } catch (error) {
+        developer.log('Failed to send websocket ping: $error', name: 'WebSocketService');
+      }
+    });
   }
 
   // ── Live Hot Mic ─────────────────────────────────────────────────────

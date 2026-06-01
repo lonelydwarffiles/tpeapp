@@ -591,14 +591,32 @@ class _StartupGateState extends State<_StartupGate>
 
   Future<void> _attemptAutoEnrollment(SharedPreferences prefs) async {
     if (_autoEnrollInFlight) return;
-    if (prefs.getBool('is_paired') ?? false) {
+    final paired = prefs.getBool('is_paired') ?? false;
+    final wsAuthFailed = prefs.getBool('ws_auth_failed') ?? false;
+    final webhookBearer =
+        (prefs.getString('webhook_bearer_token') ?? '').trim();
+    final hasWebhookBearer = webhookBearer.isNotEmpty;
+
+    if (paired && !wsAuthFailed && hasWebhookBearer) {
       await prefs.setString(_autoEnrollmentStateKey, 'connected');
       unawaited(context.read<WebSocketService>().ensureConnected());
       unawaited(_pushDeviceStatus(prefs));
       unawaited(_captureAndFlushPendingQuickShare(prefs));
-      _autoEnrollTimer?.cancel();
-      _autoEnrollTimer = null;
       return;
+    }
+
+    if (paired && wsAuthFailed) {
+      await prefs.setString(_autoEnrollmentStateKey, 'retrying');
+      await prefs.setString(
+        _autoEnrollmentErrorKey,
+        'Backend auth changed. Refreshing enrollment credentials...',
+      );
+    } else if (paired && !hasWebhookBearer) {
+      await prefs.setString(_autoEnrollmentStateKey, 'retrying');
+      await prefs.setString(
+        _autoEnrollmentErrorKey,
+        'Missing websocket auth token. Refreshing enrollment credentials...',
+      );
     }
 
     var endpoint = (prefs.getString('partner_endpoint_url') ?? '')
@@ -663,6 +681,7 @@ class _StartupGateState extends State<_StartupGate>
           (result['mqtt_topic_prefix'] as String?)?.trim() ?? '';
 
       await prefs.setBool('is_paired', true);
+      await prefs.setBool('ws_auth_failed', false);
       await prefs.setString('partner_endpoint_url', endpoint);
       await prefs.setString('webhook_url', '$endpoint/api/tpe/webhook');
       if (mqttBrokerUri.isNotEmpty) {
@@ -684,8 +703,6 @@ class _StartupGateState extends State<_StartupGate>
       await prefs.setString(_autoEnrollmentStateKey, 'connected');
       await prefs.remove(_autoEnrollmentErrorKey);
       await _syncNativeCorePrefs(prefs);
-      _autoEnrollTimer?.cancel();
-      _autoEnrollTimer = null;
       unawaited(context.read<WebSocketService>().ensureConnected());
       unawaited(_pushDeviceStatus(prefs));
       unawaited(_captureAndFlushPendingQuickShare(prefs));
