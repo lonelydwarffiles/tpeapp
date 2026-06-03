@@ -17,6 +17,7 @@ object MediaFilterRuntimeConfig {
         val mode: String = "speed", // speed|strict
         val censorStyle: String = "random", // blackout|heavy_blur|pixelate|random
         val strictPackages: Set<String> = emptySet(),
+        val forbiddenClassIds: Set<Int> = setOf(2, 3, 4, 6, 14),
         val maxInFlight: Int = 4,
         val failClosed: Boolean = true,
         val revealDurationMs: Int = 300,
@@ -113,8 +114,15 @@ object MediaFilterRuntimeConfig {
                 else -> "pixelate"
             }
             val strictPackages = parsePackages(obj.optJSONArray("strict_packages") ?: JSONArray())
+            val forbiddenClassIds = parseForbiddenClassIds(
+                obj.optJSONArray("forbidden_class_ids") ?: JSONArray()
+            )
             val maxInFlight = obj.optInt("max_in_flight", 4).coerceIn(1, 12)
-            val failClosed = obj.optBoolean("fail_closed", true)
+            val failClosed = if (obj.has("fail_closed")) {
+                obj.optBoolean("fail_closed", true)
+            } else {
+                obj.optBoolean("nudenet_fail_closed", true)
+            }
             val revealDurationMs = obj.optInt("reveal_duration_ms", 300).coerceIn(0, 3_000)
             val nudityPermittedByHandler = obj.optBoolean("nudity_permitted_by_handler", false)
             val placeholderText = obj.optString("placeholder_text", "Loading...")
@@ -125,6 +133,7 @@ object MediaFilterRuntimeConfig {
                 mode = mode,
                 censorStyle = censorStyle,
                 strictPackages = strictPackages,
+                forbiddenClassIds = forbiddenClassIds,
                 maxInFlight = maxInFlight,
                 failClosed = failClosed,
                 revealDurationMs = revealDurationMs,
@@ -141,6 +150,19 @@ object MediaFilterRuntimeConfig {
             if (pkg.isNotEmpty()) out.add(pkg)
         }
         return out
+    }
+
+    private fun parseForbiddenClassIds(arr: JSONArray): Set<Int> {
+        val out = LinkedHashSet<Int>()
+        for (i in 0 until arr.length()) {
+            val id = when (val value = arr.opt(i)) {
+                is Number -> value.toInt()
+                is String -> value.trim().toIntOrNull()
+                else -> null
+            }
+            if (id != null && id >= 0) out.add(id)
+        }
+        return if (out.isEmpty()) setOf(2, 3, 4, 6, 14) else out
     }
 }
 

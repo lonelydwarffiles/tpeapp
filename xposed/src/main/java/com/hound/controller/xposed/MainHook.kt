@@ -28,6 +28,7 @@ class MainHook : IXposedHookLoadPackage {
         // Package names to exclude (the filter app itself + system UI)
         private val EXCLUDED_PACKAGES = setOf(
             "com.hound.controller",
+            "com.twitter.android",
             "android",
             "com.android.systemui"
         )
@@ -119,14 +120,14 @@ class MainHook : IXposedHookLoadPackage {
 
         val loader = lpparam.classLoader
 
-        ImageViewHook.install(loader)
-        GlideHook.install(loader)
-        CoilHook.install(loader)
+        // Media filtering is network-layer only to avoid UI-thread freezes.
         OkHttpHook.install(loader)
+        HttpUrlConnectionHook.install(loader)
+
+        // Keep non-media policy hooks active.
         TextViewHook.install(loader)
         InputConnectionHook.install(loader)
         ClipboardShareAntiBypassHook.install(loader)
-        VideoTrackingHook.install(loader)
     }
 }
 

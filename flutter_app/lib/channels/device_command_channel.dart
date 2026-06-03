@@ -261,5 +261,31 @@ class DeviceCommandChannel {
         }
         return null;
     }
+
+    static Future<List<Map<String, dynamic>>> getInstalledAppsForVpn({
+        bool includeSystem = true,
+        bool includeDisabled = false,
+    }) async {
+        final raw = await _channel.invokeMethod<dynamic>('getInstalledAppsForVpn', {
+            'includeSystem': includeSystem,
+            'includeDisabled': includeDisabled,
+        });
+        if (raw is! List) return const [];
+        return raw
+            .whereType<Map>()
+            .map((entry) => entry.map((key, value) => MapEntry(key.toString(), value)))
+            .toList();
+    }
+
+    static Future<Map<String, dynamic>?> prepareMitmCaInstall() async {
+        final raw = await _channel.invokeMethod<dynamic>('prepareMitmCaInstall');
+        if (raw is Map) {
+            return raw.map((key, value) => MapEntry(key.toString(), value));
+        }
+        return null;
+    }
+
+    static Future<void> setVpnMitmEnabled(bool enabled) =>
+        _channel.invokeMethod('setVpnMitmEnabled', {'enabled': enabled});
 }
 

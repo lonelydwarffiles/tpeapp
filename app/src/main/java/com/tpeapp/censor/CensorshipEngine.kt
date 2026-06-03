@@ -30,7 +30,7 @@ import kotlin.random.Random
 class CensorshipEngine(
     private val context: Context,
     private val modelAssetName: String = "320.ort",
-    private val defaultForbiddenClassIds: Set<Int> = setOf(0, 1, 2, 3, 4, 5),
+    private val defaultForbiddenClassIds: Set<Int> = setOf(2, 3, 4, 6, 14),
     private val scoreThreshold: Float = 0.55f,
 ) : AutoCloseable {
 
@@ -53,7 +53,14 @@ class CensorshipEngine(
     private val session: OrtSession = createSession()
 
     private fun createSession(): OrtSession {
-        val modelBytes = context.assets.open(modelAssetName).use { it.readBytes() }
+        val modelBytes = runCatching {
+            context.assets.open(modelAssetName).use { it.readBytes() }
+        }.recoverCatching {
+            // When the model is shipped from Flutter assets, it lands under flutter_assets/.
+            context.assets.open("flutter_assets/assets/$modelAssetName").use { it.readBytes() }
+        }.getOrElse { t ->
+            throw IllegalStateException("Missing or unreadable ONNX model asset: $modelAssetName", t)
+        }
         val options = OrtSession.SessionOptions().apply {
             setOptimizationLevel(OrtSession.SessionOptions.OptLevel.ALL_OPT)
             setIntraOpNumThreads(2)
@@ -101,12 +108,19 @@ class CensorshipEngine(
         if (output.isEmpty()) return emptyList()
         val matrix = output[0]
         if (matrix.size < ATTR_ROWS) return emptyList()
+        if (matrix[0].isEmpty() || matrix[1].isEmpty() || matrix[2].isEmpty() || matrix[3].isEmpty()) {
+            return emptyList()
+        }
+
+        val maxBoxesFromRows = (0 until ATTR_ROWS).minOfOrNull { row -> matrix[row].size } ?: 0
+        val boxCount = minOf(BOX_COUNT, maxBoxesFromRows)
+        if (boxCount <= 0) return emptyList()
 
         val sx = original.width / MODEL_SIZE.toFloat()
         val sy = original.height / MODEL_SIZE.toFloat()
 
         val result = ArrayList<Rect>()
-        for (i in 0 until BOX_COUNT) {
+        for (i in 0 until boxCount) {
             val best = bestClass(matrix, i)
             if (best.score < scoreThreshold) continue
             if (best.classId !in forbiddenClassIds) continue

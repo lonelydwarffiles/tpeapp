@@ -1,9 +1,11 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../channels/accessibility_setup_channel.dart';
+import '../channels/device_command_channel.dart';
 import '../channels/device_admin_channel.dart';
 import '../channels/remote_control_channel.dart';
 import '../channels/text_replacement_channel.dart';
@@ -15,6 +17,7 @@ import 'password_vault_screen.dart';
 // SharedPreferences keys for the password vault (mirror of Kotlin constants)
 const _kBlockPasswordChanges = 'vault_block_password_changes';
 const _kRevealTimeoutSeconds = 'vault_reveal_timeout_seconds';
+const _kAndroidAutoPackage = 'com.google.android.projection.gearhead';
 
 /// Settings / admin screen.
 ///
@@ -59,6 +62,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _blockPasswordChanges = false;
   int _revealTimeoutSeconds  = 10;
 
+  // VPN split tunneling / MITM controls
+  bool _loadingVpn = true;
+  bool _savingSplitTunnel = false;
+  Map<String, dynamic>? _vpnStatus;
+  List<Map<String, dynamic>> _vpnApps = const [];
+  Set<String> _splitTunnelBypassPackages = <String>{};
+  bool _mitmEnabled = false;
+
   late SharedPreferences _prefs;
 
   @override
@@ -86,6 +97,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
       await _safeNullableBool(RemoteControlChannel.isRootAvailable);
     final textReplacementDict = await _safeDict(TextReplacementChannel.getDict);
     final textReplacementPolicy = await _safeDict(TextReplacementChannel.getPolicy);
+    final vpnStatus = await _safeVpnStatus();
+    final vpnApps = await _safeVpnApps();
+    final selectedBypassPackages = _loadSplitTunnelBypassPackagesFromPrefs()..add(_kAndroidAutoPackage);
+    final mitmEnabled = vpnStatus['mitm_enabled'] == true;
     setState(() {
       _adminActive = active;
       _loadingAdmin = false;
@@ -106,7 +121,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _blockPasswordChanges = _prefs.getBool(_kBlockPasswordChanges) ?? false;
       _revealTimeoutSeconds =
           _prefs.getInt(_kRevealTimeoutSeconds) ?? 10;
+      _vpnStatus = vpnStatus;
+      _vpnApps = vpnApps;
+      _splitTunnelBypassPackages = selectedBypassPackages;
+      _mitmEnabled = mitmEnabled;
+      _loadingVpn = false;
     });
+
+    if (!_loadSplitTunnelBypassPackagesFromPrefs().contains(_kAndroidAutoPackage)) {
+      unawaited(_saveSplitTunnelPolicy(showSnackBar: false));
+    }
   }
 
   Future<bool> _safeBool(Future<bool> Function() fn) async {
@@ -144,6 +168,42 @@ class _SettingsScreenState extends State<SettingsScreen> {
       return await fn().timeout(_channelTimeout);
     } catch (_) {
       return const {};
+    }
+  }
+
+  Future<Map<String, dynamic>> _safeVpnStatus() async {
+    try {
+      return await DeviceCommandChannel.getVpnStatus().timeout(_channelTimeout) ?? const {};
+    } catch (_) {
+      return const {};
+    }
+  }
+
+  Future<List<Map<String, dynamic>>> _safeVpnApps() async {
+    try {
+      return await DeviceCommandChannel
+          .getInstalledAppsForVpn(includeSystem: true, includeDisabled: false)
+          .timeout(_channelTimeout);
+    } catch (_) {
+      return const [];
+    }
+  }
+
+  Set<String> _loadSplitTunnelBypassPackagesFromPrefs() {
+    final raw = (_prefs.getString('vpn_policy_json') ?? '').trim();
+    if (raw.isEmpty) return <String>{};
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is! Map) return <String>{};
+      final dynamic allowed = decoded['allowed_packages'] ?? decoded['allowedPackages'];
+      if (allowed is! List) return <String>{};
+
+      return allowed
+          .map((entry) => entry.toString().trim())
+          .where((entry) => entry.isNotEmpty)
+          .toSet();
+    } catch (_) {
+      return <String>{};
     }
   }
 
@@ -596,6 +656,208 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
   }
 
+  Future<void> _refreshVpnStatus() async {
+    try {
+      setState(() => _loadingVpn = true);
+      final status = await _safeVpnStatus();
+      final apps = await _safeVpnApps();
+      if (!mounted) return;
+      setState(() {
+        _vpnStatus = status;
+        _vpnApps = apps;
+        _mitmEnabled = status['mitm_enabled'] == true;
+        _loadingVpn = false;
+      });
+    } catch (error) {
+      if (!mounted) return;
+      setState(() => _loadingVpn = false);
+      _showActionError('refresh VPN status', error);
+    }
+  }
+
+  Future<void> _saveSplitTunnelPolicy({bool showSnackBar = true}) async {
+    try {
+      setState(() => _savingSplitTunnel = true);
+
+      final raw = (_prefs.getString('vpn_policy_json') ?? '').trim();
+      final policy = <String, dynamic>{};
+      if (raw.isNotEmpty) {
+        final decoded = jsonDecode(raw);
+        if (decoded is Map) {
+          decoded.forEach((key, value) {
+            policy[key.toString()] = value;
+          });
+        }
+      }
+
+      final selected = _splitTunnelBypassPackages
+          .map((pkg) => pkg.trim())
+          .where((pkg) => pkg.isNotEmpty)
+          .toList()
+        ..sort();
+
+      if (selected.isEmpty) {
+        policy.remove('allowed_packages');
+        policy.remove('allowedPackages');
+        policy['restriction_mode'] = 'off';
+      } else {
+        policy['restriction_mode'] = 'allow_list';
+        policy['allowed_packages'] = selected;
+      }
+
+      final policyJson = jsonEncode(policy);
+      await DeviceCommandChannel.setVpnPolicy(
+        vpnPolicyJson: policyJson,
+        providerMode: 'local_capture',
+      );
+      await _prefs.setString('vpn_policy_json', policyJson);
+
+      await _emitBehavior(
+        event: 'vpn_split_tunnel_updated',
+        reason: 'settings',
+        payload: {
+          'bypass_count': selected.length,
+          'android_auto_bypassed': selected.contains(_kAndroidAutoPackage),
+        },
+      );
+
+      await _refreshVpnStatus();
+      if (!mounted || !showSnackBar) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Split tunnel updated for ${selected.length} app(s).')),
+      );
+    } catch (error) {
+      _showActionError('save split-tunnel policy', error);
+    } finally {
+      if (mounted) {
+        setState(() => _savingSplitTunnel = false);
+      }
+    }
+  }
+
+  Future<void> _showSplitTunnelPicker() async {
+    final current = Set<String>.from(_splitTunnelBypassPackages);
+    final chosen = await showDialog<Set<String>>(
+      context: context,
+      builder: (ctx) {
+        final localSelected = Set<String>.from(current);
+        var query = '';
+        return StatefulBuilder(
+          builder: (context, setLocalState) {
+            final filtered = _vpnApps.where((app) {
+              final label = (app['app_name'] ?? '').toString().toLowerCase();
+              final pkg = (app['package_name'] ?? '').toString().toLowerCase();
+              if (query.isEmpty) return true;
+              return label.contains(query) || pkg.contains(query);
+            }).toList();
+
+            return AlertDialog(
+              title: const Text('Split Tunnel Apps'),
+              content: SizedBox(
+                width: 520,
+                height: 420,
+                child: Column(
+                  children: [
+                    TextField(
+                      decoration: const InputDecoration(
+                        hintText: 'Search app or package…',
+                        prefixIcon: Icon(Icons.search),
+                        border: OutlineInputBorder(),
+                        isDense: true,
+                      ),
+                      onChanged: (value) {
+                        setLocalState(() => query = value.trim().toLowerCase());
+                      },
+                    ),
+                    const SizedBox(height: 12),
+                    Expanded(
+                      child: ListView.builder(
+                        itemCount: filtered.length,
+                        itemBuilder: (_, index) {
+                          final app = filtered[index];
+                          final pkg = (app['package_name'] ?? '').toString();
+                          final appName = (app['app_name'] ?? pkg).toString();
+                          final selected = localSelected.contains(pkg);
+                          return CheckboxListTile(
+                            dense: true,
+                            value: selected,
+                            title: Text(appName),
+                            subtitle: Text(pkg),
+                            onChanged: (checked) {
+                              setLocalState(() {
+                                if (checked == true) {
+                                  localSelected.add(pkg);
+                                } else {
+                                  localSelected.remove(pkg);
+                                }
+                              });
+                            },
+                          );
+                        },
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(ctx),
+                  child: const Text('Cancel'),
+                ),
+                FilledButton(
+                  onPressed: () {
+                    localSelected.add(_kAndroidAutoPackage);
+                    Navigator.pop(ctx, localSelected);
+                  },
+                  child: const Text('Save'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+
+    if (chosen == null) return;
+    setState(() => _splitTunnelBypassPackages = chosen);
+    await _saveSplitTunnelPolicy();
+  }
+
+  Future<void> _prepareMitmCaInstall() async {
+    try {
+      final payload = await DeviceCommandChannel.prepareMitmCaInstall();
+      await _refreshVpnStatus();
+      if (!mounted) return;
+      final alias = payload?['alias']?.toString();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            alias == null || alias.isEmpty
+                ? 'Certificate install prompt opened. Trust the CA in Android credentials.'
+                : 'Install prompt opened for CA $alias. Trust it in Android credentials.',
+          ),
+        ),
+      );
+    } catch (error) {
+      _showActionError('prepare MITM CA install', error);
+    }
+  }
+
+  Future<void> _setMitmEnabled(bool enabled) async {
+    try {
+      await DeviceCommandChannel.setVpnMitmEnabled(enabled);
+      if (!mounted) return;
+      setState(() => _mitmEnabled = enabled);
+      await _emitBehavior(
+        event: 'vpn_mitm_toggled',
+        reason: enabled ? 'enabled' : 'disabled',
+      );
+      await _refreshVpnStatus();
+    } catch (error) {
+      _showActionError('set MITM enabled', error);
+    }
+  }
+
   void _showActionError(String action, Object error) {
     if (!mounted) return;
     final message = error
@@ -861,6 +1123,86 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       value: RemoteControlChannel.modeAccessibility,
                       groupValue: _injectionMode,
                       onChanged: _setInjectionMode,
+                      contentPadding: EdgeInsets.zero,
+                    ),
+                  ],
+                ),
+
+          const Divider(height: 32),
+
+          // ── VPN Split Tunnel + MITM ───────────────────────────────
+          Text('VPN', style: Theme.of(context).textTheme.titleMedium),
+          const SizedBox(height: 8),
+          _loadingVpn
+              ? const LinearProgressIndicator()
+              : Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      _vpnStatus?['connection_state']?.toString().trim().isNotEmpty == true
+                          ? 'Connection: ${_vpnStatus?['connection_state']}'
+                          : 'Connection: unknown',
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      'Bypass apps: ${_splitTunnelBypassPackages.length} '
+                      '(Android Auto always included)',
+                    ),
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: (() {
+                        final packages = _splitTunnelBypassPackages.toList()..sort();
+                        return packages
+                            .map((pkg) => InputChip(
+                                  label: Text(pkg),
+                                  onDeleted: pkg == _kAndroidAutoPackage
+                                      ? null
+                                      : () {
+                                          setState(() {
+                                            _splitTunnelBypassPackages.remove(pkg);
+                                          });
+                                          unawaited(_saveSplitTunnelPolicy());
+                                        },
+                                ))
+                            .toList();
+                      })(),
+                    ),
+                    const SizedBox(height: 10),
+                    Row(
+                      children: [
+                        FilledButton.icon(
+                          onPressed: _savingSplitTunnel ? null : _showSplitTunnelPicker,
+                          icon: const Icon(Icons.tune),
+                          label: const Text('Choose Apps'),
+                        ),
+                        const SizedBox(width: 8),
+                        OutlinedButton.icon(
+                          onPressed: _refreshVpnStatus,
+                          icon: const Icon(Icons.refresh),
+                          label: const Text('Refresh'),
+                        ),
+                      ],
+                    ),
+                    if (_savingSplitTunnel) ...[
+                      const SizedBox(height: 8),
+                      const LinearProgressIndicator(),
+                    ],
+                    const SizedBox(height: 16),
+                    FilledButton.icon(
+                      onPressed: _prepareMitmCaInstall,
+                      icon: const Icon(Icons.verified_user),
+                      label: const Text('Install MITM CA'),
+                    ),
+                    const SizedBox(height: 6),
+                    SwitchListTile(
+                      title: const Text('Enable HTTPS MITM'),
+                      subtitle: const Text(
+                        'Requires trusted CA install under Android user credentials.',
+                      ),
+                      value: _mitmEnabled,
+                      onChanged: _setMitmEnabled,
                       contentPadding: EdgeInsets.zero,
                     ),
                   ],

@@ -113,6 +113,10 @@ dependencies {
     // ML Kit Barcode Scanning — reads accountability-partner QR codes
     implementation(libs.mlkit.barcode.scanning)
 
+    // X.509 certificate generation for local MITM CA bootstrapping
+    implementation("org.bouncycastle:bcprov-jdk18on:1.78.1")
+    implementation("org.bouncycastle:bcpkix-jdk18on:1.78.1")
+
     // ── Flutter embedding ─────────────────────────────────────────────────────
     // When building with `flutter build apk` (or `flutter run`), the Flutter
     // Gradle plugin (applied via settings.gradle.kts) automatically provides the

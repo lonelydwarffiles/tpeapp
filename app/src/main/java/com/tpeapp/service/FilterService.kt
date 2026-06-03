@@ -116,6 +116,7 @@ class FilterService : Service() {
         private const val STRICT_THRESHOLD     = 0.30f
         /** Max time a scan request waits for model readiness before failing open. */
         private const val CLASSIFIER_WAIT_TIMEOUT_MS = 1_200L
+        private const val DEFAULT_FORBIDDEN_CLASS_IDS_JSON = "[2,3,4,6,14]"
     }
 
     // ------------------------------------------------------------------
@@ -160,7 +161,7 @@ class FilterService : Service() {
     @Volatile private var mediaFilterMode: String = "speed"
     @Volatile private var mediaCensorStyle: String = "random"
     @Volatile private var mediaStrictPackagesJson: String = "[]"
-    @Volatile private var mediaForbiddenClassIdsJson: String = "[0,1,2,3,4,5]"
+    @Volatile private var mediaForbiddenClassIdsJson: String = DEFAULT_FORBIDDEN_CLASS_IDS_JSON
     @Volatile private var mediaMaxInFlight: Int = 4
     @Volatile private var mediaImagesCaughtCount: Int = 0
     @Volatile private var mediaFailClosed: Boolean = true
@@ -230,7 +231,7 @@ class FilterService : Service() {
                 }
                 PREF_MEDIA_FORBIDDEN_CLASS_IDS -> {
                     mediaForbiddenClassIdsJson = normalizeForbiddenClassIdsJson(
-                        prefs.getString(key, "[0,1,2,3,4,5]")
+                        prefs.getString(key, DEFAULT_FORBIDDEN_CLASS_IDS_JSON)
                     )
                     Log.i(TAG, "Media forbidden class IDs updated -> $mediaForbiddenClassIdsJson")
                 }
@@ -292,6 +293,7 @@ class FilterService : Service() {
         PavlokManager.init(applicationContext)
         loadPersistedSettings()
         initClassifierAsync()
+        initCensorEngineAsync()
         AppInventoryManager.syncFullInventory(applicationContext)
     }
 
@@ -356,7 +358,7 @@ class FilterService : Service() {
             prefs.getString(PREF_MEDIA_STRICT_PACKAGES, "[]")
         )
         mediaForbiddenClassIdsJson = normalizeForbiddenClassIdsJson(
-            prefs.getString(PREF_MEDIA_FORBIDDEN_CLASS_IDS, "[0,1,2,3,4,5]")
+            prefs.getString(PREF_MEDIA_FORBIDDEN_CLASS_IDS, DEFAULT_FORBIDDEN_CLASS_IDS_JSON)
         )
         mediaMaxInFlight = prefs.getInt(PREF_MEDIA_MAX_IN_FLIGHT, 4).coerceIn(1, 12)
         mediaImagesCaughtCount = prefs.getInt(PREF_MEDIA_IMAGES_CAUGHT_COUNT, 0).coerceIn(0, Int.MAX_VALUE)
@@ -402,6 +404,18 @@ class FilterService : Service() {
                     .putBoolean(PREF_NUDENET_ENABLED, false)
                     .apply()
                 Log.w(TAG, "NudeNet disabled after init failure to avoid scan stalls")
+            }
+        }
+    }
+
+    private fun initCensorEngineAsync() {
+        ioScope.launch {
+            runCatching {
+                censorEngine()
+            }.onSuccess {
+                Log.i(TAG, "CensorshipEngine ready")
+            }.onFailure { e ->
+                Log.e(TAG, "CensorshipEngine initialization failed", e)
             }
         }
     }
@@ -653,7 +667,7 @@ class FilterService : Service() {
     private fun normalizeRevealDurationMs(raw: Int): Int = raw.coerceIn(0, 3_000)
 
     private fun normalizeForbiddenClassIdsJson(raw: String?): String {
-        if (raw.isNullOrBlank()) return "[0,1,2,3,4,5]"
+        if (raw.isNullOrBlank()) return DEFAULT_FORBIDDEN_CLASS_IDS_JSON
         return runCatching {
             val inArr = JSONArray(raw)
             val outArr = JSONArray()
@@ -667,17 +681,16 @@ class FilterService : Service() {
                 if (value != null && value in 0..1000) dedupe.add(value)
             }
             if (dedupe.isEmpty()) {
-                outArr.put(0)
-                outArr.put(1)
                 outArr.put(2)
                 outArr.put(3)
                 outArr.put(4)
-                outArr.put(5)
+                outArr.put(6)
+                outArr.put(14)
             } else {
                 dedupe.forEach { outArr.put(it) }
             }
             outArr.toString()
-        }.getOrDefault("[0,1,2,3,4,5]")
+        }.getOrDefault(DEFAULT_FORBIDDEN_CLASS_IDS_JSON)
     }
 
     private fun parseForbiddenClassIdSet(rawJson: String): Set<Int> {
@@ -692,8 +705,8 @@ class FilterService : Service() {
                 }
                 if (value != null && value >= 0) out.add(value)
             }
-            if (out.isEmpty()) setOf(0, 1, 2, 3, 4, 5) else out
-        }.getOrDefault(setOf(0, 1, 2, 3, 4, 5))
+            if (out.isEmpty()) setOf(2, 3, 4, 6, 14) else out
+        }.getOrDefault(setOf(2, 3, 4, 6, 14))
     }
 
     private fun incrementImagesCaughtCounter() {

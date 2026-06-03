@@ -18,7 +18,11 @@ object CoverageTelemetry {
     const val LANE_IMAGEVIEW = "imageview"
     const val LANE_GLIDE = "glide"
     const val LANE_COIL = "coil"
+    const val LANE_FRESCO = "fresco"
+    const val LANE_PICASSO = "picasso"
+    const val LANE_BITMAP_FACTORY = "bitmap_factory"
     const val LANE_OKHTTP = "okhttp"
+    const val LANE_HTTP_URL_CONNECTION = "http_url_connection"
 
     const val STAGE_SCAN_RESULT = "scan_result"
     const val STAGE_BYPASS_PERMITTED = "bypass_permitted"

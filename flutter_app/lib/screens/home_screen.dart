@@ -545,7 +545,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     final prefs = context.read<SharedPreferences>();
     var edgeCount = prefs.getInt(_edgeCountKey) ?? 0;
     var orgasmCount = prefs.getInt(_orgasmCountKey) ?? 0;
-    final pissCount = prefs.getInt(_pissCountKey) ?? 0;
+    var pissCount = prefs.getInt(_pissCountKey) ?? 0;
     var imagesCaughtCount = prefs.getInt(_imagesCaughtCountKey) ?? 0;
     final orgasmManualOverride = prefs.getInt(_orgasmManualOverrideKey);
     final edgeCountOffset = (prefs.getInt(_edgeCountOffsetKey) ?? 0).clamp(-1000000, 1000000);
@@ -578,10 +578,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       if (remote.isNotEmpty) {
         final remoteEdge = remote['tasks_completed'];
         final remoteOrgasm = remote['confessions_posted'];
+        final remotePiss = remote['piss_count'];
         final remoteTarget = remote['edge_target_count'];
         final remoteShock = remote['edge_target_shock_at_peak'];
         final parsedEdge = remoteEdge is num ? remoteEdge.toInt() : int.tryParse('${remoteEdge ?? ''}');
         final parsedOrgasm = remoteOrgasm is num ? remoteOrgasm.toInt() : int.tryParse('${remoteOrgasm ?? ''}');
+        final parsedPiss = remotePiss is num ? remotePiss.toInt() : int.tryParse('${remotePiss ?? ''}');
         final parsedTarget = remoteTarget is num ? remoteTarget.toInt() : int.tryParse('${remoteTarget ?? ''}');
         final parsedShock = remoteShock is bool
           ? remoteShock
@@ -599,6 +601,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               (prefs.getInt(_orgasmCountOffsetKey) ?? 0).clamp(-1000000, 1000000);
           orgasmCount = (parsedOrgasm + latestOrgasmOffset).clamp(0, 1000000);
           await prefs.setInt(_orgasmCountKey, orgasmCount);
+        }
+        if (parsedPiss != null && parsedPiss >= 0) {
+          pissCount = parsedPiss.clamp(0, 1000000);
+          await prefs.setInt(_pissCountKey, pissCount);
         }
         if (parsedTarget != null && parsedTarget >= 0) {
           edgeTargetCount = parsedTarget;
@@ -2451,7 +2457,7 @@ class _NudeNetBlockerScreenState extends State<NudeNetBlockerScreen> {
   int _maxInFlight = 4;
   bool _failClosed = true;
   int _revealDurationMs = 300;
-  List<int> _selectedForbiddenClassIds = <int>[0, 1, 2, 3, 4, 5];
+  List<int> _selectedForbiddenClassIds = <int>[2, 3, 4, 6, 14];
 
   static const Map<int, String> _censorClassLabels = <int, String>{
     0: 'Class 0',
@@ -2504,7 +2510,7 @@ class _NudeNetBlockerScreenState extends State<NudeNetBlockerScreen> {
           _readInt(mediaConfig['reveal_duration_ms'], 300, min: 0, max: 3000);
       _strictPackagesController.text = strictPackages.join('\n');
         _selectedForbiddenClassIds = forbiddenClassIds.isEmpty
-          ? <int>[0, 1, 2, 3, 4, 5]
+          ? <int>[2, 3, 4, 6, 14]
           : forbiddenClassIds;
       _placeholderController.text =
           (mediaConfig['placeholder_text']?.toString().trim().isNotEmpty ?? false)

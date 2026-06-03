@@ -168,7 +168,7 @@ object FilterServiceChannel {
                             prefs.getString(FilterService.PREF_MEDIA_STRICT_PACKAGES, "[]") ?: "[]"
                         ))
                         put("forbidden_class_ids", org.json.JSONArray(
-                            prefs.getString(FilterService.PREF_MEDIA_FORBIDDEN_CLASS_IDS, "[0,1,2,3,4,5]") ?: "[0,1,2,3,4,5]"
+                            prefs.getString(FilterService.PREF_MEDIA_FORBIDDEN_CLASS_IDS, "[2,3,4,6,14]") ?: "[2,3,4,6,14]"
                         ))
                         put("max_in_flight", prefs.getInt(FilterService.PREF_MEDIA_MAX_IN_FLIGHT, 4).coerceIn(1, 12))
                         put("images_caught_count", prefs.getInt(FilterService.PREF_MEDIA_IMAGES_CAUGHT_COUNT, 0).coerceIn(0, Int.MAX_VALUE))

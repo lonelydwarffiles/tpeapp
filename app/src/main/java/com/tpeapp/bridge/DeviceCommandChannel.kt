@@ -19,6 +19,7 @@ import com.tpeapp.mqtt.PartnerMqttService
 import com.tpeapp.pairing.PairingActivity
 import com.tpeapp.service.FilterService
 import com.tpeapp.service.CoreServiceKeeper
+import com.tpeapp.vpn.MitmCertificateAuthority
 import com.tpeapp.vpn.VpnPolicyManager
 import io.flutter.plugin.common.BinaryMessenger
 import io.flutter.plugin.common.MethodChannel
@@ -510,6 +511,23 @@ object DeviceCommandChannel {
                         )
                         result.success(null)
                     }
+                    "getInstalledAppsForVpn" -> {
+                        val includeSystem = call.argument<Boolean>("includeSystem") ?: true
+                        val includeDisabled = call.argument<Boolean>("includeDisabled") ?: false
+                        val apps = AppInventoryManager.getInstalledApps(ctx, includeSystem)
+                            .asSequence()
+                            .filter { includeDisabled || it.isEnabled }
+                            .map { entry ->
+                                ArrayMap<String, Any?>().apply {
+                                    put("package_name", entry.packageName)
+                                    put("app_name", entry.appLabel)
+                                    put("is_system", entry.isSystem)
+                                    put("is_enabled", entry.isEnabled)
+                                }
+                            }
+                            .toList()
+                        result.success(apps)
+                    }
                     "setVpnPolicy" -> {
                         val vpnPolicyJson = call.argument<String>("vpnPolicyJson")
                         val providerMode = call.argument<String>("providerMode")
@@ -544,6 +562,29 @@ object DeviceCommandChannel {
                         val payload = ArrayMap<String, Any?>()
                         payload.putAll(VpnPolicyManager.statusSnapshot(ctx))
                         result.success(payload)
+                    }
+                    "prepareMitmCaInstall" -> {
+                        val ca = MitmCertificateAuthority.ensure(ctx)
+                        VpnPolicyManager.recordMitmCaGenerated(ctx, ca.alias, ca.generatedAtMs)
+
+                        val installIntent = MitmCertificateAuthority.buildInstallIntent(ca).apply {
+                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        }
+                        ctx.startActivity(installIntent)
+                        VpnPolicyManager.recordMitmCaInstallRequested(ctx)
+
+                        val payload = ArrayMap<String, Any?>().apply {
+                            put("alias", ca.alias)
+                            put("generated_at_ms", ca.generatedAtMs)
+                            put("certificate_pem", ca.certificatePem)
+                        }
+                        result.success(payload)
+                    }
+                    "setVpnMitmEnabled" -> {
+                        val enabled = call.argument<Boolean>("enabled")
+                            ?: return@setMethodCallHandler result.error("INVALID", "enabled required", null)
+                        VpnPolicyManager.setMitmEnabled(ctx, enabled)
+                        result.success(null)
                     }
                     else -> result.notImplemented()
                 }

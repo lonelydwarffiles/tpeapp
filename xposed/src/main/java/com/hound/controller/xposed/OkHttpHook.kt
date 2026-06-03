@@ -1,315 +1,90 @@
-﻿package com.hound.controller.xposed
+package com.hound.controller.xposed
 
 import android.util.Log
-import com.tpeapp.filter.IFilterCallback
 import de.robv.android.xposed.XC_MethodHook
+import de.robv.android.xposed.XposedBridge
 import de.robv.android.xposed.XposedHelpers
-import kotlinx.coroutines.CompletableDeferred
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withTimeoutOrNull
-import java.util.LinkedHashMap
-import java.util.concurrent.ConcurrentHashMap
-import java.util.concurrent.atomic.AtomicLong
+import java.io.ByteArrayInputStream
+import java.io.InputStream
 
-/**
- * Hooks [okhttp3.ResponseBody] to intercept image byte streams at the network
- * layer â€” **after** download, **before** any image-loading library caches them.
- *
- * This is the lowest-level hook: it catches images loaded by Glide, Coil,
- * Picasso, or any other OkHttp consumer in the target app.
- *
- * **Hooked method**:
- *   `okhttp3.ResponseBody.bytes()` â€” the fully-buffered byte array path.
- *
- * We also hook the streaming path via `okhttp3.internal.cache.CacheInterceptor`
- * to catch chunked responses before they are written to OkHttp's internal
- * DiskLruCache.
- *
- * **Performance note**: We only scan responses whose `Content-Type` starts
- * with `image/` so non-image network traffic is not affected.
- */
 object OkHttpHook {
 
-    private const val TAG             = "TPE_OkHttpHook"
-    private const val SCAN_TIMEOUT_MS = 800L
-    private const val DECISION_CACHE_MAX = 1024
-
-    private val requestSeq = AtomicLong(0)
-    private val bgScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
-    private val decisionCache = object : LinkedHashMap<Int, Boolean>(
-        DECISION_CACHE_MAX,
-        0.75f,
-        true,
-    ) {
-        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Int, Boolean>?): Boolean {
-            return size > DECISION_CACHE_MAX
-        }
-    }
-    private val cacheLock = Any()
-    private val inFlight = ConcurrentHashMap<Int, Unit>()
+    private const val TAG = "TPE_OkHttpHook"
 
     fun install(loader: ClassLoader) {
-        hookResponseBodyBytes(loader)
-        hookCacheInterceptor(loader)
+        val responseBodyClass = resolveResponseBodyClass(loader) ?: return
+        installBytesHook(responseBodyClass)
+        installByteStreamHook(responseBodyClass)
     }
 
-    // ------------------------------------------------------------------
-    //  ResponseBody.bytes() hook
-    // ------------------------------------------------------------------
+    private fun resolveResponseBodyClass(loader: ClassLoader): Class<*>? {
+        return runCatching {
+            Class.forName("okhttp3.ResponseBody", false, loader)
+        }.getOrElse {
+            null
+        }
+    }
 
-    private fun hookResponseBodyBytes(loader: ClassLoader) {
+    private fun installBytesHook(responseBodyClass: Class<*>) {
         runCatching {
-            XposedHelpers.findAndHookMethod(
-                "okhttp3.ResponseBody", loader,
+            XposedBridge.hookAllMethods(
+                responseBodyClass,
                 "bytes",
-                responseBytesHook
+                bytesHook,
             )
-            Log.i(TAG, "OkHttpHook (ResponseBody.bytes) installed")
-        }.onFailure { Log.w(TAG, "OkHttpHook (ResponseBody.bytes) not installed", it) }
+            Log.i(TAG, "Installed ResponseBody.bytes hook")
+        }.onFailure {
+            Log.w(TAG, "Failed to install ResponseBody.bytes hook", it)
+        }
     }
 
-    private val responseBytesHook = object : XC_MethodHook() {
+    private fun installByteStreamHook(responseBodyClass: Class<*>) {
+        runCatching {
+            XposedBridge.hookAllMethods(
+                responseBodyClass,
+                "byteStream",
+                byteStreamHook,
+            )
+            Log.i(TAG, "Installed ResponseBody.byteStream hook")
+        }.onFailure {
+            Log.w(TAG, "Failed to install ResponseBody.byteStream hook", it)
+        }
+    }
+
+    private val bytesHook = object : XC_MethodHook() {
         override fun afterHookedMethod(param: MethodHookParam) {
             val body = param.thisObject ?: return
-            if (!isImageContentType(body)) return
+            val payload = param.result as? ByteArray ?: return
+            val contentType = contentTypeOf(body)
+            if (!isImageContentType(contentType)) return
 
-            val originalBytes = param.result as? ByteArray ?: return
-            val censored      = scanAndCensorBytes(originalBytes)
-            if (censored !== originalBytes) {
-                param.result = censored
+            val rewritten = NetworkStreamCensor.maybeCensorNetworkImage(contentType, payload)
+            if (rewritten !== payload) {
+                param.result = rewritten
             }
         }
     }
 
-    // ------------------------------------------------------------------
-    //  CacheInterceptor hook (intercepts before disk write)
-    // ------------------------------------------------------------------
-
-    private fun hookCacheInterceptor(loader: ClassLoader) {
-        runCatching {
-            // OkHttp 4.x internal class name
-            val clazz = "okhttp3.internal.cache.CacheInterceptor"
-            XposedHelpers.findAndHookMethod(
-                clazz, loader,
-                "intercept",
-                "okhttp3.Interceptor\$Chain",
-                cacheInterceptorHook
-            )
-            Log.i(TAG, "OkHttpHook (CacheInterceptor) installed")
-        }.onFailure { Log.w(TAG, "OkHttpHook (CacheInterceptor) not installed", it) }
-    }
-
-    private val cacheInterceptorHook = object : XC_MethodHook() {
+    private val byteStreamHook = object : XC_MethodHook() {
         override fun afterHookedMethod(param: MethodHookParam) {
-            // The response is the return value; replace the body if it is an image.
-            val response = param.result ?: return
-            runCatching {
-                val bodyField = response.javaClass.getDeclaredField("body").apply { isAccessible = true }
-                val body      = bodyField.get(response) ?: return
-                if (!isImageContentType(body)) return
+            val body = param.thisObject ?: return
+            val stream = param.result as? InputStream ?: return
+            val contentType = contentTypeOf(body)
+            if (!isImageContentType(contentType)) return
 
-                val bytesMethod = body.javaClass.getMethod("bytes")
-                val originalBytes = bytesMethod.invoke(body) as? ByteArray ?: return
-                val censored = scanAndCensorBytes(originalBytes)
-                if (censored !== originalBytes) {
-                    // Replace with a ByteString-backed ResponseBody
-                    val create = Class.forName("okhttp3.ResponseBody")
-                        .getMethod("create",
-                            Class.forName("okhttp3.MediaType"),
-                            ByteArray::class.java
-                        )
-                    val mediaTypeField = body.javaClass
-                        .getDeclaredField("contentType").apply { isAccessible = true }
-                    val newBody = create.invoke(null, mediaTypeField.get(body), censored)
-                    bodyField.set(response, newBody)
-                }
-            }.onFailure { Log.w(TAG, "CacheInterceptor body replacement failed", it) }
+            val rewritten = NetworkStreamCensor.maybeCensorNetworkImage(contentType, stream)
+            param.result = ByteArrayInputStream(rewritten)
         }
     }
 
-    // ------------------------------------------------------------------
-    //  Helpers
-    // ------------------------------------------------------------------
-
-    private fun isImageContentType(body: Any): Boolean {
+    private fun contentTypeOf(responseBody: Any): String? {
         return runCatching {
-            val ctMethod = body.javaClass.getMethod("contentType")
-            val ct       = ctMethod.invoke(body)?.toString() ?: return false
-            ct.startsWith("image/", ignoreCase = true)
-        }.getOrDefault(false)
-    }
-
-    private fun scanAndCensorBytes(imageBytes: ByteArray): ByteArray {
-        val service = MainHook.filterService ?: run {
-            MainHook.getContext()?.let { MainHook.ensureServiceBound(it) }
-            CoverageTelemetry.report(
-                lane = CoverageTelemetry.LANE_OKHTTP,
-                stage = CoverageTelemetry.STAGE_SERVICE_UNAVAILABLE,
-                reason = "filter_service_not_bound"
-            )
-            return imageBytes
-        }
-
-        if (MediaFilterRuntimeConfig.isStrictForCurrentPackage()) {
-            return scanAndCensorStrict(service, imageBytes)
-        }
-
-        val key = fingerprint(imageBytes)
-        val cachedDecision = getCachedDecision(key)
-        if (cachedDecision == true) {
-            return BlurHelper.pixelateBytes(context = null, imageBytes)
-        }
-        if (cachedDecision == false) {
-            return imageBytes
-        }
-
-        // Unknown image: scan in the background and fail-open for this response.
-        maybeScheduleAsyncScan(service, key, imageBytes)
-        return imageBytes
-    }
-
-    private fun scanAndCensorStrict(
-        service: com.tpeapp.filter.IFilterService,
-        imageBytes: ByteArray,
-    ): ByteArray {
-        if (!MediaFilterRuntimeConfig.tryAcquireScanBudget()) {
-            return imageBytes
-        }
-
-        val requestId = requestSeq.incrementAndGet()
-        val startedAt = System.currentTimeMillis()
-        val deferred = CompletableDeferred<Pair<Boolean, Float>>()
-
-        val result = runCatching {
-            service.scanImageBytes(requestId, imageBytes, object : IFilterCallback.Stub() {
-                override fun onScanResult(id: Long, isSensitive: Boolean, confidence: Float) {
-                    if (!deferred.isCompleted) {
-                        deferred.complete(isSensitive to confidence)
-                    }
-                }
-            })
-        }
-        if (result.isFailure) {
-            MediaFilterRuntimeConfig.releaseScanBudget()
-            return imageBytes
-        }
-
-        val outcome = runCatching {
-            kotlinx.coroutines.runBlocking {
-                withTimeoutOrNull(SCAN_TIMEOUT_MS) { deferred.await() }
-            }
+            val method = responseBody.javaClass.getMethod("contentType")
+            method.invoke(responseBody)?.toString()
         }.getOrNull()
-
-        MediaFilterRuntimeConfig.releaseScanBudget()
-
-        if (outcome == null) {
-            CoverageTelemetry.report(
-                lane = CoverageTelemetry.LANE_OKHTTP,
-                stage = CoverageTelemetry.STAGE_SCAN_TIMEOUT,
-                latencyMs = System.currentTimeMillis() - startedAt,
-                reason = "strict_timeout"
-            )
-            return imageBytes
-        }
-
-        val (isSensitive, confidence) = outcome
-        CoverageTelemetry.report(
-            lane = CoverageTelemetry.LANE_OKHTTP,
-            stage = CoverageTelemetry.STAGE_SCAN_RESULT,
-            sensitive = isSensitive,
-            confidence = confidence,
-            latencyMs = System.currentTimeMillis() - startedAt,
-        )
-        return if (isSensitive) BlurHelper.pixelateBytes(context = null, imageBytes) else imageBytes
     }
 
-    private fun maybeScheduleAsyncScan(
-        service: com.tpeapp.filter.IFilterService,
-        key: Int,
-        imageBytes: ByteArray,
-    ) {
-        if (inFlight.putIfAbsent(key, Unit) != null) return
-        if (!MediaFilterRuntimeConfig.tryAcquireScanBudget()) {
-            inFlight.remove(key)
-            return
-        }
-
-        val requestId = requestSeq.incrementAndGet()
-        val startedAt = System.currentTimeMillis()
-
-        val resultDeferred = CompletableDeferred<Pair<Boolean, Float>>()
-
-        runCatching {
-            service.scanImageBytes(requestId, imageBytes, object : IFilterCallback.Stub() {
-                override fun onScanResult(id: Long, isSensitive: Boolean, confidence: Float) {
-                    if (!resultDeferred.isCompleted) {
-                        resultDeferred.complete(isSensitive to confidence)
-                    }
-                }
-            })
-        }.onFailure {
-            MediaFilterRuntimeConfig.releaseScanBudget()
-            inFlight.remove(key)
-            CoverageTelemetry.report(
-                lane = CoverageTelemetry.LANE_OKHTTP,
-                stage = CoverageTelemetry.STAGE_SCAN_ERROR,
-                latencyMs = System.currentTimeMillis() - startedAt,
-                reason = it.javaClass.simpleName
-            )
-            return
-        }
-
-        bgScope.launch {
-            val outcome = withTimeoutOrNull(SCAN_TIMEOUT_MS) { resultDeferred.await() }
-            if (outcome == null) {
-                CoverageTelemetry.report(
-                    lane = CoverageTelemetry.LANE_OKHTTP,
-                    stage = CoverageTelemetry.STAGE_SCAN_TIMEOUT,
-                    latencyMs = System.currentTimeMillis() - startedAt,
-                    reason = "async_timeout"
-                )
-            } else {
-                val (isSensitive, confidence) = outcome
-                putCachedDecision(key, isSensitive)
-                CoverageTelemetry.report(
-                    lane = CoverageTelemetry.LANE_OKHTTP,
-                    stage = CoverageTelemetry.STAGE_SCAN_RESULT,
-                    sensitive = isSensitive,
-                    confidence = confidence,
-                    latencyMs = System.currentTimeMillis() - startedAt,
-                )
-                if (isSensitive) {
-                    Log.d(TAG, "OkHttp: cached sensitive image [$requestId] score=$confidence")
-                }
-            }
-            MediaFilterRuntimeConfig.releaseScanBudget()
-            inFlight.remove(key)
-        }
-    }
-
-    private fun getCachedDecision(key: Int): Boolean? = synchronized(cacheLock) {
-        decisionCache[key]
-    }
-
-    private fun putCachedDecision(key: Int, sensitive: Boolean) {
-        synchronized(cacheLock) {
-            decisionCache[key] = sensitive
-        }
-    }
-
-    private fun fingerprint(bytes: ByteArray): Int {
-        if (bytes.isEmpty()) return 0
-        val step = maxOf(1, bytes.size / 64)
-        var hash = bytes.size
-        var i = 0
-        while (i < bytes.size) {
-            hash = 31 * hash + bytes[i].toInt()
-            i += step
-        }
-        return hash
+    private fun isImageContentType(contentType: String?): Boolean {
+        return contentType?.trim()?.startsWith("image/", ignoreCase = true) == true
     }
 }
-

@@ -35,12 +35,25 @@ object VpnPolicyManager {
     private const val PREF_VPN_TUNNEL_STARTED_AT_MS = "vpn_tunnel_started_at_ms"
     private const val PREF_VPN_CAPTURE_BYTES = "vpn_capture_bytes"
     private const val PREF_VPN_CAPTURE_PACKETS = "vpn_capture_packets"
+    private const val PREF_VPN_FORWARDED_BYTES = "vpn_forwarded_bytes"
+    private const val PREF_VPN_FORWARDED_PACKETS = "vpn_forwarded_packets"
+    private const val PREF_VPN_DROPPED_PACKETS = "vpn_dropped_packets"
+    private const val PREF_VPN_FLOW_ENDPOINT_COUNTS_JSON = "vpn_flow_endpoint_counts_json"
+    private const val PREF_VPN_FLOW_DOMAIN_COUNTS_JSON = "vpn_flow_domain_counts_json"
+    private const val PREF_VPN_FLOW_PACKAGE_COUNTS_JSON = "vpn_flow_package_counts_json"
+    private const val PREF_VPN_BLOCKED_EVENTS = "vpn_blocked_events"
+    private const val PREF_VPN_BLOCKED_DOMAIN_COUNTS_JSON = "vpn_blocked_domain_counts_json"
+    private const val PREF_VPN_BLOCKED_DOMAIN_RULES_JSON = "vpn_blocked_domain_rules_json"
+    private const val PREF_VPN_MITM_CA_ALIAS = "vpn_mitm_ca_alias"
+    private const val PREF_VPN_MITM_CA_GENERATED_AT_MS = "vpn_mitm_ca_generated_at_ms"
+    private const val PREF_VPN_MITM_CA_INSTALL_REQUESTED_AT_MS = "vpn_mitm_ca_install_requested_at_ms"
+    private const val PREF_VPN_MITM_ENABLED = "vpn_mitm_enabled"
 
     /**
      * Ensures VPN is enabled by default for local policy mode.
      *
      * Behavior:
-    * - If no desired state exists yet, default to disconnected.
+    * - If no desired state exists yet, default to connected.
      * - If desired state is explicitly disconnected, respect it.
      * - If permission is already granted, start the local tunnel automatically.
      * - If permission is missing, record pending user action but do not force a prompt
@@ -52,6 +65,7 @@ object VpnPolicyManager {
 
         var desiredState = prefs.getString(PREF_VPN_DESIRED_STATE, "")?.trim().orEmpty()
         val providerMode = prefs.getString(PREF_VPN_PROVIDER_MODE, "")?.trim().orEmpty()
+        val lastAction = prefs.getString(PREF_VPN_LAST_ACTION, "")?.trim().orEmpty()
 
         val edit = prefs.edit()
         var changed = false
@@ -60,7 +74,15 @@ object VpnPolicyManager {
             changed = true
         }
         if (desiredState.isBlank()) {
-            desiredState = "disconnected"
+            desiredState = "connected"
+            edit.putString(PREF_VPN_DESIRED_STATE, desiredState)
+            changed = true
+        } else if (
+            desiredState.equals("disconnected", ignoreCase = true) &&
+            lastAction.startsWith("AUTO_VPN_DEFAULT:", ignoreCase = true)
+        ) {
+            // Upgrade legacy auto-defaulted devices from disconnected to connected.
+            desiredState = "connected"
             edit.putString(PREF_VPN_DESIRED_STATE, desiredState)
             changed = true
         }
@@ -75,10 +97,24 @@ object VpnPolicyManager {
 
         if (!desiredState.equals("connected", ignoreCase = true)) return
 
-        val tunnelActive = prefs.getBoolean(PREF_VPN_TUNNEL_ACTIVE, false)
-        if (tunnelActive || isVpnTransportActive(context)) return
+        val tunnelActivePref = prefs.getBoolean(PREF_VPN_TUNNEL_ACTIVE, false)
+        val vpnTransportActive = isVpnTransportActive(context)
+        if (vpnTransportActive) return
+
+        if (tunnelActivePref) {
+            // Process restarts can leave this flag stale even when VPN transport is gone.
+            prefs.edit()
+                .putBoolean(PREF_VPN_TUNNEL_ACTIVE, false)
+                .putString(PREF_VPN_LAST_RESULT, "reconnect_pending")
+                .putLong(PREF_VPN_UPDATED_AT_MS, System.currentTimeMillis())
+                .apply()
+        }
 
         if (VpnService.prepare(context) != null) {
+            if (source.equals("app_on_create", ignoreCase = true)) {
+                requestConnect(context)
+                return
+            }
             setLastResult(context, "permission_required", "Open app once to grant VPN permission")
             return
         }
@@ -254,6 +290,19 @@ object VpnPolicyManager {
         val tunnelStartedAtMs = prefs.getLong(PREF_VPN_TUNNEL_STARTED_AT_MS, 0L)
         val captureBytes = prefs.getLong(PREF_VPN_CAPTURE_BYTES, 0L)
         val capturePackets = prefs.getLong(PREF_VPN_CAPTURE_PACKETS, 0L)
+        val forwardedBytes = prefs.getLong(PREF_VPN_FORWARDED_BYTES, 0L)
+        val forwardedPackets = prefs.getLong(PREF_VPN_FORWARDED_PACKETS, 0L)
+        val droppedPackets = prefs.getLong(PREF_VPN_DROPPED_PACKETS, 0L)
+        val endpointFlowJson = prefs.getString(PREF_VPN_FLOW_ENDPOINT_COUNTS_JSON, "")?.trim().orEmpty()
+        val domainFlowJson = prefs.getString(PREF_VPN_FLOW_DOMAIN_COUNTS_JSON, "")?.trim().orEmpty()
+        val packageFlowJson = prefs.getString(PREF_VPN_FLOW_PACKAGE_COUNTS_JSON, "")?.trim().orEmpty()
+        val blockedEvents = prefs.getLong(PREF_VPN_BLOCKED_EVENTS, 0L)
+        val blockedDomainsJson = prefs.getString(PREF_VPN_BLOCKED_DOMAIN_COUNTS_JSON, "")?.trim().orEmpty()
+        val blockedRulesJson = prefs.getString(PREF_VPN_BLOCKED_DOMAIN_RULES_JSON, "")?.trim().orEmpty()
+        val mitmCaAlias = prefs.getString(PREF_VPN_MITM_CA_ALIAS, "")?.trim().orEmpty()
+        val mitmCaGeneratedAtMs = prefs.getLong(PREF_VPN_MITM_CA_GENERATED_AT_MS, 0L)
+        val mitmCaInstallRequestedAtMs = prefs.getLong(PREF_VPN_MITM_CA_INSTALL_REQUESTED_AT_MS, 0L)
+        val mitmEnabled = prefs.getBoolean(PREF_VPN_MITM_ENABLED, false)
 
         val localPolicy = localTunnelPolicy(context)
         val providerPackage = resolveProviderPackage(providerMode, policyJson)
@@ -288,7 +337,21 @@ object VpnPolicyManager {
             "tunnel_started_at_ms" to if (tunnelStartedAtMs > 0L) tunnelStartedAtMs else null,
             "captured_bytes" to captureBytes,
             "captured_packets" to capturePackets,
-            "forwarding_supported" to false,
+            "forwarding_supported" to true,
+            "forwarding_protocols" to listOf("ipv4_udp", "ipv4_tcp_best_effort"),
+            "forwarded_bytes" to forwardedBytes,
+            "forwarded_packets" to forwardedPackets,
+            "dropped_packets" to droppedPackets,
+            "flow_endpoint_counts_json" to endpointFlowJson.ifBlank { "{}" },
+            "flow_domain_counts_json" to domainFlowJson.ifBlank { "{}" },
+            "flow_package_counts_json" to packageFlowJson.ifBlank { "{}" },
+            "blocked_events" to blockedEvents,
+            "blocked_domain_counts_json" to blockedDomainsJson.ifBlank { "{}" },
+            "blocked_domain_rules_json" to blockedRulesJson.ifBlank { "[]" },
+            "mitm_ca_alias" to mitmCaAlias.ifBlank { null },
+            "mitm_ca_generated_at_ms" to if (mitmCaGeneratedAtMs > 0L) mitmCaGeneratedAtMs else null,
+            "mitm_ca_install_requested_at_ms" to if (mitmCaInstallRequestedAtMs > 0L) mitmCaInstallRequestedAtMs else null,
+            "mitm_enabled" to mitmEnabled,
             "last_action" to lastAction.ifBlank { null },
             "last_result" to lastResult.ifBlank { null },
             "last_error" to lastError.ifBlank { null },
@@ -325,6 +388,160 @@ object VpnPolicyManager {
             .putLong(PREF_VPN_CAPTURE_PACKETS, nextPackets)
             .putLong(PREF_VPN_UPDATED_AT_MS, System.currentTimeMillis())
             .apply()
+    }
+
+    internal fun addForwardedTraffic(context: Context, bytes: Long, packets: Long) {
+        if (bytes <= 0L && packets <= 0L) return
+        val prefs = PreferenceManager.getDefaultSharedPreferences(context)
+        val nextBytes = (prefs.getLong(PREF_VPN_FORWARDED_BYTES, 0L) + bytes).coerceAtLeast(0L)
+        val nextPackets = (prefs.getLong(PREF_VPN_FORWARDED_PACKETS, 0L) + packets).coerceAtLeast(0L)
+        prefs.edit()
+            .putLong(PREF_VPN_FORWARDED_BYTES, nextBytes)
+            .putLong(PREF_VPN_FORWARDED_PACKETS, nextPackets)
+            .putLong(PREF_VPN_UPDATED_AT_MS, System.currentTimeMillis())
+            .apply()
+    }
+
+    internal fun addDroppedPackets(context: Context, packets: Long) {
+        if (packets <= 0L) return
+        val prefs = PreferenceManager.getDefaultSharedPreferences(context)
+        val nextDropped = (prefs.getLong(PREF_VPN_DROPPED_PACKETS, 0L) + packets).coerceAtLeast(0L)
+        prefs.edit()
+            .putLong(PREF_VPN_DROPPED_PACKETS, nextDropped)
+            .putLong(PREF_VPN_UPDATED_AT_MS, System.currentTimeMillis())
+            .apply()
+    }
+
+    internal fun addFlowSample(
+        context: Context,
+        endpointKey: String?,
+        domain: String?,
+        packageName: String?,
+    ) {
+        val endpoint = endpointKey?.trim().orEmpty()
+        val dns = domain?.trim()?.lowercase().orEmpty()
+        val pkg = packageName?.trim().orEmpty()
+        if (endpoint.isBlank() && dns.isBlank() && pkg.isBlank()) return
+
+        val prefs = PreferenceManager.getDefaultSharedPreferences(context)
+        val endpointJson = incrementTopCountJson(
+            prefs.getString(PREF_VPN_FLOW_ENDPOINT_COUNTS_JSON, "")?.trim().orEmpty(),
+            endpoint,
+            maxKeys = 48,
+        )
+        val domainJson = incrementTopCountJson(
+            prefs.getString(PREF_VPN_FLOW_DOMAIN_COUNTS_JSON, "")?.trim().orEmpty(),
+            dns,
+            maxKeys = 64,
+        )
+        val packageJson = incrementTopCountJson(
+            prefs.getString(PREF_VPN_FLOW_PACKAGE_COUNTS_JSON, "")?.trim().orEmpty(),
+            pkg,
+            maxKeys = 48,
+        )
+
+        prefs.edit()
+            .putString(PREF_VPN_FLOW_ENDPOINT_COUNTS_JSON, endpointJson)
+            .putString(PREF_VPN_FLOW_DOMAIN_COUNTS_JSON, domainJson)
+            .putString(PREF_VPN_FLOW_PACKAGE_COUNTS_JSON, packageJson)
+            .putLong(PREF_VPN_UPDATED_AT_MS, System.currentTimeMillis())
+            .apply()
+    }
+
+    internal fun addBlockedDomainEvent(context: Context, domain: String?) {
+        val value = domain?.trim()?.lowercase().orEmpty()
+        val prefs = PreferenceManager.getDefaultSharedPreferences(context)
+        val nextTotal = (prefs.getLong(PREF_VPN_BLOCKED_EVENTS, 0L) + 1L).coerceAtLeast(0L)
+        val nextDomainJson = incrementTopCountJson(
+            prefs.getString(PREF_VPN_BLOCKED_DOMAIN_COUNTS_JSON, "")?.trim().orEmpty(),
+            value,
+            maxKeys = 64,
+        )
+        prefs.edit()
+            .putLong(PREF_VPN_BLOCKED_EVENTS, nextTotal)
+            .putString(PREF_VPN_BLOCKED_DOMAIN_COUNTS_JSON, nextDomainJson)
+            .putLong(PREF_VPN_UPDATED_AT_MS, System.currentTimeMillis())
+            .apply()
+    }
+
+    internal fun blockedDomainRules(context: Context): List<String> {
+        val prefs = PreferenceManager.getDefaultSharedPreferences(context)
+        val raw = prefs.getString(PREF_VPN_BLOCKED_DOMAIN_RULES_JSON, "")?.trim().orEmpty()
+        if (raw.isBlank()) {
+            return listOf(
+                "porn",
+                "xvideos",
+                "xnxx",
+                "redtube",
+                "youporn",
+                "spankbang",
+                "chaturbate",
+            )
+        }
+        return runCatching {
+            val out = mutableListOf<String>()
+            val arr = JSONArray(raw)
+            for (i in 0 until arr.length()) {
+                val item = arr.optString(i, "").trim().lowercase()
+                if (item.isNotBlank()) out += item
+            }
+            out.distinct()
+        }.getOrDefault(emptyList())
+    }
+
+    internal fun recordMitmCaGenerated(context: Context, alias: String, generatedAtMs: Long) {
+        PreferenceManager.getDefaultSharedPreferences(context).edit()
+            .putString(PREF_VPN_MITM_CA_ALIAS, alias.trim())
+            .putLong(PREF_VPN_MITM_CA_GENERATED_AT_MS, generatedAtMs.coerceAtLeast(0L))
+            .putLong(PREF_VPN_UPDATED_AT_MS, System.currentTimeMillis())
+            .apply()
+    }
+
+    internal fun recordMitmCaInstallRequested(context: Context) {
+        PreferenceManager.getDefaultSharedPreferences(context).edit()
+            .putLong(PREF_VPN_MITM_CA_INSTALL_REQUESTED_AT_MS, System.currentTimeMillis())
+            .putLong(PREF_VPN_UPDATED_AT_MS, System.currentTimeMillis())
+            .apply()
+    }
+
+    internal fun setMitmEnabled(context: Context, enabled: Boolean) {
+        PreferenceManager.getDefaultSharedPreferences(context).edit()
+            .putBoolean(PREF_VPN_MITM_ENABLED, enabled)
+            .putLong(PREF_VPN_UPDATED_AT_MS, System.currentTimeMillis())
+            .apply()
+    }
+
+    private fun incrementTopCountJson(currentJson: String, key: String, maxKeys: Int): String {
+        if (key.isBlank()) return currentJson.ifBlank { "{}" }
+
+        val map = linkedMapOf<String, Long>()
+        runCatching {
+            val obj = JSONObject(currentJson.ifBlank { "{}" })
+            val names = obj.keys()
+            while (names.hasNext()) {
+                val next = names.next()
+                map[next] = obj.optLong(next, 0L)
+            }
+        }
+
+        val nextValue = (map[key] ?: 0L) + 1L
+        map[key] = nextValue
+
+        if (map.size > maxKeys) {
+            val sorted = map.entries
+                .sortedByDescending { it.value }
+                .take(maxKeys)
+            map.clear()
+            for (entry in sorted) {
+                map[entry.key] = entry.value
+            }
+        }
+
+        val out = JSONObject()
+        for ((k, v) in map) {
+            out.put(k, v)
+        }
+        return out.toString()
     }
 
     private fun setLastResult(context: Context, result: String, error: String?) {
