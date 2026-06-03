@@ -274,9 +274,11 @@ class BleManager(
             override fun onScanResult(callbackType: Int, result: ScanResult) {
                 val device = result.device
                 val address = device.address ?: return
+                val advertisedName = result.scanRecord?.deviceName ?: ""
                 val candidate = mapOf(
                     "address" to address,
                     "name" to (device.name ?: ""),
+                    "adv_name" to advertisedName,
                     "rssi" to result.rssi,
                 )
                 candidateScanResults[address] = candidate

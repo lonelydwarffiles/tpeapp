@@ -98,4 +98,20 @@ interface IFilterService {
      * }
      */
     String getMediaFilterConfig();
+
+    /**
+     * Synchronously process an image and return an approved display bitmap payload.
+     *
+     * Input and output are encoded image bytes (PNG/JPEG). The output image keeps
+     * original dimensions but applies selective censorship for forbidden detections.
+     * Returns null on failure.
+     */
+    byte[] processImageBytesForDisplay(in byte[] imageData);
+
+    /**
+     * Lightweight synchronous detection call used by periodic video tracking.
+     *
+     * Returns true when forbidden classes are detected above threshold.
+     */
+    boolean hasForbiddenContent(in byte[] imageData);
 }

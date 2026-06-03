@@ -4,6 +4,7 @@ import android.graphics.Bitmap
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.concurrent.atomic.AtomicInteger
+import kotlin.random.Random
 
 /**
  * Cached runtime config used by media hooks to balance speed vs strict behavior.
@@ -14,9 +15,11 @@ object MediaFilterRuntimeConfig {
 
     data class Config(
         val mode: String = "speed", // speed|strict
-        val censorStyle: String = "pixelate", // blackout|heavy_blur|pixelate
+        val censorStyle: String = "random", // blackout|heavy_blur|pixelate|random
         val strictPackages: Set<String> = emptySet(),
         val maxInFlight: Int = 4,
+        val failClosed: Boolean = true,
+        val revealDurationMs: Int = 300,
         val nudityPermittedByHandler: Boolean = false,
         val placeholderText: String = "Loading...",
     )
@@ -67,10 +70,16 @@ object MediaFilterRuntimeConfig {
 
     fun isNudityPermittedByHandler(): Boolean = current().nudityPermittedByHandler
     fun placeholderText(): String = current().placeholderText
+    fun failClosed(): Boolean = current().failClosed
+    fun revealDurationMs(): Long = current().revealDurationMs.toLong()
 
     fun censorBitmapInPlace(bitmap: Bitmap) {
         val ctx = MainHook.getContext()
-        val style = current().censorStyle
+        val cfg = current()
+        val style = when (cfg.censorStyle) {
+            "random" -> if (Random.nextBoolean()) "pixelate" else "heavy_blur"
+            else -> cfg.censorStyle
+        }
         val censored = when (style) {
             "blackout" -> {
                 Bitmap.createBitmap(bitmap.width, bitmap.height, Bitmap.Config.ARGB_8888).apply {
@@ -100,10 +109,13 @@ object MediaFilterRuntimeConfig {
             val censorStyle = when (obj.optString("censor_style", "pixelate").trim().lowercase()) {
                 "blackout" -> "blackout"
                 "heavy_blur", "heavyblur", "blur" -> "heavy_blur"
+                "random" -> "random"
                 else -> "pixelate"
             }
             val strictPackages = parsePackages(obj.optJSONArray("strict_packages") ?: JSONArray())
             val maxInFlight = obj.optInt("max_in_flight", 4).coerceIn(1, 12)
+            val failClosed = obj.optBoolean("fail_closed", true)
+            val revealDurationMs = obj.optInt("reveal_duration_ms", 300).coerceIn(0, 3_000)
             val nudityPermittedByHandler = obj.optBoolean("nudity_permitted_by_handler", false)
             val placeholderText = obj.optString("placeholder_text", "Loading...")
                 .trim()
@@ -114,6 +126,8 @@ object MediaFilterRuntimeConfig {
                 censorStyle = censorStyle,
                 strictPackages = strictPackages,
                 maxInFlight = maxInFlight,
+                failClosed = failClosed,
+                revealDurationMs = revealDurationMs,
                 nudityPermittedByHandler = nudityPermittedByHandler,
                 placeholderText = placeholderText,
             )

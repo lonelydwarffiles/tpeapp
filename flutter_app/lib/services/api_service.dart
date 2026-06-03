@@ -370,26 +370,50 @@ class ApiService {
     required TaskStatus status,
     String? photoPath,
   }) async {
-    final uri = Uri.parse('$_endpoint/api/tpe/task/status');
+    const paths = <String>[
+      '/api/tpe/task/status',
+      '/api/tpe/tasks/status',
+      '/api/task/status',
+      '/api/handler/tpe/task/status',
+    ];
 
     if (photoPath != null) {
-      final request = http.MultipartRequest('POST', uri)
-        ..headers.addAll(_bearerHeaders..remove('Content-Type'))
-        ..fields['task_id'] = taskId
-        ..fields['status'] = status.name.toUpperCase()
-        ..files.add(await http.MultipartFile.fromPath('photo', photoPath));
-      final streamed = await request.send().timeout(_timeout);
-      if (streamed.statusCode < 200 || streamed.statusCode >= 300) {
+      int? lastStatus;
+      for (final path in paths) {
+        final request = http.MultipartRequest('POST', Uri.parse('$_endpoint$path'))
+          ..headers.addAll(Map<String, String>.from(_bearerHeaders)..remove('Content-Type'))
+          ..fields['task_id'] = taskId
+          ..fields['status'] = status.name.toUpperCase()
+          ..files.add(await http.MultipartFile.fromPath('photo', photoPath));
+        final streamed = await request.send().timeout(_timeout);
+        lastStatus = streamed.statusCode;
+        if (streamed.statusCode >= 200 && streamed.statusCode < 300) {
+          return;
+        }
+        if (streamed.statusCode == 401 ||
+            streamed.statusCode == 403 ||
+            streamed.statusCode == 404) {
+          continue;
+        }
         throw Exception('Task upload failed: HTTP ${streamed.statusCode}');
       }
+      throw Exception('Task upload failed: HTTP ${lastStatus ?? 404} (all task-status routes returned auth/route miss)');
     } else {
       final body = jsonEncode({
         'task_id': taskId,
         'status': status.name.toUpperCase(),
       });
-      final response = await http
-          .post(uri, headers: _bearerHeaders, body: body)
-          .timeout(_timeout);
+      final response = await _requestWithFallback(
+        method: 'POST',
+        paths: paths,
+        headersByPath: [
+          _bearerHeaders,
+          _bearerHeaders,
+          _bearerHeaders,
+          _bearerHeaders,
+        ],
+        body: body,
+      );
       _assertSuccess(response, 'Task status');
     }
   }

@@ -5,12 +5,15 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
 import android.content.Intent
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.os.IBinder
 import android.os.ParcelFileDescriptor
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.preference.PreferenceManager
 import com.tpeapp.R
+import com.tpeapp.censor.CensorshipEngine
 import com.tpeapp.filter.IFilterCallback
 import com.tpeapp.filter.IFilterService
 import com.tpeapp.ml.NudeNetClassifier
@@ -96,6 +99,14 @@ class FilterService : Service() {
         const val PREF_MEDIA_STRICT_PACKAGES    = "media_filter_strict_packages"
         /** Soft upper bound for concurrent in-flight scans in Xposed lanes. */
         const val PREF_MEDIA_MAX_IN_FLIGHT      = "media_filter_max_in_flight"
+        /** JSON array of class IDs the ONNX censor should treat as forbidden. */
+        const val PREF_MEDIA_FORBIDDEN_CLASS_IDS = "media_forbidden_class_ids"
+        /** Persistent counter of media items detected as forbidden. */
+        const val PREF_MEDIA_IMAGES_CAUGHT_COUNT = "media_images_caught_count"
+        /** Fail-closed toggle for ImageView interception path. */
+        const val PREF_MEDIA_FAIL_CLOSED        = "media_filter_fail_closed"
+        /** Fade-in duration for approved image reveals (ms). */
+        const val PREF_MEDIA_REVEAL_DURATION_MS = "media_reveal_duration_ms"
         /** Whether handler explicitly permits nudity (bypass media scan reveal gates). */
         const val PREF_NUDITY_PERMITTED_BY_HANDLER = "nudity_permitted_by_handler"
         /** Placeholder text shown while intercepted images are awaiting scan result. */
@@ -147,11 +158,16 @@ class FilterService : Service() {
      */
     @Volatile private var nudeNetEnabled: Boolean = false
     @Volatile private var mediaFilterMode: String = "speed"
-    @Volatile private var mediaCensorStyle: String = "pixelate"
+    @Volatile private var mediaCensorStyle: String = "random"
     @Volatile private var mediaStrictPackagesJson: String = "[]"
+    @Volatile private var mediaForbiddenClassIdsJson: String = "[0,1,2,3,4,5]"
     @Volatile private var mediaMaxInFlight: Int = 4
+    @Volatile private var mediaImagesCaughtCount: Int = 0
+    @Volatile private var mediaFailClosed: Boolean = true
+    @Volatile private var mediaRevealDurationMs: Int = 300
     @Volatile private var nudityPermittedByHandler: Boolean = false
     @Volatile private var mediaPlaceholderText: String = "Loading..."
+    @Volatile private var censorshipEngine: CensorshipEngine? = null
 
     /** Minimum gap between consecutive clean-scan reward triggers (30 minutes). */
     private val CLEAN_SCAN_REWARD_INTERVAL_MS = 30 * 60 * 1_000L
@@ -205,16 +221,33 @@ class FilterService : Service() {
                     Log.i(TAG, "Media filter mode updated via settings -> $mediaFilterMode")
                 }
                 PREF_MEDIA_CENSOR_STYLE -> {
-                    mediaCensorStyle = normalizeCensorStyle(prefs.getString(key, "pixelate"))
+                    mediaCensorStyle = normalizeCensorStyle(prefs.getString(key, "random"))
                     Log.i(TAG, "Media censor style updated via settings -> $mediaCensorStyle")
                 }
                 PREF_MEDIA_STRICT_PACKAGES -> {
                     mediaStrictPackagesJson = normalizeStrictPackagesJson(prefs.getString(key, "[]"))
                     Log.i(TAG, "Media strict package list updated")
                 }
+                PREF_MEDIA_FORBIDDEN_CLASS_IDS -> {
+                    mediaForbiddenClassIdsJson = normalizeForbiddenClassIdsJson(
+                        prefs.getString(key, "[0,1,2,3,4,5]")
+                    )
+                    Log.i(TAG, "Media forbidden class IDs updated -> $mediaForbiddenClassIdsJson")
+                }
                 PREF_MEDIA_MAX_IN_FLIGHT -> {
                     mediaMaxInFlight = prefs.getInt(key, 4).coerceIn(1, 12)
                     Log.i(TAG, "Media in-flight budget updated -> $mediaMaxInFlight")
+                }
+                PREF_MEDIA_IMAGES_CAUGHT_COUNT -> {
+                    mediaImagesCaughtCount = prefs.getInt(key, 0).coerceIn(0, Int.MAX_VALUE)
+                }
+                PREF_MEDIA_FAIL_CLOSED -> {
+                    mediaFailClosed = prefs.getBoolean(key, true)
+                    Log.i(TAG, "Media fail-closed updated via settings -> $mediaFailClosed")
+                }
+                PREF_MEDIA_REVEAL_DURATION_MS -> {
+                    mediaRevealDurationMs = normalizeRevealDurationMs(prefs.getInt(key, 300))
+                    Log.i(TAG, "Media reveal duration updated via settings -> ${mediaRevealDurationMs}ms")
                 }
                 PREF_NUDITY_PERMITTED_BY_HANDLER -> {
                     nudityPermittedByHandler = prefs.getBoolean(key, false)
@@ -242,7 +275,19 @@ class FilterService : Service() {
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
-        startForeground(CORE_NOTIFICATION_ID, buildForegroundNotification())
+        try {
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                startForeground(
+                    CORE_NOTIFICATION_ID,
+                    buildForegroundNotification(),
+                    android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE,
+                )
+            } else {
+                startForeground(CORE_NOTIFICATION_ID, buildForegroundNotification())
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "startForeground failed, running as background service: ${e.message}")
+        }
         LovenseManager.init(applicationContext)
         PavlokManager.init(applicationContext)
         loadPersistedSettings()
@@ -273,6 +318,8 @@ class FilterService : Service() {
         ioScope.cancel()
         classifier?.close()
         classifier = null
+        censorshipEngine?.close()
+        censorshipEngine = null
         LovenseManager.close()
         PavlokManager.close()
         androidx.preference.PreferenceManager
@@ -304,11 +351,19 @@ class FilterService : Service() {
             Log.i(TAG, "Cleared persisted NudeNet enable flag; feature is forced off")
         }
         mediaFilterMode = normalizeMode(prefs.getString(PREF_MEDIA_FILTER_MODE, "speed"))
-        mediaCensorStyle = normalizeCensorStyle(prefs.getString(PREF_MEDIA_CENSOR_STYLE, "pixelate"))
+        mediaCensorStyle = normalizeCensorStyle(prefs.getString(PREF_MEDIA_CENSOR_STYLE, "random"))
         mediaStrictPackagesJson = normalizeStrictPackagesJson(
             prefs.getString(PREF_MEDIA_STRICT_PACKAGES, "[]")
         )
+        mediaForbiddenClassIdsJson = normalizeForbiddenClassIdsJson(
+            prefs.getString(PREF_MEDIA_FORBIDDEN_CLASS_IDS, "[0,1,2,3,4,5]")
+        )
         mediaMaxInFlight = prefs.getInt(PREF_MEDIA_MAX_IN_FLIGHT, 4).coerceIn(1, 12)
+        mediaImagesCaughtCount = prefs.getInt(PREF_MEDIA_IMAGES_CAUGHT_COUNT, 0).coerceIn(0, Int.MAX_VALUE)
+        mediaFailClosed = prefs.getBoolean(PREF_MEDIA_FAIL_CLOSED, true)
+        mediaRevealDurationMs = normalizeRevealDurationMs(
+            prefs.getInt(PREF_MEDIA_REVEAL_DURATION_MS, 300)
+        )
         nudityPermittedByHandler = prefs.getBoolean(PREF_NUDITY_PERMITTED_BY_HANDLER, false)
         mediaPlaceholderText = normalizePlaceholderText(
             prefs.getString(PREF_MEDIA_PLACEHOLDER_TEXT, "Loading...")
@@ -373,6 +428,7 @@ class FilterService : Service() {
                     val blocked = score >= threshold
                     callback.onScanResult(requestId, blocked, score)
                     if (blocked) {
+                        incrementImagesCaughtCounter()
                         dispatchAppBlockedEvent(requestId, score)
                         triggerToyEscalation()
                     } else {
@@ -404,6 +460,7 @@ class FilterService : Service() {
                         val blocked = score >= threshold
                         callback.onScanResult(requestId, blocked, score)
                         if (blocked) {
+                            incrementImagesCaughtCounter()
                             dispatchAppBlockedEvent(requestId, score)
                             triggerToyEscalation()
                         } else {
@@ -456,10 +513,65 @@ class FilterService : Service() {
             put("mode", mediaFilterMode)
             put("censor_style", mediaCensorStyle)
             put("strict_packages", JSONArray(mediaStrictPackagesJson))
+            put("forbidden_class_ids", JSONArray(mediaForbiddenClassIdsJson))
             put("max_in_flight", mediaMaxInFlight)
+            put("images_caught_count", mediaImagesCaughtCount)
+            put("fail_closed", mediaFailClosed)
+            put("reveal_duration_ms", mediaRevealDurationMs)
             put("nudity_permitted_by_handler", nudityPermittedByHandler)
             put("placeholder_text", mediaPlaceholderText)
         }.toString()
+
+        override fun processImageBytesForDisplay(imageData: ByteArray?): ByteArray? {
+            if (imageData == null || imageData.isEmpty()) return null
+            val src = decodeBitmap(imageData) ?: return null
+            return try {
+                val forbiddenClassIds = parseForbiddenClassIdSet(mediaForbiddenClassIdsJson)
+                val result = censorEngine().censorBitmap(src, mediaCensorStyle, forbiddenClassIds)
+                if (result.hasForbidden) {
+                    incrementImagesCaughtCounter()
+                }
+                try {
+                    censorEngine().encodePng(result.outputBitmap)
+                } finally {
+                    if (!result.outputBitmap.isRecycled) result.outputBitmap.recycle()
+                }
+            } catch (t: Throwable) {
+                Log.e(TAG, "processImageBytesForDisplay failed", t)
+                null
+            } finally {
+                if (!src.isRecycled) src.recycle()
+            }
+        }
+
+        override fun hasForbiddenContent(imageData: ByteArray?): Boolean {
+            if (imageData == null || imageData.isEmpty()) return true
+            val src = decodeBitmap(imageData) ?: return true
+            return try {
+                val forbiddenClassIds = parseForbiddenClassIdSet(mediaForbiddenClassIdsJson)
+                censorEngine().hasForbiddenContent(src, forbiddenClassIds)
+            } catch (t: Throwable) {
+                Log.e(TAG, "hasForbiddenContent failed", t)
+                true
+            } finally {
+                if (!src.isRecycled) src.recycle()
+            }
+        }
+    }
+
+    @Synchronized
+    private fun censorEngine(): CensorshipEngine {
+        val existing = censorshipEngine
+        if (existing != null) return existing
+        val created = CensorshipEngine(applicationContext)
+        censorshipEngine = created
+        return created
+    }
+
+    private fun decodeBitmap(bytes: ByteArray): Bitmap? {
+        return runCatching {
+            BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+        }.getOrNull()
     }
 
     // ------------------------------------------------------------------
@@ -534,7 +646,63 @@ class FilterService : Service() {
     private fun normalizeCensorStyle(raw: String?): String = when (raw?.trim()?.lowercase()) {
         "blackout" -> "blackout"
         "heavy_blur", "heavyblur", "blur" -> "heavy_blur"
+        "random" -> "random"
         else -> "pixelate"
+    }
+
+    private fun normalizeRevealDurationMs(raw: Int): Int = raw.coerceIn(0, 3_000)
+
+    private fun normalizeForbiddenClassIdsJson(raw: String?): String {
+        if (raw.isNullOrBlank()) return "[0,1,2,3,4,5]"
+        return runCatching {
+            val inArr = JSONArray(raw)
+            val outArr = JSONArray()
+            val dedupe = LinkedHashSet<Int>()
+            for (i in 0 until inArr.length()) {
+                val value = when (val any = inArr.opt(i)) {
+                    is Number -> any.toInt()
+                    is String -> any.trim().toIntOrNull()
+                    else -> null
+                }
+                if (value != null && value in 0..1000) dedupe.add(value)
+            }
+            if (dedupe.isEmpty()) {
+                outArr.put(0)
+                outArr.put(1)
+                outArr.put(2)
+                outArr.put(3)
+                outArr.put(4)
+                outArr.put(5)
+            } else {
+                dedupe.forEach { outArr.put(it) }
+            }
+            outArr.toString()
+        }.getOrDefault("[0,1,2,3,4,5]")
+    }
+
+    private fun parseForbiddenClassIdSet(rawJson: String): Set<Int> {
+        return runCatching {
+            val arr = JSONArray(rawJson)
+            val out = LinkedHashSet<Int>()
+            for (i in 0 until arr.length()) {
+                val value = when (val any = arr.opt(i)) {
+                    is Number -> any.toInt()
+                    is String -> any.trim().toIntOrNull()
+                    else -> null
+                }
+                if (value != null && value >= 0) out.add(value)
+            }
+            if (out.isEmpty()) setOf(0, 1, 2, 3, 4, 5) else out
+        }.getOrDefault(setOf(0, 1, 2, 3, 4, 5))
+    }
+
+    private fun incrementImagesCaughtCounter() {
+        val next = (mediaImagesCaughtCount + 1).coerceAtMost(Int.MAX_VALUE)
+        mediaImagesCaughtCount = next
+        PreferenceManager.getDefaultSharedPreferences(applicationContext)
+            .edit()
+            .putInt(PREF_MEDIA_IMAGES_CAUGHT_COUNT, next)
+            .apply()
     }
 
     private fun normalizeStrictPackagesJson(raw: String?): String {

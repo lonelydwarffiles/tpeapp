@@ -9,6 +9,16 @@ android {
     compileSdk = flutter.compileSdkVersion
     ndkVersion = flutter.ndkVersion
 
+    sourceSets {
+        getByName("main") {
+            java.srcDirs(
+                "src/main/kotlin",
+                "../../../app/src/main/java/com/tpeapp/ble",
+                "../../../app/src/main/java/com/tpeapp/bridge",
+            )
+        }
+    }
+
     buildFeatures {
         aidl = true
     }

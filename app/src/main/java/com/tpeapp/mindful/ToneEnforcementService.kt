@@ -99,6 +99,14 @@ class ToneEnforcementService : AccessibilityService() {
         private const val AFFIRMATION_REWRITE_MIN_CHANCE = 0.10
         private const val AFFIRMATION_REWRITE_MAX_CHANCE = 0.20
 
+        private const val POLICY_FLAG_INPUT_REDACTION = "enable_input_redaction"
+
+        /**
+         * Emergency safety switch for live typing UX.
+         * When false, dictionary/grammar/honorific inline rewrites are disabled.
+         */
+        private const val ENABLE_INLINE_TEXT_REWRITES = false
+
         /**
          * Grammar correction rules as (pattern → replacement) pairs.
          * Applied AFTER text dictionary replacements to fix agreement errors.
@@ -472,6 +480,11 @@ class ToneEnforcementService : AccessibilityService() {
             val currentText = node.text?.toString() ?: return
             if (currentText.isBlank()) return
 
+            val editingAwayFromEnd = isEditingAwayFromTextEnd(event, node, currentText)
+            if (editingAwayFromEnd) {
+                Log.d(TAG, "Skipping correction while user is editing mid-text")
+            }
+
             val now = System.currentTimeMillis()
             if (currentText == lastAppliedReplacementText &&
                 (now - lastAppliedReplacementAt) <= REPLACEMENT_ECHO_WINDOW_MS
@@ -492,47 +505,49 @@ class ToneEnforcementService : AccessibilityService() {
                 return
             }
 
-            // ---- Contextual honorific rewrite --------------------------------------
-            HonorificManager
-                .rewriteForContext(applicationContext, currentPackage, currentText)
-                ?.takeIf { it != currentText }
-                ?.let { rewritten ->
-                    scheduleReplacement(rewritten)
+            if (!editingAwayFromEnd && ENABLE_INLINE_TEXT_REWRITES) {
+                // ---- Contextual honorific rewrite --------------------------------------
+                HonorificManager
+                    .rewriteForContext(applicationContext, currentPackage, currentText)
+                    ?.takeIf { it != currentText }
+                    ?.let { rewritten ->
+                        scheduleReplacement(rewritten)
+                        return
+                    }
+
+                // ---- Discord Twitter/X link rewrite pass -------------------------------
+                val fxtwitterRewrite = applyDiscordTwitterLinkRewrite(currentPackage, currentText)
+                if (fxtwitterRewrite != currentText) {
+                    Log.i(TAG, "Discord link rewrite applied (x/twitter -> fxtwitter)")
+                    lastReplacementAcceptedAt = System.currentTimeMillis()
+                    scheduleReplacement(fxtwitterRewrite)
                     return
                 }
 
-            // ---- Discord Twitter/X link rewrite pass -------------------------------
-            val fxtwitterRewrite = applyDiscordTwitterLinkRewrite(currentPackage, currentText)
-            if (fxtwitterRewrite != currentText) {
-                Log.i(TAG, "Discord link rewrite applied (x/twitter -> fxtwitter)")
-                lastReplacementAcceptedAt = System.currentTimeMillis()
-                scheduleReplacement(fxtwitterRewrite)
-                return
-            }
+                // ---- Correction pass --------------------------------------------------
+                val rewritten = applyTextReplacementDictionary(currentText)
+                if (rewritten != currentText) {
+                    Log.i(TAG, "Text-replacement dictionary matched — applying rewrite")
+                    lastReplacementAcceptedAt = System.currentTimeMillis()
+                    applyReplacement(node, ensureTrailingSpace(rewritten))
+                    return
+                }
 
-            // ---- Correction pass --------------------------------------------------
-            val rewritten = applyTextReplacementDictionary(currentText)
-            if (rewritten != currentText) {
-                Log.i(TAG, "Text-replacement dictionary matched — applying rewrite")
-                lastReplacementAcceptedAt = System.currentTimeMillis()
-                applyReplacement(node, ensureTrailingSpace(rewritten))
-                return
-            }
+                // ---- Grammar correction pass -------------------------------------------
+                val grammarCorrected = postProcessGrammar(currentPackage, currentText)
+                if (grammarCorrected != currentText) {
+                    Log.i(TAG, "Grammar error detected and corrected")
+                    applyReplacement(node, grammarCorrected)
+                    return
+                }
 
-            // ---- Grammar correction pass --------------------------------------------------
-            val grammarCorrected = postProcessGrammar(currentPackage, currentText)
-            if (grammarCorrected != currentText) {
-                Log.i(TAG, "Grammar error detected and corrected")
-                applyReplacement(node, grammarCorrected)
-                return
-            }
-
-            // ---- Optional negation -> affirmation pass ---------------------------
-            val affirmativeRewrite = applyOptionalAffirmativeRewrite(currentText)
-            if (affirmativeRewrite != currentText) {
-                Log.i(TAG, "Optional affirmation rewrite applied")
-                applyReplacement(node, affirmativeRewrite)
-                return
+                // ---- Optional negation -> affirmation pass ---------------------------
+                val affirmativeRewrite = applyOptionalAffirmativeRewrite(currentText)
+                if (affirmativeRewrite != currentText) {
+                    Log.i(TAG, "Optional affirmation rewrite applied")
+                    applyReplacement(node, affirmativeRewrite)
+                    return
+                }
             }
 
             // ---- Dictionary bypass detection (soft mode only) ----
@@ -555,6 +570,10 @@ class ToneEnforcementService : AccessibilityService() {
 
             val restricted = loadRestrictedVocabulary()
             if (restricted.isEmpty()) return
+            if (!isTextReplacementPolicyFlagEnabled(POLICY_FLAG_INPUT_REDACTION, true)) {
+                Log.d(TAG, "Restricted-word redaction disabled by text-replacement policy")
+                return
+            }
 
             val strictMode = strictToneModeEnabled
             val textLower  = currentText.lowercase()
@@ -595,6 +614,42 @@ class ToneEnforcementService : AccessibilityService() {
         } finally {
             node.recycle()
         }
+    }
+
+    /**
+     * Returns true when the user is editing away from the tail of the field.
+     *
+     * Replacing the full field while caret is in the middle tends to snap
+     * cursor/selection to the end in many apps, so we avoid enforcement until
+     * caret returns to the text end.
+     */
+    private fun isEditingAwayFromTextEnd(
+        event: AccessibilityEvent,
+        node: AccessibilityNodeInfo,
+        currentText: String,
+    ): Boolean {
+        val textLength = currentText.length
+        if (textLength <= 1) return false
+
+        val selectionStart = node.textSelectionStart
+        val selectionEnd = node.textSelectionEnd
+        if (selectionStart >= 0 && selectionEnd >= 0) {
+            val selectionTail = maxOf(selectionStart, selectionEnd)
+            if (selectionTail in 0 until textLength) {
+                return true
+            }
+        }
+
+        val fromIndex = event.fromIndex
+        val addedCount = event.addedCount
+        if (fromIndex >= 0 && addedCount >= 0) {
+            val changedTail = fromIndex + addedCount
+            if (changedTail < textLength) {
+                return true
+            }
+        }
+
+        return false
     }
 
     // ------------------------------------------------------------------
@@ -669,6 +724,28 @@ class ToneEnforcementService : AccessibilityService() {
     /** Returns `true` if [text] contains [word] as a whole word (regex boundary). */
     private fun containsWholeWord(text: String, word: String): Boolean =
         WORD_BOUNDARY_REGEX.format(Regex.escape(word)).toRegex().containsMatchIn(text)
+
+    private fun isTextReplacementPolicyFlagEnabled(flagKey: String, defaultValue: Boolean): Boolean {
+        val prefs = PreferenceManager.getDefaultSharedPreferences(applicationContext)
+        val policyJson = prefs.getString(FilterService.PREF_TEXT_REPLACEMENT_POLICY, null)
+            ?.takeIf { it.isNotBlank() }
+            ?: return defaultValue
+
+        return runCatching {
+            val root = JSONObject(policyJson)
+            if (!root.has(flagKey)) return@runCatching defaultValue
+            when (val raw = root.opt(flagKey)) {
+                is Boolean -> raw
+                is Number -> raw.toInt() != 0
+                is String -> when (raw.trim().lowercase()) {
+                    "true", "1", "yes", "on", "enabled" -> true
+                    "false", "0", "no", "off", "disabled" -> false
+                    else -> defaultValue
+                }
+                else -> defaultValue
+            }
+        }.getOrDefault(defaultValue)
+    }
 
     /**
      * Applies partner-configured regex dictionary rules from SharedPreferences.

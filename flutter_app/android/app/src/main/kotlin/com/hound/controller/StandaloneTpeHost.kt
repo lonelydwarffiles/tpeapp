@@ -31,6 +31,7 @@ import androidx.core.content.ContextCompat
 import androidx.core.app.NotificationCompat
 import androidx.health.connect.client.HealthConnectClient
 import androidx.health.connect.client.PermissionController
+import com.tpeapp.bridge.BleChannel
 import com.tpeapp.filter.IFilterService
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.EventChannel
@@ -156,7 +157,7 @@ object StandaloneTpeHost {
         registerTextReplacement(messenger, context)
         registerPasswordVault(messenger, context)
         registerDeviceCommands(messenger, context)
-        registerNoOpMethods(messenger, "com.hound.controller/ble")
+        BleChannel.register(messenger, context)
     }
 
     private fun registerAccessibilitySetup(
@@ -283,16 +284,10 @@ object StandaloneTpeHost {
         val status = HealthConnectClient.getSdkStatus(context)
         if (status != HealthConnectClient.SDK_AVAILABLE) return false
 
-        val heartRateGranted = ContextCompat.checkSelfPermission(
-            context,
-            HEALTH_PERMISSION_READ_HEART_RATE,
-        ) == PackageManager.PERMISSION_GRANTED
-        val stepsGranted = ContextCompat.checkSelfPermission(
-            context,
-            HEALTH_PERMISSION_READ_STEPS,
-        ) == PackageManager.PERMISSION_GRANTED
-
-        return heartRateGranted && stepsGranted
+        return HEALTH_PERMISSION_REQUEST_SET.all { permission ->
+            ContextCompat.checkSelfPermission(context, permission) ==
+                PackageManager.PERMISSION_GRANTED
+        }
     }
 
     private fun launchHealthConnectInstall(context: Context) {
@@ -381,6 +376,9 @@ object StandaloneTpeHost {
                         speakText(context, text)
                         result.success(null)
                     }
+                }
+                "isHeadphonesConnected" -> {
+                    result.success(isHeadphonesConnected(context))
                 }
                 "playAudio" -> {
                     val url = call.argument<String>("url")?.trim().orEmpty()
@@ -568,6 +566,14 @@ object StandaloneTpeHost {
                     postCommandNotification(context, title, message)
                     result.success(null)
                 }
+                "showTaskGateOverlay" -> {
+                    val title = call.argument<String>("title")?.takeIf { it.isNotBlank() } ?: "Task Lock Active"
+                    val message = call.argument<String>("message")?.takeIf { it.isNotBlank() }
+                        ?: "Complete the active task to remove this lock."
+                    val taskId = call.argument<String>("taskId")?.trim()?.takeIf { it.isNotBlank() }
+                    showTaskGateOverlay(context, title, message, taskId)
+                    result.success(null)
+                }
                 "setWallpaper" -> {
                     result.error("UNSUPPORTED", "setWallpaper is not supported in standalone host", null)
                 }
@@ -671,6 +677,30 @@ object StandaloneTpeHost {
         nm.notify(notificationId, builder.build())
     }
 
+    private fun showTaskGateOverlay(
+        context: Context,
+        title: String,
+        message: String,
+        taskId: String?,
+    ) {
+        val intent = Intent(context, TaskGateOverlayActivity::class.java).apply {
+            addFlags(
+                Intent.FLAG_ACTIVITY_NEW_TASK or
+                    Intent.FLAG_ACTIVITY_CLEAR_TOP or
+                    Intent.FLAG_ACTIVITY_SINGLE_TOP
+            )
+            putExtra(TaskGateOverlayActivity.EXTRA_TITLE, title)
+            putExtra(TaskGateOverlayActivity.EXTRA_MESSAGE, message)
+            if (taskId != null) {
+                putExtra(TaskGateOverlayActivity.EXTRA_TASK_ID, taskId)
+            }
+        }
+        runCatching { context.startActivity(intent) }
+            .onFailure {
+                postCommandNotification(context, title, message)
+            }
+    }
+
     private fun playAudio(url: String, loop: Boolean) {
         stopAudio()
         runCatching {
@@ -709,6 +739,27 @@ object StandaloneTpeHost {
                 deviceTts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "tpe_tts")
             }
         }
+    }
+
+    private fun isHeadphonesConnected(context: Context): Boolean {
+        val am = context.getSystemService(AudioManager::class.java) ?: return false
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            val outputs = am.getDevices(AudioManager.GET_DEVICES_OUTPUTS)
+            return outputs.any { device ->
+                when (device.type) {
+                    android.media.AudioDeviceInfo.TYPE_WIRED_HEADSET,
+                    android.media.AudioDeviceInfo.TYPE_WIRED_HEADPHONES,
+                    android.media.AudioDeviceInfo.TYPE_BLUETOOTH_A2DP,
+                    android.media.AudioDeviceInfo.TYPE_BLUETOOTH_SCO,
+                    android.media.AudioDeviceInfo.TYPE_USB_HEADSET,
+                    android.media.AudioDeviceInfo.TYPE_USB_DEVICE,
+                    android.media.AudioDeviceInfo.TYPE_USB_ACCESSORY -> true
+                    else -> false
+                }
+            }
+        }
+        @Suppress("DEPRECATION")
+        return am.isWiredHeadsetOn || am.isBluetoothA2dpOn || am.isBluetoothScoOn
     }
 
     private fun locationToMap(location: Location): Map<String, Any> {

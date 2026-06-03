@@ -26,8 +26,22 @@ class TextReplacementChannel {
   TextReplacementChannel._();
 
   static const _channel = MethodChannel('com.hound.controller/text_replacement');
+  static const List<String> _defaultBlockedPackages = <String>[
+    // Messages
+    'com.google.android.apps.messaging',
+    'com.android.messaging',
+    'com.samsung.android.messaging',
+    // Snapchat
+    'com.snapchat.android',
+    // Facebook Messenger
+    'com.facebook.orca',
+    // Google Search (Google app)
+    'com.google.android.googlequicksearchbox',
+  ];
   static const Map<String, dynamic> defaultPolicy = {
     'default_mode': 'auto',
+    'blocked_packages': _defaultBlockedPackages,
+    'blocked_package_prefixes': <String>[],
   };
 
   /// Built-in defaults for URL rewrite + self-reference normalization.
@@ -167,6 +181,9 @@ class TextReplacementChannel {
     mergedPolicy.putIfAbsent('default_mode', () => defaultPolicy['default_mode']);
     mergedPolicy.putIfAbsent('packages', () => <String, dynamic>{});
     mergedPolicy.putIfAbsent('package_prefixes', () => <String, dynamic>{});
+    // Keep the block scope intentionally narrow to these specific apps.
+    mergedPolicy['blocked_packages'] = List<String>.from(_defaultBlockedPackages);
+    mergedPolicy['blocked_package_prefixes'] = <String>[];
     await setPolicy(mergedPolicy);
   }
 }

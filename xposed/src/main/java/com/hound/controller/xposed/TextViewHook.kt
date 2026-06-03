@@ -33,6 +33,9 @@ object TextViewHook {
     private val PROTECTED_URL_REGEX = Regex(
         pattern = """(?i)\b(?:https?://|www\.)\S+|\b[a-z][a-z0-9+.-]{1,20}://\S+"""
     )
+    private val PROTECTED_BARE_DOMAIN_REGEX = Regex(
+        pattern = """(?i)\b(?:[a-z0-9-]+\.)+(?:com|net|org|io|dev|app|gg|xyz|tv|me|co|ai|edu|gov|mil|biz|info|us|uk|ca|au|de|fr|jp|cn|ru|br|in)(?:/\S*)?\b"""
+    )
     private val PROTECTED_EMAIL_REGEX = Regex(
         pattern = """(?i)\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b"""
     )
@@ -112,13 +115,14 @@ object TextViewHook {
             val currentText = runCatching { view.text }.getOrNull()
             if (currentText is Editable) return
             val packageName = MainHook.getProcessPackageName()
-            if (isPackageExcludedFromTextReplacement(packageName)) return
+            val policy = currentPolicy()
+            if (!policy.enableOnScreenReplacement) return
+            if (isPackageBlockedForTextReplacement(packageName, policy)) return
 
             val dict = currentDict() ?: return
             if (dict.isEmpty()) return
 
             val toneMode = currentToneMode()
-            val policy = currentPolicy()
             val modified = applyReplacements(
                 text = original,
                 dict = dict,
@@ -225,11 +229,87 @@ object TextViewHook {
                 }
             }
 
-            ReplacementPolicy(defaultMode, packageModes, prefixModes, neverReplaceWords)
+            val blockedPackages = linkedSetOf<String>()
+            obj.optJSONArray("blocked_packages")?.let { arr ->
+                for (i in 0 until arr.length()) {
+                    val token = arr.optString(i).trim().lowercase()
+                    if (token.isNotEmpty()) blockedPackages.add(token)
+                }
+            }
+            obj.optJSONArray("app_blocklist")?.let { arr ->
+                for (i in 0 until arr.length()) {
+                    val token = arr.optString(i).trim().lowercase()
+                    if (token.isNotEmpty()) blockedPackages.add(token)
+                }
+            }
+
+            val blockedPackagePrefixes = linkedSetOf<String>()
+            obj.optJSONArray("blocked_package_prefixes")?.let { arr ->
+                for (i in 0 until arr.length()) {
+                    val token = arr.optString(i).trim().lowercase()
+                    if (token.isNotEmpty()) blockedPackagePrefixes.add(token)
+                }
+            }
+            obj.optJSONArray("app_blocklist_prefixes")?.let { arr ->
+                for (i in 0 until arr.length()) {
+                    val token = arr.optString(i).trim().lowercase()
+                    if (token.isNotEmpty()) blockedPackagePrefixes.add(token)
+                }
+            }
+
+            val enableInputRedaction = parseBooleanFlag(
+                obj,
+                listOf("enable_input_redaction", "input_redaction_enabled"),
+                true,
+            )
+            val enableInlineAutocorrect = parseBooleanFlag(
+                obj,
+                listOf("enable_inline_autocorrect", "inline_autocorrect_enabled"),
+                true,
+            )
+            val enableOnScreenReplacement = parseBooleanFlag(
+                obj,
+                listOf(
+                    "enable_onscreen_replacement",
+                    "onscreen_replacement_enabled",
+                    "display_replacement_enabled",
+                ),
+                true,
+            )
+
+            ReplacementPolicy(
+                defaultMode = defaultMode,
+                packageModes = packageModes,
+                packagePrefixModes = prefixModes,
+                neverReplaceWords = neverReplaceWords,
+                blockedPackages = blockedPackages,
+                blockedPackagePrefixes = blockedPackagePrefixes,
+                enableInputRedaction = enableInputRedaction,
+                enableInlineAutocorrect = enableInlineAutocorrect,
+                enableOnScreenReplacement = enableOnScreenReplacement,
+            )
         }.getOrElse { e ->
             Log.w(TAG, "Failed to parse text-replacement policy JSON", e)
             ReplacementPolicy()
         }
+    }
+
+    private fun parseBooleanFlag(obj: JSONObject, keys: List<String>, defaultValue: Boolean): Boolean {
+        for (key in keys) {
+            if (!obj.has(key)) continue
+            val raw = obj.opt(key)
+            when (raw) {
+                is Boolean -> return raw
+                is Number -> return raw.toInt() != 0
+                is String -> {
+                    when (raw.trim().lowercase()) {
+                        "true", "1", "yes", "on", "enabled" -> return true
+                        "false", "0", "no", "off", "disabled" -> return false
+                    }
+                }
+            }
+        }
+        return defaultValue
     }
 
     // â”€â”€ Replacement with span preservation â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -288,6 +368,16 @@ object TextViewHook {
         val normalized = packageName.trim().lowercase()
         if (normalized.isEmpty()) return false
         return BLOCKED_TEXT_REPLACEMENT_PACKAGES.contains(normalized)
+    }
+
+    internal fun isPackageBlockedForTextReplacement(
+        packageName: String,
+        policy: ReplacementPolicy,
+    ): Boolean {
+        val normalized = packageName.trim().lowercase()
+        if (normalized.isEmpty()) return false
+        if (isPackageExcludedFromTextReplacement(normalized)) return true
+        return policy.isBlocked(normalized)
     }
 
     /**
@@ -376,6 +466,7 @@ object TextViewHook {
             regex.findAll(text).forEach { ranges.add(it.range) }
         }
         collect(PROTECTED_URL_REGEX)
+        collect(PROTECTED_BARE_DOMAIN_REGEX)
         collect(PROTECTED_EMAIL_REGEX)
         collect(PROTECTED_CODE_BLOCK_REGEX)
         collect(MARKDOWN_LINK_REGEX)
@@ -488,34 +579,11 @@ object TextViewHook {
     private fun postProcessGrammar(input: String): String {
         var out = input
 
-        // Keep a few domain-specific corrections that are common in replacement maps.
+        // Keep only tone-enforcement specific corrections.
         out = Regex("""\bthis mutt are\b""", RegexOption.IGNORE_CASE).replace(out, "this mutt is")
         out = Regex("""\bit are\b""", RegexOption.IGNORE_CASE).replace(out, "it is")
         out = Regex("""\bit\s+is\s+is\b""", RegexOption.IGNORE_CASE).replace(out, "it is")
-        out = Regex("""\b(these|those)\s+is\b""", RegexOption.IGNORE_CASE).replace(out) { m ->
-            "${m.groupValues[1]} are"
-        }
-        out = Regex("""\b(this|that)\s+are\b""", RegexOption.IGNORE_CASE).replace(out) { m ->
-            "${m.groupValues[1]} is"
-        }
-
-        // Normalize whitespace around punctuation and collapse accidental doubles.
-        out = Regex("""\s+([,.;:!?])""").replace(out, "$1")
-        out = Regex("""([,.;:!?])(?!\s|$)""").replace(out, "$1 ")
-        out = Regex("""[ ]{2,}""").replace(out, " ")
-
-        // Normalize standalone lowercase "i" pronoun.
-        out = Regex("""(?<=^|\s)i(?=\s|$|[,.!?;:])""").replace(out, "I")
-
-        // Capitalize sentence starts while preserving existing caps elsewhere.
-        out = Regex("""(^|[.!?]\s+)([a-z])""").replace(out) { m ->
-            val prefix = m.groupValues[1]
-            val letter = m.groupValues[2]
-            prefix + letter.uppercase()
-        }
-
-        // Final lightweight local NLP pass (no network / no heavy model).
-        out = LightweightTextNlp.enhance(out)
+        out = Regex("""\bits are\b""", RegexOption.IGNORE_CASE).replace(out, "it is")
         return out
     }
 
@@ -569,8 +637,22 @@ object TextViewHook {
         val packageModes: Map<String, PolicyMode> = emptyMap(),
         val packagePrefixModes: Map<String, PolicyMode> = emptyMap(),
         val neverReplaceWords: Set<String> = linkedSetOf("no", "it"),
+        val blockedPackages: Set<String> = emptySet(),
+        val blockedPackagePrefixes: Set<String> = emptySet(),
+        val enableInputRedaction: Boolean = true,
+        val enableInlineAutocorrect: Boolean = true,
+        val enableOnScreenReplacement: Boolean = true,
     ) {
+        fun isBlocked(packageName: String): Boolean {
+            if (blockedPackages.contains(packageName)) return true
+            for (prefix in blockedPackagePrefixes) {
+                if (packageName.startsWith(prefix)) return true
+            }
+            return false
+        }
+
         fun modeFor(packageName: String): PolicyMode {
+            if (isBlocked(packageName)) return PolicyMode.OFF
             packageModes[packageName]?.let { return it }
             for ((prefix, mode) in packagePrefixModes) {
                 if (packageName.startsWith(prefix)) return mode

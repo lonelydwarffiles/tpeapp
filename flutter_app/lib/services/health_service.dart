@@ -37,6 +37,25 @@ class HealthService {
     'BODY_TEMPERATURE',
   };
 
+  static const Set<String> _typeNameKeywords = <String>{
+    'HEART',
+    'RESPIRATORY',
+    'OXYGEN',
+    'SLEEP',
+    'STEP',
+    'DISTANCE',
+    'FLIGHT',
+    'FLOOR',
+    'CALORIE',
+    'ENERGY',
+    'WEIGHT',
+    'HEIGHT',
+    'BODY_FAT',
+    'TEMPERATURE',
+    'EXERCISE',
+    'VO2',
+  };
+
   static final List<HealthDataType> _types = _resolveSupportedTypes();
 
   static final List<HealthDataAccess> _permissions =
@@ -180,23 +199,34 @@ class HealthService {
     };
 
     final resolved = <HealthDataType>[];
-    for (final name in _preferredTypeNames) {
+    final seen = <String>{};
+
+    void addIfPresent(String name) {
       final type = byName[name];
-      if (type != null) {
-        resolved.add(type);
+      if (type == null) return;
+      if (!seen.add(name)) return;
+      resolved.add(type);
+    }
+
+    for (final name in _preferredTypeNames) {
+      addIfPresent(name);
+    }
+
+    for (final entry in byName.entries) {
+      if (seen.contains(entry.key)) continue;
+      final upper = entry.key.toUpperCase();
+      final isRelevant = _typeNameKeywords.any((keyword) => upper.contains(keyword));
+      if (isRelevant) {
+        seen.add(entry.key);
+        resolved.add(entry.value);
       }
     }
 
     if (resolved.isEmpty) {
-      final fallbackHeartRate = byName['HEART_RATE'];
-      final fallbackSteps = byName['STEPS'];
-      if (fallbackHeartRate != null) {
-        resolved.add(fallbackHeartRate);
-      }
-      if (fallbackSteps != null) {
-        resolved.add(fallbackSteps);
-      }
+      addIfPresent('HEART_RATE');
+      addIfPresent('STEPS');
     }
+
     return resolved;
   }
 

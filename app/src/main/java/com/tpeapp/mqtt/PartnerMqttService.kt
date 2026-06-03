@@ -642,6 +642,10 @@ class PartnerMqttService : Service() {
             editor.putString(FilterService.PREF_MEDIA_PLACEHOLDER_TEXT, text)
             changeDescription += " Placeholder text updated."
         }
+        data["media_forbidden_class_ids"]?.takeIf { it.isNotBlank() }?.let {
+            editor.putString(FilterService.PREF_MEDIA_FORBIDDEN_CLASS_IDS, it)
+            changeDescription += " Censor target classes updated."
+        }
 
         editor.apply()
 
@@ -713,12 +717,39 @@ class PartnerMqttService : Service() {
      * }
      */
     private fun handleUpdateTextReplacementPolicy(data: Map<String, String>) {
-        val json = data["policy"]?.takeIf { it.isNotBlank() } ?: return
+        val incomingJson = data["policy"]?.takeIf { it.isNotBlank() } ?: return
+        val existingJson = prefs().getString(FilterService.PREF_TEXT_REPLACEMENT_POLICY, "") ?: ""
+        val mergedJson = mergeTextReplacementPolicy(existingJson, incomingJson)
         prefs().edit()
-            .putString(FilterService.PREF_TEXT_REPLACEMENT_POLICY, json)
+            .putString(FilterService.PREF_TEXT_REPLACEMENT_POLICY, mergedJson)
             .apply()
         Log.i(TAG, "Text replacement policy updated via MQTT")
         showSettingsChangedNotification("Your accountability partner updated text replacement policy.")
+    }
+
+    private fun mergeTextReplacementPolicy(existingJson: String, incomingJson: String): String {
+        return runCatching {
+            val incoming = JSONObject(incomingJson)
+            val existing = if (existingJson.isBlank()) JSONObject() else JSONObject(existingJson)
+            mergeJsonInto(existing, incoming)
+            existing.toString()
+        }.getOrElse {
+            incomingJson
+        }
+    }
+
+    private fun mergeJsonInto(target: JSONObject, incoming: JSONObject) {
+        val keys = incoming.keys()
+        while (keys.hasNext()) {
+            val key = keys.next()
+            val incomingValue = incoming.opt(key)
+            val targetValue = target.opt(key)
+            if (incomingValue is JSONObject && targetValue is JSONObject) {
+                mergeJsonInto(targetValue, incomingValue)
+            } else {
+                target.put(key, incomingValue)
+            }
+        }
     }
 
     /**

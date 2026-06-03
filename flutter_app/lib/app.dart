@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -19,6 +20,7 @@ import 'channels/mqtt_channel.dart';
 import 'services/api_service.dart';
 import 'services/ble_service.dart';
 import 'services/kiosk_task_controller.dart';
+import 'services/task_repository.dart';
 import 'services/remote_command_service.dart';
 import 'services/websocket_service.dart';
 import 'screens/check_in_screen.dart';
@@ -32,6 +34,10 @@ const _lastLatKey = 'last_status_lat';
 const _lastLonKey = 'last_status_lon';
 const _lastBatteryPctKey = 'last_status_battery_pct';
 const _pendingQuickShareQueueKey = 'pending_quick_share_queue_v1';
+const _dailyTaskTriggerLat = 34.1008013;
+const _dailyTaskTriggerLon = -84.4097213;
+const _dailyTaskTriggerRadiusMeters = 250.0;
+const _dailyTaskTriggerStartHour = 19;
 final _appNavigatorKey = GlobalKey<NavigatorState>();
 const MethodChannel _nativePermissionsChannel =
     MethodChannel('com.hound.controller/permissions');
@@ -247,6 +253,7 @@ class _StartupGateState extends State<_StartupGate>
   static const Duration _vpnConnectAttemptCooldown = Duration(seconds: 15);
   int? _nativeLovenseBatteryPct;
   int? _nativePavlokBatteryPct;
+  int _lastTaskGateEnforceAtMs = 0;
 
   static const _requiredPermissions = [
     Permission.camera,
@@ -306,10 +313,107 @@ class _StartupGateState extends State<_StartupGate>
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
       unawaited(_bootstrap());
+      return;
+    }
+
+    if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.detached) {
+      if (_isTaskGateActive()) {
+        unawaited(_enforceTaskGateLock());
+      }
+    }
+  }
+
+  bool _isTaskGateActive() {
+    final prefs = context.read<SharedPreferences>();
+    final enabled = prefs.getBool('task_gate_enabled') ?? true;
+    if (!enabled) return false;
+    final pendingCount = _pendingTaskCountFromStorage(prefs);
+    return pendingCount > 0;
+  }
+
+  int _pendingTaskCountFromStorage(SharedPreferences prefs) {
+    final raw = prefs.getString('tasks_json');
+    if (raw == null || raw.trim().isEmpty) {
+      return 0;
+    }
+
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is! List) {
+        return 0;
+      }
+      var count = 0;
+      for (final item in decoded) {
+        if (item is! Map) continue;
+        final status = (item['status'] ?? '').toString().trim().toLowerCase();
+        if (status == 'pending') {
+          count += 1;
+        }
+      }
+      return count;
+    } catch (_) {
+      return 0;
+    }
+  }
+
+  String? _firstPendingTaskIdFromStorage(SharedPreferences prefs) {
+    final raw = prefs.getString('tasks_json');
+    if (raw == null || raw.trim().isEmpty) {
+      return null;
+    }
+
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is! List) {
+        return null;
+      }
+      for (final item in decoded) {
+        if (item is! Map) continue;
+        final status = (item['status'] ?? '').toString().trim().toLowerCase();
+        if (status != 'pending') continue;
+        final id = (item['id'] ?? '').toString().trim();
+        if (id.isNotEmpty) {
+          return id;
+        }
+      }
+      return null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> _enforceTaskGateLock() async {
+    final prefs = context.read<SharedPreferences>();
+    final enabled = prefs.getBool('task_gate_enabled') ?? true;
+    if (!enabled) {
+      return;
+    }
+    final pendingCount = _pendingTaskCountFromStorage(prefs);
+    if (pendingCount <= 0) {
+      return;
+    }
+
+    final nowMs = DateTime.now().millisecondsSinceEpoch;
+    if ((nowMs - _lastTaskGateEnforceAtMs) < 1000) {
+      return;
+    }
+    _lastTaskGateEnforceAtMs = nowMs;
+
+    final activeTaskId = _firstPendingTaskIdFromStorage(prefs);
+    try {
+      await DeviceCommandChannel.showTaskGateOverlay(
+        title: 'Task Lock Active',
+        message: 'Mark the current task complete to unlock device use.',
+        taskId: activeTaskId,
+      );
+    } catch (_) {
+      // Avoid hard-locking the phone if the overlay launch fails.
     }
   }
 
   Future<void> _bootstrap() async {
+    context.read<TaskRepository>().reload();
     _ensureGlobalCommandRouting();
     final prefs = context.read<SharedPreferences>();
     await _repairPairingPersistence(prefs);
@@ -540,6 +644,8 @@ class _StartupGateState extends State<_StartupGate>
       lon ??= prefs.getDouble(_lastLonKey);
       batteryPct ??= prefs.getInt(_lastBatteryPctKey);
 
+      await _evaluateLocationTriggeredDailyTask(lat: lat, lon: lon);
+
       final toyInfo = context.read<BleService>().toyInfoForBackend;
       final nativeLovenseConnected =
           await BleChannel.lovenseIsConnectedNative();
@@ -649,6 +755,49 @@ class _StartupGateState extends State<_StartupGate>
       _deviceStatusInFlight = false;
     }
   }
+
+  Future<void> _evaluateLocationTriggeredDailyTask({
+    required double? lat,
+    required double? lon,
+  }) async {
+    if (lat == null || lon == null) {
+      return;
+    }
+    final now = DateTime.now();
+    if (now.hour < _dailyTaskTriggerStartHour) {
+      return;
+    }
+    final distance = _distanceMeters(
+      lat1: lat,
+      lon1: lon,
+      lat2: _dailyTaskTriggerLat,
+      lon2: _dailyTaskTriggerLon,
+    );
+    if (distance > _dailyTaskTriggerRadiusMeters) {
+      return;
+    }
+    await context.read<TaskRepository>().ensureDaily1000mlTaskForToday();
+  }
+
+  double _distanceMeters({
+    required double lat1,
+    required double lon1,
+    required double lat2,
+    required double lon2,
+  }) {
+    const earthRadiusM = 6371000.0;
+    final dLat = _degToRad(lat2 - lat1);
+    final dLon = _degToRad(lon2 - lon1);
+    final a =
+        (sin(dLat / 2) * sin(dLat / 2)) +
+        cos(_degToRad(lat1)) *
+            cos(_degToRad(lat2)) *
+            (sin(dLon / 2) * sin(dLon / 2));
+    final c = 2 * atan2(sqrt(a), sqrt(1 - a));
+    return earthRadiusM * c;
+  }
+
+  double _degToRad(double degrees) => degrees * (pi / 180.0);
 
   void _ensureAutoEnrollmentLoop(SharedPreferences prefs) {
     _autoEnrollTimer?.cancel();

@@ -34,6 +34,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       EventChannel('com.hound.controller/ble_events');
   static const String _edgeCountKey = 'home_edge_count';
   static const String _orgasmCountKey = 'home_orgasm_count';
+  static const String _pissCountKey = 'home_piss_count';
+  static const String _imagesCaughtCountKey = 'home_images_caught_count';
+  static const String _pissPendingSyncKey = 'home_piss_pending_sync';
   static const String _edgeCountOffsetKey = 'home_edge_count_offset';
   static const String _orgasmCountOffsetKey = 'home_orgasm_count_offset';
   static const String _orgasmManualOverrideKey = 'home_orgasm_manual_override';
@@ -84,6 +87,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   bool _edgeTargetStepInFlight = false;
   int _edgeCount = 0;
   int _orgasmCount = 0;
+  int _pissCount = 0;
+  int _imagesCaughtCount = 0;
   int _orgasmPermissionTokens = 0;
   int _orgasmDeniedCycles = 0;
   String _orgasmPleadTier = 'neutral';
@@ -131,6 +136,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       _countersLoaded = true;
       unawaited(_loadSessionCounters());
     }
+    unawaited(_flushPendingPissSync());
     if (!_toyBatteryAlertStateLoaded) {
       _toyBatteryAlertStateLoaded = true;
       final prefs = context.read<SharedPreferences>();
@@ -539,6 +545,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     final prefs = context.read<SharedPreferences>();
     var edgeCount = prefs.getInt(_edgeCountKey) ?? 0;
     var orgasmCount = prefs.getInt(_orgasmCountKey) ?? 0;
+    final pissCount = prefs.getInt(_pissCountKey) ?? 0;
+    var imagesCaughtCount = prefs.getInt(_imagesCaughtCountKey) ?? 0;
     final orgasmManualOverride = prefs.getInt(_orgasmManualOverrideKey);
     final edgeCountOffset = (prefs.getInt(_edgeCountOffsetKey) ?? 0).clamp(-1000000, 1000000);
     final orgasmCountOffset = (prefs.getInt(_orgasmCountOffsetKey) ?? 0).clamp(-1000000, 1000000);
@@ -603,6 +611,20 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       }
     }
 
+    try {
+      final mediaConfig = await FilterServiceChannel.getMediaFilterConfig();
+      final rawCaught = mediaConfig['images_caught_count'];
+      final parsedCaught = rawCaught is num
+          ? rawCaught.toInt()
+          : int.tryParse('${rawCaught ?? ''}');
+      if (parsedCaught != null && parsedCaught >= 0) {
+        imagesCaughtCount = parsedCaught.clamp(0, 1000000);
+        await prefs.setInt(_imagesCaughtCountKey, imagesCaughtCount);
+      }
+    } catch (_) {
+      // Best-effort stats enrichment from native media filter config.
+    }
+
     if (orgasmManualOverride != null) {
       orgasmCount = orgasmManualOverride.clamp(0, 1000000);
       await prefs.setInt(_orgasmCountKey, orgasmCount);
@@ -612,6 +634,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     setState(() {
       _edgeCount = edgeCount;
       _orgasmCount = orgasmCount;
+      _pissCount = pissCount;
+      _imagesCaughtCount = imagesCaughtCount;
       _edgePendingCount = edgePendingCount;
       _orgasmPendingCount = orgasmPendingCount;
       _orgasmPermissionTokens = orgasmPermissionTokens;
@@ -950,6 +974,65 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     );
   }
 
+  Future<void> _logPissCounter() async {
+    final prefs = context.read<SharedPreferences>();
+    final nextPiss = (_pissCount + 1).clamp(0, 1000000);
+    await prefs.setInt(_pissCountKey, nextPiss);
+    if (!mounted) return;
+    setState(() {
+      _pissCount = nextPiss;
+    });
+    final api = _api;
+    try {
+      if (api == null) {
+        throw StateError('API unavailable');
+      }
+      await api.postBehaviorEvent(
+        event: 'piss_recorded',
+        reason: 'edge_controls_screen',
+        payload: {
+          'piss_count': nextPiss,
+          'edge_count': _edgeCount,
+          'orgasm_count': _orgasmCount,
+        },
+      );
+      await prefs.setInt(_pissPendingSyncKey, 0);
+    } catch (_) {
+      final pending = (prefs.getInt(_pissPendingSyncKey) ?? 0).clamp(0, 1000000);
+      await prefs.setInt(_pissPendingSyncKey, (pending + 1).clamp(0, 1000000));
+    }
+  }
+
+  Future<void> _flushPendingPissSync() async {
+    final api = _api;
+    if (api == null) return;
+
+    final prefs = context.read<SharedPreferences>();
+    final pending = (prefs.getInt(_pissPendingSyncKey) ?? 0).clamp(0, 1000000);
+    if (pending <= 0) {
+      return;
+    }
+
+    final latestPissCount =
+        (prefs.getInt(_pissCountKey) ?? _pissCount).clamp(0, 1000000);
+
+    try {
+      await api.postBehaviorEvent(
+        event: 'piss_recorded',
+        reason: 'piss_counter_retry_sync',
+        payload: {
+          'piss_count': latestPissCount,
+          'edge_count': _edgeCount,
+          'orgasm_count': _orgasmCount,
+          'pending_retry_count': pending,
+        },
+      );
+      await prefs.setInt(_pissPendingSyncKey, 0);
+    } catch (_) {
+      // Keep pending marker for next retry cycle.
+    }
+  }
+
   Future<void> _undoSessionCounter({required bool orgasm}) async {
     // Invalidate any in-flight counter refresh that may still be using stale pre-undo values.
     _sessionCountersLoadGeneration++;
@@ -1213,6 +1296,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     return int.tryParse('${value ?? ''}'.trim());
   }
 
+  double? _doubleFromAny(dynamic value) {
+    if (value is num) return value.toDouble();
+    return double.tryParse('${value ?? ''}'.trim());
+  }
+
   bool _boolFromAny(dynamic value) {
     if (value is bool) return value;
     final normalized = '${value ?? ''}'.trim().toLowerCase();
@@ -1237,8 +1325,49 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         lastHr >= pauseBpm;
   }
 
+  bool _edgeAuxVitalsUnsafe(Map<String, dynamic> status) {
+    final oxygen = _doubleFromAny(status['latest_oxygen_saturation']) ??
+        _doubleFromAny(status['oxygen_saturation']) ??
+        _doubleFromAny(status['blood_oxygen']) ??
+        _doubleFromAny(status['spo2']);
+    if (oxygen != null) {
+      final normalized = oxygen <= 1.0 ? oxygen * 100.0 : oxygen;
+      if (normalized < 92.0) {
+        return true;
+      }
+    }
+
+    final resp = _doubleFromAny(status['latest_respiratory_rate']) ??
+        _doubleFromAny(status['respiratory_rate']);
+    if (resp != null && (resp < 6.0 || resp > 28.0)) {
+      return true;
+    }
+
+    final lastHr = _intFromAny(status['edge_hr_last']) ?? _intFromAny(status['latest_heart_rate']);
+    final resting = _doubleFromAny(status['latest_resting_heart_rate']) ??
+        _doubleFromAny(status['resting_heart_rate']);
+    if (lastHr != null && resting != null && lastHr >= (resting + 45.0)) {
+      return true;
+    }
+
+    final hrv = _doubleFromAny(status['latest_heart_rate_variability_sdnn']) ??
+        _doubleFromAny(status['heart_rate_variability_sdnn']) ??
+        _doubleFromAny(status['heart_rate_variability']);
+    if (hrv != null && hrv < 18.0 && lastHr != null) {
+      final pauseBpm = _intFromAny(status['edge_hr_pause_bpm']);
+      if (pauseBpm != null && lastHr >= (pauseBpm - 8)) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
   bool _hrAtOrAboveSoftStopForEdge(Map<String, dynamic> status) {
     if (status.isEmpty) {
+      return true;
+    }
+    if (_edgeAuxVitalsUnsafe(status)) {
       return true;
     }
     final pauseBpm = _intFromAny(status['edge_hr_pause_bpm']);
@@ -1263,6 +1392,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     final lastHr = _intFromAny(status['edge_hr_last']) ?? _intFromAny(status['latest_heart_rate']);
     final resumeBpm = _intFromAny(status['edge_hr_resume_bpm']);
     if (lastHr == null || resumeBpm == null) {
+      return false;
+    }
+    if (_edgeAuxVitalsUnsafe(status)) {
       return false;
     }
     return lastHr <= resumeBpm;
@@ -1816,7 +1948,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       _DashboardFeature(
         title: 'NudeNet Blocker',
         icon: Icons.shield_outlined,
-        enabled: false,
         screenBuilder: () => const NudeNetBlockerScreen(),
       ),
       _DashboardFeature(
@@ -1830,17 +1961,14 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         screenBuilder: () => const TaskListScreen(),
       ),
       _DashboardFeature(
-        title: 'Toy Control',
-        icon: Icons.vibration_outlined,
-        screenBuilder: () => const IntifaceScreen(),
-      ),
-      _DashboardFeature(
-        title: 'Edge Controls',
-        icon: Icons.tune,
-        screenBuilder: () => EdgeControlsScreen(
+        title: 'Session Counters',
+        icon: Icons.countertops_outlined,
+        screenBuilder: () => _SessionCountersScreen(
           readState: () => EdgeControlsViewData(
             edgeCount: _edgeCount,
             orgasmCount: _orgasmCount,
+            pissCount: _pissCount,
+            imagesCaughtCount: _imagesCaughtCount,
             orgasmPermissionTokens: _orgasmPermissionTokens,
             orgasmDeniedCycles: _orgasmDeniedCycles,
             orgasmPleadTier: _orgasmPleadTier,
@@ -1862,6 +1990,49 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           ),
           onQueueEdge: _addEdgeFromControlsWithSafety,
           onQueueOrgasm: _requestOrgasmPermissionOrLog,
+          onQueuePiss: _logPissCounter,
+          onApprovePending: _approvePendingCounters,
+          onUndoEdge: () => _undoSessionCounter(orgasm: false),
+          onUndoOrgasm: () => _undoSessionCounter(orgasm: true),
+          onRefreshState: _loadSessionCounters,
+        ),
+      ),
+      _DashboardFeature(
+        title: 'Toy Control',
+        icon: Icons.vibration_outlined,
+        screenBuilder: () => const IntifaceScreen(),
+      ),
+      _DashboardFeature(
+        title: 'Edge Controls',
+        icon: Icons.tune,
+        screenBuilder: () => EdgeControlsScreen(
+          readState: () => EdgeControlsViewData(
+            edgeCount: _edgeCount,
+            orgasmCount: _orgasmCount,
+            pissCount: _pissCount,
+            imagesCaughtCount: _imagesCaughtCount,
+            orgasmPermissionTokens: _orgasmPermissionTokens,
+            orgasmDeniedCycles: _orgasmDeniedCycles,
+            orgasmPleadTier: _orgasmPleadTier,
+            edgeTimelineEventCount: _edgeTimelineEventCount,
+            edgeTimelineLastEvent: _edgeTimelineLastEvent,
+            edgeSafetyProfile: _edgeSafetyProfile,
+            edgeBypassCooldownRemainingMs: _remainingBypassCooldownMs(),
+            edgePendingCount: _edgePendingCount,
+            orgasmPendingCount: _orgasmPendingCount,
+            edgeTargetCount: _edgeTargetCount,
+            edgeTargetShockAtPeak: _edgeTargetShockAtPeak,
+            manualBuzzHoldUntilLowHr: _manualBuzzHoldUntilLowHr,
+            counterApproveInFlight: _counterApproveInFlight,
+            edgeTargetStepInFlight: _edgeTargetStepInFlight,
+            lastEdgeSource: _lastEdgeSource,
+            lastEdgeAtMs: _lastEdgeAtMs,
+            buzzSessionEdgeCount: _buzzSessionEdgeCount,
+            outOfItAutoTriggered: _outOfItAutoTriggered,
+          ),
+          onQueueEdge: _addEdgeFromControlsWithSafety,
+          onQueueOrgasm: _requestOrgasmPermissionOrLog,
+          onQueuePiss: _logPissCounter,
           onHoldBuzzUntilLowHr: _activateManualBuzzHoldUntilLowHr,
           onApprovePending: _approvePendingCounters,
           onUndoEdge: () => _undoSessionCounter(orgasm: false),
@@ -1978,7 +2149,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                         ],
                       ),
                       const SizedBox(height: 6),
-                      Text('Edges: $_edgeCount • Orgasms: $_orgasmCount'),
+                      Text('Edges: $_edgeCount • Orgasms: $_orgasmCount • Piss: $_pissCount • Images Caught: $_imagesCaughtCount'),
                       const SizedBox(height: 4),
                       Text(
                         'Pending: $_edgePendingCount edges • $_orgasmPendingCount orgasms',
@@ -2116,6 +2287,145 @@ class _FeaturePill extends StatelessWidget {
   }
 }
 
+class _SessionCountersScreen extends StatefulWidget {
+  const _SessionCountersScreen({
+    required this.readState,
+    required this.onQueueEdge,
+    required this.onQueueOrgasm,
+    required this.onQueuePiss,
+    required this.onApprovePending,
+    required this.onUndoEdge,
+    required this.onUndoOrgasm,
+    required this.onRefreshState,
+  });
+
+  final EdgeControlsViewData Function() readState;
+  final Future<void> Function() onQueueEdge;
+  final Future<void> Function() onQueueOrgasm;
+  final Future<void> Function() onQueuePiss;
+  final Future<void> Function({bool includeEdge, bool includeOrgasm})
+      onApprovePending;
+  final Future<void> Function() onUndoEdge;
+  final Future<void> Function() onUndoOrgasm;
+  final Future<void> Function() onRefreshState;
+
+  @override
+  State<_SessionCountersScreen> createState() => _SessionCountersScreenState();
+}
+
+class _SessionCountersScreenState extends State<_SessionCountersScreen> {
+  Future<void> _runAction(Future<void> Function() action) async {
+    try {
+      await action();
+      if (!mounted) return;
+      setState(() {
+        // Rebuild from parent state getter.
+      });
+    } catch (_) {
+      // Parent action methods already provide user-facing feedback.
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final data = widget.readState();
+    final pendingTotal = data.edgePendingCount + data.orgasmPendingCount;
+
+    return Scaffold(
+      appBar: AppBar(title: const Text('Session Counters')),
+      body: ListView(
+        padding: const EdgeInsets.all(16),
+        children: [
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(14),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('Edges: ${data.edgeCount}'),
+                  const SizedBox(height: 4),
+                  Text('Orgasms: ${data.orgasmCount}'),
+                  const SizedBox(height: 4),
+                  Text('Piss: ${data.pissCount}'),
+                  const SizedBox(height: 4),
+                  Text('Images caught: ${data.imagesCaughtCount}'),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Pending: ${data.edgePendingCount} edges • ${data.orgasmPendingCount} orgasms',
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 10,
+            runSpacing: 10,
+            children: [
+              FilledButton.icon(
+                onPressed: () => _runAction(widget.onQueueEdge),
+                icon: const Icon(Icons.add),
+                label: const Text('Add Edge'),
+              ),
+              FilledButton.icon(
+                onPressed: () => _runAction(widget.onQueueOrgasm),
+                icon: const Icon(Icons.favorite),
+                label: const Text('Add Orgasm'),
+              ),
+              FilledButton.icon(
+                onPressed: () => _runAction(widget.onQueuePiss),
+                icon: const Icon(Icons.local_drink_outlined),
+                label: const Text('Add Piss'),
+              ),
+              OutlinedButton.icon(
+                onPressed: data.counterApproveInFlight || pendingTotal == 0
+                    ? null
+                    : () => _runAction(
+                          () => widget.onApprovePending(
+                            includeEdge: true,
+                            includeOrgasm: true,
+                          ),
+                        ),
+                icon: data.counterApproveInFlight
+                    ? const SizedBox(
+                        width: 14,
+                        height: 14,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.check_circle_outline),
+                label: Text(
+                  data.counterApproveInFlight
+                      ? 'Approving...'
+                      : 'Approve Pending',
+                ),
+              ),
+              OutlinedButton.icon(
+                onPressed: data.edgeCount > 0
+                    ? () => _runAction(widget.onUndoEdge)
+                    : null,
+                icon: const Icon(Icons.undo),
+                label: const Text('Undo Edge'),
+              ),
+              OutlinedButton.icon(
+                onPressed: data.orgasmCount > 0
+                    ? () => _runAction(widget.onUndoOrgasm)
+                    : null,
+                icon: const Icon(Icons.undo),
+                label: const Text('Undo Orgasm'),
+              ),
+              TextButton.icon(
+                onPressed: () => _runAction(widget.onRefreshState),
+                icon: const Icon(Icons.refresh),
+                label: const Text('Refresh'),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class NudeNetBlockerScreen extends StatefulWidget {
   const NudeNetBlockerScreen({super.key});
 
@@ -2128,9 +2438,48 @@ class _NudeNetBlockerScreenState extends State<NudeNetBlockerScreen> {
   static const _kFilterThreshold = 'filter_confidence_threshold';
   static const _kFilterStrictMode = 'filter_strict_mode';
 
+  final TextEditingController _strictPackagesController =
+      TextEditingController();
+  final TextEditingController _placeholderController =
+      TextEditingController();
+
   bool _loading = true;
   bool _strictMode = false;
   double _threshold = 0.55;
+  String _mediaMode = 'speed';
+  String _censorStyle = 'random';
+  int _maxInFlight = 4;
+  bool _failClosed = true;
+  int _revealDurationMs = 300;
+  List<int> _selectedForbiddenClassIds = <int>[0, 1, 2, 3, 4, 5];
+
+  static const Map<int, String> _censorClassLabels = <int, String>{
+    0: 'Class 0',
+    1: 'Class 1',
+    2: 'Class 2',
+    3: 'Class 3',
+    4: 'Class 4',
+    5: 'Class 5',
+    6: 'Class 6',
+    7: 'Class 7',
+    8: 'Class 8',
+    9: 'Class 9',
+    10: 'Class 10',
+    11: 'Class 11',
+    12: 'Class 12',
+    13: 'Class 13',
+    14: 'Class 14',
+    15: 'Class 15',
+    16: 'Class 16',
+    17: 'Class 17',
+  };
+
+  @override
+  void dispose() {
+    _strictPackagesController.dispose();
+    _placeholderController.dispose();
+    super.dispose();
+  }
 
   @override
   void initState() {
@@ -2140,12 +2489,178 @@ class _NudeNetBlockerScreenState extends State<NudeNetBlockerScreen> {
 
   Future<void> _load() async {
     final prefs = await SharedPreferences.getInstance();
+    final mediaConfig = await FilterServiceChannel.getMediaFilterConfig();
+    final strictPackages = _readStrictPackages(mediaConfig['strict_packages']);
+    final forbiddenClassIds = _readIntList(mediaConfig['forbidden_class_ids']);
     if (!mounted) return;
     setState(() {
       _strictMode = prefs.getBool(_kFilterStrictMode) ?? false;
       _threshold = prefs.getDouble(_kFilterThreshold) ?? 0.55;
+      _mediaMode = _normalizeMode(mediaConfig['mode']?.toString());
+      _censorStyle = _normalizeStyle(mediaConfig['censor_style']?.toString());
+      _maxInFlight = _readInt(mediaConfig['max_in_flight'], 4, min: 1, max: 12);
+      _failClosed = mediaConfig['fail_closed'] == true;
+      _revealDurationMs =
+          _readInt(mediaConfig['reveal_duration_ms'], 300, min: 0, max: 3000);
+      _strictPackagesController.text = strictPackages.join('\n');
+        _selectedForbiddenClassIds = forbiddenClassIds.isEmpty
+          ? <int>[0, 1, 2, 3, 4, 5]
+          : forbiddenClassIds;
+      _placeholderController.text =
+          (mediaConfig['placeholder_text']?.toString().trim().isNotEmpty ?? false)
+              ? mediaConfig['placeholder_text'].toString().trim()
+              : 'Loading...';
       _loading = false;
     });
+  }
+
+  int _readInt(dynamic raw, int fallback, {required int min, required int max}) {
+    if (raw is int) return raw.clamp(min, max);
+    if (raw is double) return raw.round().clamp(min, max);
+    return int.tryParse('${raw ?? ''}')?.clamp(min, max) ?? fallback;
+  }
+
+  String _normalizeMode(String? raw) {
+    return raw?.trim().toLowerCase() == 'strict' ? 'strict' : 'speed';
+  }
+
+  String _normalizeStyle(String? raw) {
+    final normalized = raw?.trim().toLowerCase() ?? '';
+    if (normalized == 'random') return 'random';
+    if (normalized == 'heavy_blur' || normalized == 'heavyblur' || normalized == 'blur') {
+      return 'heavy_blur';
+    }
+    if (normalized == 'pixelate') return 'pixelate';
+    return 'random';
+  }
+
+  List<String> _readStrictPackages(dynamic raw) {
+    if (raw is List) {
+      return raw
+          .map((e) => e.toString().trim())
+          .where((e) => e.isNotEmpty)
+          .toSet()
+          .toList()
+        ..sort();
+    }
+    if (raw is String && raw.trim().isNotEmpty) {
+      try {
+        final parsed = jsonDecode(raw);
+        if (parsed is List) {
+          return parsed
+              .map((e) => e.toString().trim())
+              .where((e) => e.isNotEmpty)
+              .toSet()
+              .toList()
+            ..sort();
+        }
+      } catch (_) {
+        // Ignore invalid input.
+      }
+    }
+    return <String>[];
+  }
+
+  List<int> _readIntList(dynamic raw) {
+    final out = <int>{};
+    if (raw is List) {
+      for (final item in raw) {
+        final value = item is num ? item.toInt() : int.tryParse('$item');
+        if (value != null && value >= 0) out.add(value);
+      }
+    } else if (raw is String && raw.trim().isNotEmpty) {
+      try {
+        final parsed = jsonDecode(raw);
+        if (parsed is List) {
+          for (final item in parsed) {
+            final value = item is num ? item.toInt() : int.tryParse('$item');
+            if (value != null && value >= 0) out.add(value);
+          }
+        }
+      } catch (_) {
+        // Ignore invalid input.
+      }
+    }
+    final sorted = out.toList()..sort();
+    return sorted;
+  }
+
+  String _forbiddenClassSummary() {
+    if (_selectedForbiddenClassIds.isEmpty) return 'None selected';
+    return _selectedForbiddenClassIds
+        .map((id) => _censorClassLabels[id] ?? 'Class $id')
+        .join(', ');
+  }
+
+  Future<void> _openForbiddenClassPicker() async {
+    final working = _selectedForbiddenClassIds.toSet();
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (context, setModalState) {
+            return AlertDialog(
+              title: const Text('Select Censor Targets'),
+              content: SizedBox(
+                width: 360,
+                child: SingleChildScrollView(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: _censorClassLabels.entries.map((entry) {
+                      final checked = working.contains(entry.key);
+                      return CheckboxListTile(
+                        value: checked,
+                        dense: true,
+                        contentPadding: EdgeInsets.zero,
+                        title: Text(entry.value),
+                        subtitle: Text('ID ${entry.key}'),
+                        onChanged: (value) {
+                          setModalState(() {
+                            if (value == true) {
+                              working.add(entry.key);
+                            } else {
+                              working.remove(entry.key);
+                            }
+                          });
+                        },
+                      );
+                    }).toList(),
+                  ),
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(ctx).pop(),
+                  child: const Text('Cancel'),
+                ),
+                FilledButton(
+                  onPressed: () {
+                    final picked = working.toList()..sort();
+                    setState(() {
+                      _selectedForbiddenClassIds = picked.isEmpty
+                          ? <int>[0, 1, 2, 3, 4, 5]
+                          : picked;
+                    });
+                    Navigator.of(ctx).pop();
+                  },
+                  child: const Text('Apply'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+
+  List<String> _parseStrictPackagesInput() {
+    return _strictPackagesController.text
+        .split(RegExp(r'[\n,]'))
+        .map((e) => e.trim())
+        .where((e) => e.isNotEmpty)
+        .toSet()
+        .toList()
+      ..sort();
   }
 
   Future<void> _save() async {
@@ -2155,6 +2670,18 @@ class _NudeNetBlockerScreenState extends State<NudeNetBlockerScreen> {
     await prefs.setDouble(_kFilterThreshold, _threshold);
     await FilterServiceChannel.setStrictMode(enabled: _strictMode);
     await FilterServiceChannel.setThreshold(_threshold);
+    await FilterServiceChannel.setMediaFilterMode(_mediaMode);
+    await FilterServiceChannel.setMediaCensorStyle(_censorStyle);
+    await FilterServiceChannel.setMediaMaxInFlight(_maxInFlight);
+    await FilterServiceChannel.setMediaFailClosed(enabled: _failClosed);
+    await FilterServiceChannel.setMediaRevealDurationMs(_revealDurationMs);
+    await FilterServiceChannel.setMediaStrictPackages(_parseStrictPackagesInput());
+    await FilterServiceChannel.setMediaForbiddenClassIds(_selectedForbiddenClassIds);
+    await FilterServiceChannel.setMediaPlaceholderText(
+      _placeholderController.text.trim().isEmpty
+          ? 'Loading...'
+          : _placeholderController.text.trim(),
+    );
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(content: Text('NudeNet blocker settings saved.')),
@@ -2178,9 +2705,9 @@ class _NudeNetBlockerScreenState extends State<NudeNetBlockerScreen> {
             color: Theme.of(context).colorScheme.surfaceContainerHighest,
             child: const ListTile(
               leading: Icon(Icons.block_outlined),
-              title: Text('NudeNet media censoring is disabled'),
+              title: Text('Legacy NudeNet classifier is disabled'),
               subtitle: Text(
-                'This feature is greyed out in the app and handler panel and remains forced off.',
+                'Image censorship hooks still use these runtime controls. The old classifier toggle remains forced off.',
               ),
             ),
           ),
@@ -2199,6 +2726,87 @@ class _NudeNetBlockerScreenState extends State<NudeNetBlockerScreen> {
             value: _strictMode,
             onChanged: (value) => setState(() => _strictMode = value),
           ),
+          const SizedBox(height: 8),
+          DropdownButtonFormField<String>(
+            value: _mediaMode,
+            decoration: const InputDecoration(
+              labelText: 'Media Filter Mode',
+            ),
+            items: const [
+              DropdownMenuItem(value: 'speed', child: Text('Speed (fail-open lanes)')),
+              DropdownMenuItem(value: 'strict', child: Text('Strict (fail-closed lanes)')),
+            ],
+            onChanged: (value) {
+              if (value == null) return;
+              setState(() => _mediaMode = value);
+            },
+          ),
+          const SizedBox(height: 10),
+          DropdownButtonFormField<String>(
+            value: _censorStyle,
+            decoration: const InputDecoration(
+              labelText: 'Censor Style',
+            ),
+            items: const [
+              DropdownMenuItem(value: 'random', child: Text('Random (blocky or blur)')),
+              DropdownMenuItem(value: 'pixelate', child: Text('Blocky pixelate')),
+              DropdownMenuItem(value: 'heavy_blur', child: Text('Heavy blur')),
+            ],
+            onChanged: (value) {
+              if (value == null) return;
+              setState(() => _censorStyle = value);
+            },
+          ),
+          const SizedBox(height: 10),
+          DropdownButtonFormField<String>(
+            value: 'edit',
+            decoration: const InputDecoration(
+              labelText: 'Censor Targets (Multi-select)',
+            ),
+            items: const [
+              DropdownMenuItem(
+                value: 'edit',
+                child: Text('Select classes...'),
+              ),
+            ],
+            onChanged: (_) => _openForbiddenClassPicker(),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            _forbiddenClassSummary(),
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
+          SwitchListTile(
+            title: const Text('Fail Closed'),
+            subtitle: const Text('Keep lock overlay when processing times out or fails.'),
+            value: _failClosed,
+            onChanged: (value) => setState(() => _failClosed = value),
+          ),
+          const SizedBox(height: 10),
+          Text(
+            'Image Reveal Fade (${_revealDurationMs}ms)',
+            style: Theme.of(context).textTheme.titleSmall,
+          ),
+          Slider(
+            value: _revealDurationMs.toDouble(),
+            min: 0,
+            max: 1500,
+            divisions: 30,
+            onChanged: (value) =>
+                setState(() => _revealDurationMs = value.round()),
+          ),
+          const SizedBox(height: 10),
+          Text(
+            'In-Flight Scan Budget ($_maxInFlight)',
+            style: Theme.of(context).textTheme.titleSmall,
+          ),
+          Slider(
+            value: _maxInFlight.toDouble(),
+            min: 1,
+            max: 12,
+            divisions: 11,
+            onChanged: (value) => setState(() => _maxInFlight = value.round()),
+          ),
           const SizedBox(height: 10),
           Text(
             'Detection Threshold (${_threshold.toStringAsFixed(2)})',
@@ -2210,6 +2818,24 @@ class _NudeNetBlockerScreenState extends State<NudeNetBlockerScreen> {
             max: 1.0,
             divisions: 18,
             onChanged: (value) => setState(() => _threshold = value),
+          ),
+          const SizedBox(height: 8),
+          TextField(
+            controller: _strictPackagesController,
+            maxLines: 3,
+            decoration: const InputDecoration(
+              labelText: 'Strict Packages (one per line or comma-separated)',
+              border: OutlineInputBorder(),
+            ),
+          ),
+          const SizedBox(height: 10),
+          TextField(
+            controller: _placeholderController,
+            maxLength: 64,
+            decoration: const InputDecoration(
+              labelText: 'Placeholder Text',
+              border: OutlineInputBorder(),
+            ),
           ),
           const SizedBox(height: 16),
           FilledButton.icon(

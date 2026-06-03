@@ -82,6 +82,9 @@ dependencies {
     implementation(libs.tflite.task.vision)
     implementation(libs.tflite.metadata)
 
+    // ONNX Runtime (YOLOv8 local selective-censor pipeline)
+    implementation(libs.onnxruntime.android)
+
     // Image-loading (needed for the xposed module target apps; also used in demo UI)
     implementation(libs.glide)
     kapt(libs.glide.compiler)

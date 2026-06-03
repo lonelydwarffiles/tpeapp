@@ -89,11 +89,47 @@ object FilterServiceChannel {
                         .apply()
                     result.success(null)
                 }
+                "setMediaForbiddenClassIds" -> {
+                    val classIds = call.argument<List<Int>>("classIds") ?: emptyList()
+                    val arr = org.json.JSONArray()
+                    classIds
+                        .map { it.coerceAtLeast(0) }
+                        .distinct()
+                        .forEach { arr.put(it) }
+                    PreferenceManager.getDefaultSharedPreferences(ctx).edit()
+                        .putString(FilterService.PREF_MEDIA_FORBIDDEN_CLASS_IDS, arr.toString())
+                        .apply()
+                    result.success(null)
+                }
                 "setMediaMaxInFlight" -> {
                     val maxInFlight = call.argument<Int>("maxInFlight")
                         ?: return@setMethodCallHandler result.error("INVALID", "maxInFlight required", null)
                     PreferenceManager.getDefaultSharedPreferences(ctx).edit()
                         .putInt(FilterService.PREF_MEDIA_MAX_IN_FLIGHT, maxInFlight.coerceIn(1, 12))
+                        .apply()
+                    result.success(null)
+                }
+                "setMediaFailClosed" -> {
+                    val enabled = call.argument<Boolean>("enabled")
+                        ?: return@setMethodCallHandler result.error("INVALID", "enabled required", null)
+                    PreferenceManager.getDefaultSharedPreferences(ctx).edit()
+                        .putBoolean(FilterService.PREF_MEDIA_FAIL_CLOSED, enabled)
+                        .apply()
+                    result.success(null)
+                }
+                "setMediaRevealDurationMs" -> {
+                    val durationMs = call.argument<Int>("durationMs")
+                        ?: return@setMethodCallHandler result.error("INVALID", "durationMs required", null)
+                    PreferenceManager.getDefaultSharedPreferences(ctx).edit()
+                        .putInt(FilterService.PREF_MEDIA_REVEAL_DURATION_MS, durationMs.coerceIn(0, 3000))
+                        .apply()
+                    result.success(null)
+                }
+                "setMediaPlaceholderText" -> {
+                    val placeholder = call.argument<String>("placeholder")
+                        ?: return@setMethodCallHandler result.error("INVALID", "placeholder required", null)
+                    PreferenceManager.getDefaultSharedPreferences(ctx).edit()
+                        .putString(FilterService.PREF_MEDIA_PLACEHOLDER_TEXT, placeholder.trim().take(64))
                         .apply()
                     result.success(null)
                 }
@@ -131,7 +167,13 @@ object FilterServiceChannel {
                         put("strict_packages", org.json.JSONArray(
                             prefs.getString(FilterService.PREF_MEDIA_STRICT_PACKAGES, "[]") ?: "[]"
                         ))
+                        put("forbidden_class_ids", org.json.JSONArray(
+                            prefs.getString(FilterService.PREF_MEDIA_FORBIDDEN_CLASS_IDS, "[0,1,2,3,4,5]") ?: "[0,1,2,3,4,5]"
+                        ))
                         put("max_in_flight", prefs.getInt(FilterService.PREF_MEDIA_MAX_IN_FLIGHT, 4).coerceIn(1, 12))
+                        put("images_caught_count", prefs.getInt(FilterService.PREF_MEDIA_IMAGES_CAUGHT_COUNT, 0).coerceIn(0, Int.MAX_VALUE))
+                        put("fail_closed", prefs.getBoolean(FilterService.PREF_MEDIA_FAIL_CLOSED, true))
+                        put("reveal_duration_ms", prefs.getInt(FilterService.PREF_MEDIA_REVEAL_DURATION_MS, 300).coerceIn(0, 3000))
                         put(
                             "placeholder_text",
                             prefs.getString(FilterService.PREF_MEDIA_PLACEHOLDER_TEXT, "Loading...") ?: "Loading..."

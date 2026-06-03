@@ -85,6 +85,10 @@ class RemoteCommand {
         return 'edge.bypass_cooldown.arm';
       case 'CLEAR_EDGE_BYPASS_COOLDOWN':
         return 'edge.bypass_cooldown.clear';
+      case 'DISCORD_BOT_NOTIFICATION_COMMAND':
+      case 'DISCORD_NOTIFICATION_COMMAND':
+      case 'BOT_NOTIFICATION_COMMAND':
+        return 'discord.bot.notification_command';
 
       // All other MQTT UPPERCASE actions are fully handled by
       // PartnerMqttService (Kotlin-native). Flutter maps them to

@@ -16,6 +16,7 @@ import '../models/remote_command.dart';
 import 'api_service.dart';
 import 'device_file_access_service.dart';
 import 'intiface_service.dart';
+import 'notification_buzz_service.dart';
 import 'screen_share_service.dart';
 
 typedef CheckInRequestHandler = Future<void> Function();
@@ -153,6 +154,9 @@ class RemoteCommandService {
           break;
         case 'edge.bypass_cooldown.clear':
           _lastTelemetry = await _handleEdgeBypassCooldownClear(command);
+          break;
+        case 'discord.bot.notification_command':
+          _lastTelemetry = await _handleDiscordBotNotificationCommand(command);
           break;
         default:
           await _ack(
@@ -1251,6 +1255,52 @@ class RemoteCommandService {
     };
     await RemoteControlChannel.setInjectionMode(mode);
     _onMessage?.call('Remote input mode set to $mode.');
+  }
+
+  Future<Map<String, dynamic>> _handleDiscordBotNotificationCommand(
+    RemoteCommand command,
+  ) async {
+    final raw = _requiredString(command.params, const [
+      'raw',
+      'message',
+      'text',
+      'content',
+      'command_text',
+    ]);
+    final packageName =
+        _stringValue(command.params, const ['package_name', 'packageName']) ??
+            'com.discord';
+    final messageId = _stringValue(command.params, const [
+      'discord_message_id',
+      'message_id',
+      'messageId',
+    ]);
+    final reactionEmoji = _stringValue(command.params, const [
+      'reaction_emoji',
+      'reactionEmoji',
+      'confirm_reaction',
+    ]);
+
+    final accepted = await NotificationBuzzService.instance.ingestExternalCommand(
+      raw: raw,
+      source: 'discord_bot',
+      packageName: packageName,
+      messageId: messageId,
+    );
+
+    _onMessage?.call(
+      accepted
+          ? 'Discord bot command accepted for buzz pipeline.'
+          : 'Discord bot command ignored by policy/dedupe.',
+    );
+
+    return {
+      'discord_bot_command_received': true,
+      'discord_command_accepted': accepted,
+      if (messageId != null) 'discord_message_id': messageId,
+      if (reactionEmoji != null) 'discord_reaction_emoji': reactionEmoji,
+      'package_name': packageName,
+    };
   }
 
   Future<void> _ack(

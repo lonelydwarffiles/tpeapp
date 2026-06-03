@@ -728,6 +728,189 @@
 				"activities"
 			],
 			"isBackground": false
+		},
+		{
+			"label": "probe-webhook-piss",
+			"type": "shell",
+			"command": "C:\\Windows\\System32\\curl.exe",
+			"args": [
+				"-sS",
+				"-i",
+				"-X",
+				"POST",
+				"https://mochii.live/api/tpe/webhook",
+				"-H",
+				"Content-Type: application/json",
+				"--data",
+				"{\"event\":\"piss_recorded\",\"reason\":\"debug_manual\",\"timestamp\":1234567890123,\"source\":\"copilot_debug\",\"piss_count\":777}"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "probe-webhook-piss-rest",
+			"type": "shell",
+			"command": "powershell",
+			"args": [
+				"-NoProfile",
+				"-NonInteractive",
+				"-Command",
+				"$payload = @{ event='piss_recorded'; reason='debug_manual'; timestamp=1234567890123; source='copilot_debug'; piss_count=777 } | ConvertTo-Json -Compress; try { $resp = Invoke-RestMethod -Uri 'https://mochii.live/api/tpe/webhook' -Method Post -ContentType 'application/json' -Body $payload -TimeoutSec 20; Write-Output 'STATUS=200'; $resp | ConvertTo-Json -Compress } catch { if ($_.Exception.Response) { Write-Output ('STATUS=' + [int]$_.Exception.Response.StatusCode.value__) } else { Write-Output ('ERR=' + $_.Exception.Message) } }"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "install-xposed-debug",
+			"type": "shell",
+			"command": ".\\gradlew.bat",
+			"args": [
+				":xposed:installDebug",
+				"--console=plain",
+				"--no-daemon"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "install-xposed-debug",
+			"type": "shell",
+			"command": ".\\gradlew.bat",
+			"args": [
+				":xposed:installDebug",
+				"--console=plain",
+				"--no-daemon"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "install-xposed-debug",
+			"type": "shell",
+			"command": ".\\gradlew.bat",
+			"args": [
+				":xposed:installDebug",
+				"--console=plain",
+				"--no-daemon"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "build-app-debug",
+			"type": "shell",
+			"command": ".\\gradlew.bat",
+			"args": [
+				":app:assembleDebug",
+				"--console=plain",
+				"--no-daemon"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "build-xposed-debug",
+			"type": "shell",
+			"command": ".\\gradlew.bat",
+			"args": [
+				":xposed:assembleDebug",
+				"--console=plain",
+				"--no-daemon"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "build-app-debug-recheck",
+			"type": "shell",
+			"command": ".\\gradlew.bat",
+			"args": [
+				":app:assembleDebug",
+				"--console=plain",
+				"--no-daemon"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "install-app-debug-direct",
+			"type": "shell",
+			"command": ".\\gradlew.bat",
+			"args": [
+				":app:installDebug",
+				"--console=plain",
+				"--no-daemon"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "install-xposed-debug-direct",
+			"type": "shell",
+			"command": ".\\gradlew.bat",
+			"args": [
+				":xposed:installDebug",
+				"--console=plain",
+				"--no-daemon"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "build-app-debug-settings-pass",
+			"type": "shell",
+			"command": ".\\gradlew.bat",
+			"args": [
+				":app:assembleDebug",
+				"--console=plain",
+				"--no-daemon"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "build-xposed-debug-settings-pass",
+			"type": "shell",
+			"command": ".\\gradlew.bat",
+			"args": [
+				":xposed:assembleDebug",
+				"--console=plain",
+				"--no-daemon"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "build-app-debug-images-caught-counter",
+			"type": "shell",
+			"command": ".\\gradlew.bat",
+			"args": [
+				":app:assembleDebug",
+				"--console=plain",
+				"--no-daemon"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "build-app-debug-censor-multiselect",
+			"type": "shell",
+			"command": ".\\gradlew.bat",
+			"args": [
+				":app:assembleDebug",
+				"--console=plain",
+				"--no-daemon"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "install-app-debug-censor-multiselect",
+			"type": "shell",
+			"command": ".\\gradlew.bat",
+			"args": [
+				":app:installDebug",
+				"--console=plain",
+				"--no-daemon"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "install-xposed-debug-censor-multiselect",
+			"type": "shell",
+			"command": ".\\gradlew.bat",
+			"args": [
+				":xposed:installDebug",
+				"--console=plain",
+				"--no-daemon"
+			],
+			"isBackground": false
 		}
 	]
 }

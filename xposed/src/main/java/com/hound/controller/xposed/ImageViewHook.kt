@@ -1,6 +1,7 @@
-﻿package com.hound.controller.xposed
+package com.hound.controller.xposed
 
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.ColorFilter
@@ -8,102 +9,64 @@ import android.graphics.Paint
 import android.graphics.PixelFormat
 import android.graphics.drawable.BitmapDrawable
 import android.graphics.drawable.Drawable
-import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
 import android.view.ContextThemeWrapper
 import android.widget.ImageView
-import com.tpeapp.filter.IFilterCallback
 import de.robv.android.xposed.XC_MethodHook
 import de.robv.android.xposed.XposedHelpers
-import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import java.io.ByteArrayOutputStream
-import java.util.LinkedHashMap
 import java.util.WeakHashMap
 import java.util.concurrent.atomic.AtomicLong
 
 /**
- * Hooks [android.widget.ImageView.setImageBitmap] and
- * [android.widget.ImageView.setImageDrawable] in the target process.
- *
- * **Flow per image**:
- * 1. Intercept the call before it reaches the real ImageView.
- * 2. Apply a lightweight placeholder so the UI is responsive while scanning.
- * 3. On a background coroutine, JPEG-compress the bitmap and send it to
- *    [com.tpeapp.service.FilterService] via AIDL.
- * 4. On callback, post back to the main thread:
- *    - **Safe**: restore the original image.
- *    - **Sensitive**: apply configured censor styling off the main thread.
+ * Fail-closed ImageView hook:
+ * - instantly obscures target container in beforeHookedMethod
+ * - sends source bytes to local Binder service
+ * - keeps locked overlay on timeout/service failure
+ * - fades approved processed image in over configured duration (default 300ms)
  */
 object ImageViewHook {
 
-    private const val TAG          = "TPE_ImageViewHook"
-    private const val JPEG_QUALITY = 70   // compress before sending over Binder
-    private const val SCAN_TIMEOUT_MS = 1_200L
-    private const val DECISION_CACHE_MAX = 1024
+    private const val TAG = "TPE_ImageViewHook"
+    private const val IPC_TIMEOUT_MS = 200L
+    private const val DEFAULT_REVEAL_MS = 300L
+    private const val JPEG_QUALITY = 90
 
-    private val mainHandler = Handler(Looper.getMainLooper())
-    private val bgScope     = CoroutineScope(Dispatchers.IO + SupervisorJob())
-    private val requestSeq  = AtomicLong(0)
-    private val decisionCache = object : LinkedHashMap<Int, Boolean>(
-        DECISION_CACHE_MAX,
-        0.75f,
-        true,
-    ) {
-        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Int, Boolean>?): Boolean {
-            return size > DECISION_CACHE_MAX
-        }
-    }
-    private val cacheLock = Any()
+    private val bgScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+    private val requestSeq = AtomicLong(0)
     private val latestViewRequest = java.util.Collections.synchronizedMap(WeakHashMap<ImageView, Long>())
     private val suppressedViewCalls = java.util.Collections.synchronizedMap(WeakHashMap<ImageView, Int>())
-
-    /**
-     * Re-entrancy guard for the main thread.
-     *
-     * LSPosed's built-in guard only suppresses re-entry while the hook's
-     * [XC_MethodHook.beforeHookedMethod] call-stack is still active.  Once we
-     * return from [XC_MethodHook.beforeHookedMethod] and later post a
-     * `view.setImageBitmap(â€¦)` callback onto the main thread, the hook fires
-     * again, creating an infinite scanâ€“blur loop.
-     *
-     * Setting this flag to `true` before any internal [ImageView.setImageBitmap]
-     * or [ImageView.setImageDrawable] call we initiate prevents the hooks from
-     * treating those calls as new user-initiated images to censor.
-     */
     private val inHook = ThreadLocal<Boolean>()
+    private val mainHandler = Handler(Looper.getMainLooper())
 
     fun install(loader: ClassLoader) {
         try {
             XposedHelpers.findAndHookMethod(
                 "android.widget.ImageView", loader,
                 "setImageBitmap", Bitmap::class.java,
-                setBitmapHook
+                setBitmapHook,
             )
             XposedHelpers.findAndHookMethod(
                 "android.widget.ImageView", loader,
                 "setImageDrawable", Drawable::class.java,
-                setDrawableHook
+                setDrawableHook,
             )
-            Log.i(TAG, "ImageView hooks installed")
-        } catch (e: Throwable) {
-            Log.w(TAG, "Failed to install ImageView hooks", e)
+            Log.i(TAG, "Fail-closed ImageView hooks installed")
+        } catch (t: Throwable) {
+            Log.w(TAG, "Failed to install ImageView hooks", t)
         }
     }
 
-    // ------------------------------------------------------------------
-    //  Hooks
-    // ------------------------------------------------------------------
-
     private val setBitmapHook = object : XC_MethodHook() {
         override fun beforeHookedMethod(param: MethodHookParam) {
-            val view   = param.thisObject as? ImageView ?: return
+            val view = param.thisObject as? ImageView ?: return
             if (consumeSuppressedCall(view) || inHook.get() == true) return
             val bitmap = param.args[0] as? Bitmap ?: return
 
@@ -114,10 +77,10 @@ object ImageViewHook {
 
     private val setDrawableHook = object : XC_MethodHook() {
         override fun beforeHookedMethod(param: MethodHookParam) {
-            val view     = param.thisObject as? ImageView ?: return
+            val view = param.thisObject as? ImageView ?: return
             if (consumeSuppressedCall(view) || inHook.get() == true) return
-            val drawable = param.args[0] as? BitmapDrawable ?: return  // only handle BitmapDrawable
-            val bitmap   = drawable.bitmap ?: return
+            val drawable = param.args[0] as? BitmapDrawable ?: return
+            val bitmap = drawable.bitmap ?: return
 
             param.result = null
             handleInterceptedBitmap(view, bitmap)
@@ -127,150 +90,104 @@ object ImageViewHook {
     private fun handleInterceptedBitmap(view: ImageView, original: Bitmap) {
         val requestId = requestSeq.incrementAndGet()
         latestViewRequest[view] = requestId
+        val cfg = MediaFilterRuntimeConfig.current()
 
-        if (MediaFilterRuntimeConfig.isNudityPermittedByHandler()) {
-            CoverageTelemetry.report(
-                lane = CoverageTelemetry.LANE_IMAGEVIEW,
-                stage = CoverageTelemetry.STAGE_BYPASS_PERMITTED,
-                reason = "nudity_permitted_by_handler",
-            )
-            Log.i(TAG, "Bypassing censor (handler permitted) request=$requestId")
-            runOnUiThread(view) { revealIfLatest(view, requestId, original) }
-            return
+        if (cfg.failClosed) {
+            runOnUiThread(view) { setLockedOverlay(view) }
         }
-
-        val key = fingerprint(original)
-        val cached = getCachedDecision(key)
-        if (cached != null) {
-            val finalBitmap = if (cached) createCensoredBitmap(original) else original
-            runOnUiThread(view) { revealIfLatest(view, requestId, finalBitmap) }
-            return
-        }
-
-        runOnUiThread(view) { setPlaceholder(view) }
-        submitForScan(view, original, requestId, key)
-    }
-
-    private fun submitForScan(view: ImageView, original: Bitmap, requestId: Long, key: Int) {
-        val service = MainHook.filterService
-        if (service == null) {
-            MainHook.ensureServiceBound(view.context)
-            CoverageTelemetry.report(
-                lane = CoverageTelemetry.LANE_IMAGEVIEW,
-                stage = CoverageTelemetry.STAGE_SERVICE_UNAVAILABLE,
-                reason = "filter_service_not_bound"
-            )
-            putCachedDecision(key, true)
-            runOnUiThread(view) {
-                revealIfLatest(view, requestId, createCensoredBitmap(original))
-            }
-            return
-        }
-
-        val startedAt = System.currentTimeMillis()
 
         bgScope.launch {
-            val bytes = runCatching {
-                ByteArrayOutputStream().use { baos ->
-                    original.compress(Bitmap.CompressFormat.JPEG, JPEG_QUALITY, baos)
-                    baos.toByteArray()
-                }
-            }.getOrNull() ?: run {
-                CoverageTelemetry.report(
-                    lane = CoverageTelemetry.LANE_IMAGEVIEW,
-                    stage = CoverageTelemetry.STAGE_ENCODE_FAILED,
-                    reason = "jpeg_compress_failed"
-                )
-                putCachedDecision(key, true)
-                runOnUiThread(view) {
-                    revealIfLatest(view, requestId, createCensoredBitmap(original))
+            val encoded = encode(original) ?: return@launch
+            val processedBytes = withTimeoutOrNull(IPC_TIMEOUT_MS) {
+                MainHook.getContext()?.let { MainHook.ensureServiceBound(it) }
+                val service = MainHook.filterService ?: return@withTimeoutOrNull null
+                service.processImageBytesForDisplay(encoded)
+            }
+
+            if (processedBytes == null || processedBytes.isEmpty()) {
+                if (!cfg.failClosed) {
+                    runOnUiThread(view) {
+                        revealIfLatest(
+                            view,
+                            requestId,
+                            original,
+                            cfg.revealDurationMs.toLong(),
+                            recycleIfStale = false,
+                        )
+                    }
+                } else {
+                    Log.w(TAG, "Image request=$requestId timed out/unavailable; keeping LOCKED overlay")
                 }
                 return@launch
             }
 
-            runCatching {
-                val deferred = CompletableDeferred<Pair<Boolean, Float>>()
-                service.scanImageBytes(requestId, bytes, object : IFilterCallback.Stub() {
-                    override fun onScanResult(id: Long, isSensitive: Boolean, confidence: Float) {
-                        if (!deferred.isCompleted) deferred.complete(isSensitive to confidence)
-                    }
-                })
-                val outcome = withTimeoutOrNull(SCAN_TIMEOUT_MS) { deferred.await() }
-                if (outcome == null) {
-                    CoverageTelemetry.report(
-                        lane = CoverageTelemetry.LANE_IMAGEVIEW,
-                        stage = CoverageTelemetry.STAGE_SCAN_TIMEOUT,
-                        latencyMs = System.currentTimeMillis() - startedAt,
-                        reason = "imageview_timeout",
-                    )
-                    putCachedDecision(key, true)
+            val processed = BitmapFactory.decodeByteArray(processedBytes, 0, processedBytes.size)
+            if (processed == null) {
+                if (!cfg.failClosed) {
                     runOnUiThread(view) {
-                        revealIfLatest(view, requestId, createCensoredBitmap(original))
+                        revealIfLatest(
+                            view,
+                            requestId,
+                            original,
+                            cfg.revealDurationMs.toLong(),
+                            recycleIfStale = false,
+                        )
                     }
-                    return@runCatching
+                } else {
+                    Log.w(TAG, "Image request=$requestId decode failed; keeping LOCKED overlay")
                 }
+                return@launch
+            }
 
-                val (isSensitive, confidence) = outcome
-                Log.d(TAG, "Scan [$requestId] sensitive=$isSensitive confidence=$confidence")
-                putCachedDecision(key, isSensitive)
-                CoverageTelemetry.report(
-                    lane = CoverageTelemetry.LANE_IMAGEVIEW,
-                    stage = CoverageTelemetry.STAGE_SCAN_RESULT,
-                    sensitive = isSensitive,
-                    confidence = confidence,
-                    latencyMs = System.currentTimeMillis() - startedAt,
-                )
-                if (isSensitive) {
-                    Log.i(TAG, "CENSOR_APPLIED request=$requestId confidence=$confidence")
-                }
-                val finalBitmap = if (isSensitive) createCensoredBitmap(original) else original
-                runOnUiThread(view) {
-                    revealIfLatest(view, requestId, finalBitmap)
-                }
-            }.onFailure {
-                CoverageTelemetry.report(
-                    lane = CoverageTelemetry.LANE_IMAGEVIEW,
-                    stage = CoverageTelemetry.STAGE_SCAN_ERROR,
-                    latencyMs = System.currentTimeMillis() - startedAt,
-                    reason = it.javaClass.simpleName
-                )
-                putCachedDecision(key, true)
-                runOnUiThread(view) {
-                    revealIfLatest(view, requestId, createCensoredBitmap(original))
-                }
+            runOnUiThread(view) {
+                revealIfLatest(view, requestId, processed, cfg.revealDurationMs.toLong())
             }
         }
     }
 
-    private fun setPlaceholder(view: ImageView) {
+    private fun encode(bitmap: Bitmap): ByteArray? {
+        return runCatching {
+            ByteArrayOutputStream().use { os ->
+                bitmap.compress(Bitmap.CompressFormat.JPEG, JPEG_QUALITY, os)
+                os.toByteArray()
+            }
+        }.getOrNull()
+    }
+
+    private fun setLockedOverlay(view: ImageView) {
         markSuppressedCall(view)
         inHook.set(true)
         try {
-            view.setImageDrawable(
-                TextPlaceholderDrawable(
-                    text = MediaFilterRuntimeConfig.placeholderText(),
-                    density = view.resources.displayMetrics.density,
-                )
-            )
+            view.alpha = 1f
+            view.setImageDrawable(LockedDrawable("LOCKED / UNVERIFIED"))
         } finally {
             inHook.set(false)
         }
     }
 
-    private fun revealBitmap(view: ImageView, bitmap: Bitmap) {
-        markSuppressedCall(view)
-        inHook.set(true)
-        try {
-            view.setImageBitmap(bitmap)
-        } finally {
-            inHook.set(false)
-        }
-    }
-
-    private fun revealIfLatest(view: ImageView, requestId: Long, bitmap: Bitmap) {
+    private fun revealIfLatest(
+        view: ImageView,
+        requestId: Long,
+        bitmap: Bitmap,
+        revealMs: Long,
+        recycleIfStale: Boolean = true,
+    ) {
         val current = latestViewRequest[view]
-        if (current != requestId) return
-        revealBitmap(view, bitmap)
+        if (current != requestId) {
+            if (recycleIfStale && !bitmap.isRecycled) bitmap.recycle()
+            return
+        }
+
+        markSuppressedCall(view)
+        inHook.set(true)
+        try {
+            view.alpha = 0f
+            view.setImageBitmap(bitmap)
+            val duration = revealMs.coerceIn(0L, 3_000L)
+            view.animate().alpha(1f).setDuration(if (duration > 0) duration else DEFAULT_REVEAL_MS).start()
+        } finally {
+            inHook.set(false)
+        }
     }
 
     private fun runOnUiThread(view: ImageView, action: () -> Unit) {
@@ -278,13 +195,11 @@ object ImageViewHook {
             action()
             return
         }
-
         val activity = findActivity(view.context)
-        if (activity != null && !activity.isFinishing && (Build.VERSION.SDK_INT < 17 || !activity.isDestroyed)) {
+        if (activity != null && !activity.isFinishing) {
             activity.runOnUiThread(action)
             return
         }
-
         mainHandler.post(action)
     }
 
@@ -297,27 +212,6 @@ object ImageViewHook {
         return if (current is android.app.Activity) current else null
     }
 
-    private fun createCensoredBitmap(original: Bitmap): Bitmap {
-        val mutable = original.copy(original.config ?: Bitmap.Config.ARGB_8888, true) ?: return original
-        return runCatching {
-            MediaFilterRuntimeConfig.censorBitmapInPlace(mutable)
-            mutable
-        }.getOrElse {
-            mutable.recycle()
-            original
-        }
-    }
-
-    private fun getCachedDecision(key: Int): Boolean? = synchronized(cacheLock) {
-        decisionCache[key]
-    }
-
-    private fun putCachedDecision(key: Int, sensitive: Boolean) {
-        synchronized(cacheLock) {
-            decisionCache[key] = sensitive
-        }
-    }
-
     private fun markSuppressedCall(view: ImageView) {
         synchronized(suppressedViewCalls) {
             val current = suppressedViewCalls[view] ?: 0
@@ -328,63 +222,47 @@ object ImageViewHook {
     private fun consumeSuppressedCall(view: ImageView): Boolean {
         synchronized(suppressedViewCalls) {
             val remaining = suppressedViewCalls[view] ?: return false
-            if (remaining <= 1) {
-                suppressedViewCalls.remove(view)
-            } else {
-                suppressedViewCalls[view] = remaining - 1
-            }
+            if (remaining <= 1) suppressedViewCalls.remove(view) else suppressedViewCalls[view] = remaining - 1
             return true
         }
     }
 
-    private fun fingerprint(bitmap: Bitmap): Int {
-        var hash = 31 * bitmap.width + bitmap.height
-        val stepX = maxOf(1, bitmap.width / 8)
-        val stepY = maxOf(1, bitmap.height / 8)
-        var y = 0
-        while (y < bitmap.height) {
-            var x = 0
-            while (x < bitmap.width) {
-                hash = 31 * hash + runCatching { bitmap.getPixel(x, y) }.getOrDefault(0)
-                x += stepX
-            }
-            y += stepY
+    private class LockedDrawable(private val text: String) : Drawable() {
+        private val bgPaint = Paint().apply { color = Color.BLACK }
+        private val strokePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.RED
+            style = Paint.Style.STROKE
+            strokeWidth = 6f
         }
-        return hash
-    }
-
-    private class TextPlaceholderDrawable(
-        text: String,
-        density: Float,
-    ) : Drawable() {
-        private val displayText = text.ifBlank { "Loading..." }
         private val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = Color.WHITE
             textAlign = Paint.Align.CENTER
-            textSize = 16f * density
+            textSize = 40f
+            isFakeBoldText = true
         }
-        private val bgPaint = Paint().apply { color = Color.BLACK }
 
         override fun draw(canvas: Canvas) {
             val b = bounds
             canvas.drawRect(b, bgPaint)
+            canvas.drawRect(b, strokePaint)
             if (b.isEmpty) return
             val fm = textPaint.fontMetrics
             val baseline = b.exactCenterY() - (fm.ascent + fm.descent) / 2f
-            canvas.drawText(displayText, b.exactCenterX(), baseline, textPaint)
+            canvas.drawText(text, b.exactCenterX(), baseline, textPaint)
         }
 
         override fun setAlpha(alpha: Int) {
-            textPaint.alpha = alpha
             bgPaint.alpha = alpha
+            strokePaint.alpha = alpha
+            textPaint.alpha = alpha
         }
 
         override fun setColorFilter(colorFilter: ColorFilter?) {
-            textPaint.colorFilter = colorFilter
             bgPaint.colorFilter = colorFilter
+            strokePaint.colorFilter = colorFilter
+            textPaint.colorFilter = colorFilter
         }
 
         override fun getOpacity(): Int = PixelFormat.OPAQUE
     }
 }
-

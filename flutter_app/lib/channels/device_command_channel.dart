@@ -36,6 +36,15 @@ class DeviceCommandChannel {
   static Future<void> speakText(String text) =>
       _channel.invokeMethod('speakText', {'text': text});
 
+    static Future<bool> isHeadphonesConnected() async {
+        final raw = await _channel.invokeMethod<dynamic>('isHeadphonesConnected');
+        if (raw is bool) {
+            return raw;
+        }
+        final normalized = '${raw ?? ''}'.trim().toLowerCase();
+        return normalized == '1' || normalized == 'true' || normalized == 'yes' || normalized == 'on';
+    }
+
   /// Streams and plays an audio clip from [url].
   ///
   /// When [loop] is `true` the clip plays continuously until [stopAudio] is
@@ -166,6 +175,17 @@ class DeviceCommandChannel {
   }) =>
       _channel.invokeMethod('showOverlay',
           {'title': title, 'message': message, 'imageUrl': imageUrl});
+
+    static Future<void> showTaskGateOverlay({
+        required String title,
+        required String message,
+        String? taskId,
+    }) =>
+            _channel.invokeMethod('showTaskGateOverlay', {
+                'title': title,
+                'message': message,
+                'taskId': taskId,
+            });
 
   static Future<void> suspendApp(String packageName) =>
       _channel.invokeMethod('suspendApp', {'packageName': packageName});

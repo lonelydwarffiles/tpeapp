@@ -52,6 +52,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
   // Text replacement dictionary
   Map<String, dynamic> _textReplacementDict = {};
   bool _loadingDict = true;
+  Map<String, dynamic> _textReplacementPolicy = {};
+  bool _loadingPolicy = true;
 
   // Password vault
   bool _blockPasswordChanges = false;
@@ -83,6 +85,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final rootAvailable =
       await _safeNullableBool(RemoteControlChannel.isRootAvailable);
     final textReplacementDict = await _safeDict(TextReplacementChannel.getDict);
+    final textReplacementPolicy = await _safeDict(TextReplacementChannel.getPolicy);
     setState(() {
       _adminActive = active;
       _loadingAdmin = false;
@@ -98,6 +101,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _loadingRemoteControl = false;
       _textReplacementDict = textReplacementDict;
       _loadingDict = false;
+        _textReplacementPolicy = textReplacementPolicy;
+        _loadingPolicy = false;
       _blockPasswordChanges = _prefs.getBool(_kBlockPasswordChanges) ?? false;
       _revealTimeoutSeconds =
           _prefs.getInt(_kRevealTimeoutSeconds) ?? 10;
@@ -472,6 +477,107 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
+  List<String> _policyStringList(String key) {
+    final raw = _textReplacementPolicy[key];
+    if (raw is! List) return const [];
+    final seen = <String>{};
+    final normalized = <String>[];
+    for (final item in raw) {
+      final value = item.toString().trim().toLowerCase();
+      if (value.isEmpty || seen.contains(value)) continue;
+      seen.add(value);
+      normalized.add(value);
+    }
+    return normalized;
+  }
+
+  Future<void> _saveTextReplacementPolicy(
+    Map<String, dynamic> policy, {
+    required String event,
+    required String reason,
+    Map<String, dynamic>? payload,
+  }) async {
+    await TextReplacementChannel.setPolicy(policy);
+    setState(() => _textReplacementPolicy = policy);
+    await _syncTextReplacementPolicy(policy);
+    await _emitBehavior(
+      event: event,
+      reason: reason,
+      payload: payload,
+    );
+  }
+
+  Future<void> _addPolicyListEntry({
+    required String key,
+    required String title,
+    required String hint,
+  }) async {
+    final ctrl = TextEditingController();
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(title),
+        content: TextField(
+          controller: ctrl,
+          decoration: InputDecoration(
+            hintText: hint,
+            border: const OutlineInputBorder(),
+          ),
+          autofocus: true,
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Add')),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+
+    final value = ctrl.text.trim().toLowerCase();
+    if (value.isEmpty) return;
+
+    final current = _policyStringList(key);
+    if (current.contains(value)) return;
+
+    final updated = Map<String, dynamic>.from(_textReplacementPolicy)
+      ..[key] = <String>[...current, value];
+    await _saveTextReplacementPolicy(
+      updated,
+      event: 'text_replacement_policy_updated',
+      reason: 'app_blocklist_add',
+      payload: {
+        'policy_key': key,
+        'value': value,
+      },
+    );
+  }
+
+  Future<void> _removePolicyListEntry({
+    required String key,
+    required String value,
+  }) async {
+    final current = _policyStringList(key);
+    if (!current.contains(value)) return;
+    final next = current.where((item) => item != value).toList();
+
+    final updated = Map<String, dynamic>.from(_textReplacementPolicy);
+    if (next.isEmpty) {
+      updated.remove(key);
+    } else {
+      updated[key] = next;
+    }
+
+    await _saveTextReplacementPolicy(
+      updated,
+      event: 'text_replacement_policy_updated',
+      reason: 'app_blocklist_remove',
+      payload: {
+        'policy_key': key,
+        'value': value,
+      },
+    );
+  }
+
   Future<void> _saveVaultSettings() async {
     try {
       await _prefs.setBool(_kBlockPasswordChanges, _blockPasswordChanges);
@@ -539,6 +645,26 @@ class _SettingsScreenState extends State<SettingsScreen> {
         const SnackBar(
           content: Text(
             'Text replacement saved locally, but could not sync to the device runtime.',
+          ),
+        ),
+      );
+    }
+  }
+
+  Future<void> _syncTextReplacementPolicy(Map<String, dynamic> policy) async {
+    final endpoint = (_prefs.getString('partner_endpoint_url') ?? '').trim();
+    if (endpoint.isEmpty) {
+      return;
+    }
+
+    try {
+      await ApiService(_prefs).pushTextReplacementPolicy(policy: policy);
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Text replacement policy saved locally, but could not sync to the device runtime.',
           ),
         ),
       );
@@ -780,6 +906,98 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         );
                       }).toList(),
                     ),
+          const SizedBox(height: 16),
+          Text('App Blocklist Manager',
+              style: Theme.of(context).textTheme.titleSmall),
+          const SizedBox(height: 8),
+          _loadingPolicy
+              ? const LinearProgressIndicator()
+              : Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        const Expanded(
+                          child: Text('Blocked packages'),
+                        ),
+                        OutlinedButton.icon(
+                          onPressed: () => _addPolicyListEntry(
+                            key: 'blocked_packages',
+                            title: 'Add blocked package',
+                            hint: 'com.discord',
+                          ),
+                          icon: const Icon(Icons.add),
+                          label: const Text('Add'),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 6),
+                    Builder(
+                      builder: (_) {
+                        final packages = _policyStringList('blocked_packages');
+                        if (packages.isEmpty) {
+                          return const Text('No blocked packages configured.');
+                        }
+                        return Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: packages
+                              .map(
+                                (pkg) => InputChip(
+                                  label: Text(pkg),
+                                  onDeleted: () => _removePolicyListEntry(
+                                    key: 'blocked_packages',
+                                    value: pkg,
+                                  ),
+                                ),
+                              )
+                              .toList(),
+                        );
+                      },
+                    ),
+                    const SizedBox(height: 12),
+                    Row(
+                      children: [
+                        const Expanded(
+                          child: Text('Blocked package prefixes'),
+                        ),
+                        OutlinedButton.icon(
+                          onPressed: () => _addPolicyListEntry(
+                            key: 'blocked_package_prefixes',
+                            title: 'Add blocked package prefix',
+                            hint: 'com.google.android.apps.',
+                          ),
+                          icon: const Icon(Icons.add),
+                          label: const Text('Add'),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 6),
+                    Builder(
+                      builder: (_) {
+                        final prefixes = _policyStringList('blocked_package_prefixes');
+                        if (prefixes.isEmpty) {
+                          return const Text('No blocked package prefixes configured.');
+                        }
+                        return Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: prefixes
+                              .map(
+                                (prefix) => InputChip(
+                                  label: Text(prefix),
+                                  onDeleted: () => _removePolicyListEntry(
+                                    key: 'blocked_package_prefixes',
+                                    value: prefix,
+                                  ),
+                                ),
+                              )
+                              .toList(),
+                        );
+                      },
+                    ),
+                  ],
+                ),
 
           const Divider(height: 32),
 

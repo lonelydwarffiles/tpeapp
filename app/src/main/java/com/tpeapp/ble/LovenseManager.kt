@@ -89,8 +89,10 @@ object LovenseManager {
     /** Starts a BLE scan and connects to the first discovered Lovense toy. */
     fun startScan() {
         checkInit("startScan")
-        scanCandidates(timeoutMs = 8_000L) { candidates ->
-            val picked = candidates.firstOrNull()
+        ble!!.scanCandidates(8_000L) { candidates ->
+            val preferred = candidates.filter(::looksLikeLovense)
+            val picked = (preferred.ifEmpty { candidates })
+                .maxByOrNull { (it["rssi"] as? Number)?.toInt() ?: Int.MIN_VALUE }
             if (picked != null) {
                 val address = picked["address"]?.toString()?.trim().orEmpty()
                 if (address.isNotBlank()) {
@@ -98,7 +100,7 @@ object LovenseManager {
                     return@scanCandidates
                 }
             }
-            Log.w(TAG, "No Lovense candidates matched strict filter; refusing non-Lovense auto-connect")
+            Log.w(TAG, "No BLE candidates available for Lovense auto-connect")
         }
     }
 
@@ -110,17 +112,24 @@ object LovenseManager {
         checkInit("scanCandidates")
         ble!!.scanCandidates(timeoutMs) { candidates ->
             val preferred = candidates.filter(::looksLikeLovense)
-            onComplete(preferred)
+            if (preferred.isNotEmpty()) {
+                onComplete(preferred)
+            } else {
+                Log.w(TAG, "No strict Lovense name matches; returning all ${candidates.size} scanned candidates")
+                onComplete(candidates)
+            }
         }
     }
 
     private fun looksLikeLovense(candidate: Map<String, Any?>): Boolean {
         val name = (candidate["name"]?.toString() ?: "").lowercase()
-        if (name.isBlank()) return false
+        val advName = (candidate["adv_name"]?.toString() ?: "").lowercase()
+        val mergedName = "$name $advName".trim()
+        if (mergedName.isBlank()) return false
 
-        if (name.contains("lovense")) return true
-        if (Regex("(^|[^a-z0-9])lv([\\s_-]|$)").containsMatchIn(name)) return true
-        if (LOVENSE_MODEL_HINTS.any { hint -> Regex("(^|[^a-z0-9])$hint([\\s_-]|$)").containsMatchIn(name) }) {
+        if (mergedName.contains("lovense")) return true
+        if (Regex("(^|[^a-z0-9])lv([\\s_-]|$)").containsMatchIn(mergedName)) return true
+        if (LOVENSE_MODEL_HINTS.any { hint -> Regex("(^|[^a-z0-9])$hint([\\s_-]|$)").containsMatchIn(mergedName) }) {
             return true
         }
 

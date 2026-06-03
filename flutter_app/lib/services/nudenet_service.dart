@@ -30,7 +30,7 @@ class NudeNetService {
 
   static final NudeNetService instance = NudeNetService._();
 
-  static const String _modelAsset = 'assets/320n.onnx';
+  static const String _modelAsset = 'assets/320.ort';
   static const int _modelSize = 320;
 
   final OnnxRuntime _onnx = OnnxRuntime();

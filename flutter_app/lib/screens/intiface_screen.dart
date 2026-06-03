@@ -87,18 +87,22 @@ class _IntifaceScreenState extends State<IntifaceScreen> {
 
   String _nativeDeviceLabel(Map<String, dynamic> device) {
     final name = (device['name'] ?? '').toString().trim();
+    final advName = (device['adv_name'] ?? '').toString().trim();
     final address = (device['address'] ?? '').toString().trim();
     if (name.isNotEmpty) return name;
+    if (advName.isNotEmpty) return advName;
     if (address.isNotEmpty) return address;
     return 'Unnamed device';
   }
 
   bool _nativeLooksLikeLovense(Map<String, dynamic> device) {
-    final name = _nativeDeviceLabel(device).toLowerCase();
-    if (name.isEmpty) return false;
+    final name = (device['name'] ?? '').toString().trim().toLowerCase();
+    final advName = (device['adv_name'] ?? '').toString().trim().toLowerCase();
+    final merged = '$name $advName'.trim();
+    if (merged.isEmpty) return false;
 
-    if (name.contains('lovense')) return true;
-    if (RegExp(r'(^|[^a-z0-9])lv([\s_-]|$)').hasMatch(name)) return true;
+    if (merged.contains('lovense')) return true;
+    if (RegExp(r'(^|[^a-z0-9])lv([\s_-]|$)').hasMatch(merged)) return true;
 
     const modelHints = <String>[
       'lush',
@@ -112,7 +116,7 @@ class _IntifaceScreenState extends State<IntifaceScreen> {
     ];
 
     return modelHints.any(
-      (hint) => RegExp('(^|[^a-z0-9])$hint([\\s_-]|\$)').hasMatch(name),
+      (hint) => RegExp('(^|[^a-z0-9])$hint([\\s_-]|\$)').hasMatch(merged),
     );
   }
 
@@ -320,9 +324,20 @@ class _IntifaceScreenState extends State<IntifaceScreen> {
         return;
       }
       await _runLovenseAction('selector scan', () async {
-        final devices = _filterLovenseNativeDevices(
-          await BleChannel.lovenseScanCandidatesNative(),
-        );
+        final allDevices = await BleChannel.lovenseScanCandidatesNative();
+        var devices = _filterLovenseNativeDevices(allDevices);
+        if (devices.isEmpty && allDevices.isNotEmpty) {
+          devices = List<Map<String, dynamic>>.from(allDevices);
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text(
+                  'No Lovense-like names matched. Showing all nearby BLE devices.',
+                ),
+              ),
+            );
+          }
+        }
         if (!mounted) return;
         if (devices.isEmpty) {
           ScaffoldMessenger.of(context).showSnackBar(
@@ -719,12 +734,12 @@ class _IntifaceScreenState extends State<IntifaceScreen> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    'Lovense path: native bridge',
+                    'Lovense path: ${BleChannel.lovensePathLabel}',
                     style: Theme.of(context).textTheme.bodySmall,
                   ),
                   const SizedBox(height: 10),
                   Text(
-                    'Pavlok path: native bridge',
+                    'Pavlok path: ${BleChannel.pavlokPathLabel}',
                     style: Theme.of(context).textTheme.bodySmall,
                   ),
                 ],

@@ -6,6 +6,8 @@ class EdgeControlsViewData {
   const EdgeControlsViewData({
     required this.edgeCount,
     required this.orgasmCount,
+    required this.pissCount,
+    required this.imagesCaughtCount,
     required this.orgasmPermissionTokens,
     required this.orgasmDeniedCycles,
     required this.orgasmPleadTier,
@@ -28,6 +30,8 @@ class EdgeControlsViewData {
 
   final int edgeCount;
   final int orgasmCount;
+  final int pissCount;
+  final int imagesCaughtCount;
   final int orgasmPermissionTokens;
   final int orgasmDeniedCycles;
   final String orgasmPleadTier;
@@ -54,6 +58,7 @@ class EdgeControlsScreen extends StatefulWidget {
     required this.readState,
     required this.onQueueEdge,
     required this.onQueueOrgasm,
+    required this.onQueuePiss,
     required this.onHoldBuzzUntilLowHr,
     required this.onApprovePending,
     required this.onUndoEdge,
@@ -68,6 +73,7 @@ class EdgeControlsScreen extends StatefulWidget {
   final EdgeControlsViewData Function() readState;
   final Future<void> Function() onQueueEdge;
   final Future<void> Function() onQueueOrgasm;
+  final Future<void> Function() onQueuePiss;
   final Future<void> Function() onHoldBuzzUntilLowHr;
   final Future<void> Function() onApprovePending;
   final Future<void> Function() onUndoEdge;
@@ -87,6 +93,7 @@ class _EdgeControlsScreenState extends State<EdgeControlsScreen> {
   Timer? _refreshTimer;
   bool _focusMode = false;
   bool _focusModeAutoEnabled = false;
+  int _stopArmUntilMs = 0;
 
   @override
   void initState() {
@@ -235,6 +242,29 @@ class _EdgeControlsScreenState extends State<EdgeControlsScreen> {
     return '${hours}h';
   }
 
+  bool _isStopArmed() {
+    return DateTime.now().millisecondsSinceEpoch < _stopArmUntilMs;
+  }
+
+  Future<void> _handleEmergencyStop() async {
+    final nowMs = DateTime.now().millisecondsSinceEpoch;
+    if (_isStopArmed()) {
+      setState(() {
+        _stopArmUntilMs = 0;
+      });
+      await _runAndRefresh(widget.onStopActuationNow);
+      return;
+    }
+
+    setState(() {
+      _stopArmUntilMs = nowMs + 10 * 1000;
+    });
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('E-Stop armed for 10s. Tap Stop again to execute.')),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final data = widget.readState();
@@ -327,6 +357,11 @@ class _EdgeControlsScreenState extends State<EdgeControlsScreen> {
                         ),
                       ),
                     ],
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Daily piss count: ${data.pissCount}',
+                    style: Theme.of(context).textTheme.titleSmall,
                   ),
                   const SizedBox(height: 10),
                   Text(
@@ -567,6 +602,16 @@ class _EdgeControlsScreenState extends State<EdgeControlsScreen> {
                 ),
               ),
               const SizedBox(height: 10),
+              FilledButton.tonalIcon(
+                onPressed: () => _runAndRefresh(widget.onQueuePiss),
+                style: FilledButton.styleFrom(
+                  minimumSize: const Size.fromHeight(56),
+                  textStyle: Theme.of(context).textTheme.titleMedium,
+                ),
+                icon: const Icon(Icons.water_drop_outlined),
+                label: const Text('Log Piss'),
+              ),
+              const SizedBox(height: 10),
               OutlinedButton.icon(
                 onPressed: () => _runAndRefreshWithHaptic(
                   widget.onHoldBuzzUntilLowHr,
@@ -582,10 +627,10 @@ class _EdgeControlsScreenState extends State<EdgeControlsScreen> {
               ),
               const SizedBox(height: 10),
               OutlinedButton.icon(
-                onPressed: () => _runAndRefresh(widget.onStopActuationNow),
+                onPressed: _handleEmergencyStop,
                 style: largeOutlineButtonStyle,
                 icon: const Icon(Icons.stop_circle_outlined),
-                label: const Text('Stop'),
+                label: Text(_isStopArmed() ? 'Confirm Stop' : 'Stop'),
               ),
               if (!_focusMode) ...[
                 const SizedBox(height: 10),

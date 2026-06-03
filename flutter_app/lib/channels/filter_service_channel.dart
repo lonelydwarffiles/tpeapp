@@ -31,8 +31,20 @@ class FilterServiceChannel {
   static Future<void> setMediaStrictPackages(List<String> packages) =>
       _channel.invokeMethod('setMediaStrictPackages', {'packages': packages});
 
+  static Future<void> setMediaForbiddenClassIds(List<int> classIds) =>
+      _channel.invokeMethod('setMediaForbiddenClassIds', {'classIds': classIds});
+
   static Future<void> setMediaMaxInFlight(int maxInFlight) =>
       _channel.invokeMethod('setMediaMaxInFlight', {'maxInFlight': maxInFlight});
+
+  static Future<void> setMediaFailClosed({required bool enabled}) =>
+      _channel.invokeMethod('setMediaFailClosed', {'enabled': enabled});
+
+  static Future<void> setMediaRevealDurationMs(int durationMs) =>
+      _channel.invokeMethod('setMediaRevealDurationMs', {'durationMs': durationMs});
+
+  static Future<void> setMediaPlaceholderText(String placeholder) =>
+      _channel.invokeMethod('setMediaPlaceholderText', {'placeholder': placeholder});
 
   static Future<Map<String, dynamic>> getMediaFilterConfig() async {
     final raw = await _channel.invokeMethod<String>('getMediaFilterConfig');

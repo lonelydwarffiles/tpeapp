@@ -37,6 +37,11 @@ class TaskRepository extends ChangeNotifier {
     }
   }
 
+  void reload() {
+    _load();
+    notifyListeners();
+  }
+
   Future<void> _save() async {
     final encoded = jsonEncode(_tasks.map((t) => t.toJson()).toList());
     await _prefs.setString(_key, encoded);
@@ -64,18 +69,85 @@ class TaskRepository extends ChangeNotifier {
 
   Future<void> markCompleted(String taskId, {String? photoPath}) async {
     final task = findById(taskId);
-    if (task == null) return;
-    await upsert(
-      task.copyWith(
-        status: TaskStatus.completed,
-        photoPath: photoPath ?? task.photoPath,
-      ),
-    );
+    if (task != null) {
+      await upsert(
+        task.copyWith(
+          status: TaskStatus.completed,
+          photoPath: photoPath ?? task.photoPath,
+        ),
+      );
+      return;
+    }
+
+    final raw = _prefs.getString(_key);
+    if (raw == null || raw.trim().isEmpty) {
+      return;
+    }
+
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is! List) {
+        return;
+      }
+
+      var updated = false;
+      for (final item in decoded) {
+        if (item is! Map) continue;
+        final id = (item['id'] ?? '').toString().trim();
+        if (id != taskId) continue;
+        item['status'] = TaskStatus.completed.name.toUpperCase();
+        if (photoPath != null && photoPath.trim().isNotEmpty) {
+          item['photoUri'] = photoPath;
+        }
+        updated = true;
+        break;
+      }
+
+      if (!updated) {
+        return;
+      }
+
+      await _prefs.setString(_key, jsonEncode(decoded));
+      _load();
+      notifyListeners();
+    } catch (_) {
+      // Keep caller resilient if local JSON is malformed.
+    }
   }
 
   Future<void> markMissed(String taskId) async {
     final task = findById(taskId);
     if (task == null) return;
     await upsert(task.copyWith(status: TaskStatus.missed));
+  }
+
+  Future<void> ensureDaily1000mlTaskForToday() async {
+    final enabled = _prefs.getBool('task_gate_enabled') ?? true;
+    if (!enabled) {
+      return;
+    }
+
+    final now = DateTime.now();
+    final taskId = _dailyTaskIdFor(now);
+    if (_tasks.any((t) => t.id == taskId)) {
+      return;
+    }
+
+    final endOfDay = DateTime(now.year, now.month, now.day, 23, 59, 59, 999);
+    final task = Task(
+      id: taskId,
+      title: 'Daily 1000ml task',
+      description: 'Complete 1000ml daily target and verify completion.',
+      deadlineMs: endOfDay.millisecondsSinceEpoch,
+      status: TaskStatus.pending,
+    );
+    await upsert(task);
+  }
+
+  String _dailyTaskIdFor(DateTime date) {
+    final y = date.year.toString().padLeft(4, '0');
+    final m = date.month.toString().padLeft(2, '0');
+    final d = date.day.toString().padLeft(2, '0');
+    return 'daily_1000ml_$y$m$d';
   }
 }

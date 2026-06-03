@@ -38,6 +38,7 @@ class NotificationBuzzService {
   final Queue<int> _actuationMs = Queue<int>();
   final Map<String, int> _recentSignatures = <String, int>{};
   final Random _rng = Random();
+  int _buzzExecutedCount = 0;
 
   SharedPreferences? _prefs;
   ApiService? _api;
@@ -73,8 +74,41 @@ class NotificationBuzzService {
       return;
     }
 
-    // Contract: only explicit notification text commands trigger BLE actuation.
-    if (parsed.source != 'notification') {
+    // Contract: only explicit command carriers trigger BLE actuation.
+    if (parsed.source != 'notification' && parsed.source != 'discord_bot') {
+      return;
+    }
+    if (!_policy.enabled) {
+      return;
+    }
+    if (_policy.allowSources.isNotEmpty && !_policy.allowSources.contains(parsed.source)) {
+      return;
+    }
+    if (_policy.packageAllowlist.isNotEmpty && !_policy.packageAllowlist.contains(parsed.packageName)) {
+      return;
+    }
+    if (_policy.packageBlocklist.contains(parsed.packageName)) {
+      return;
+    }
+
+    final appRule = _policy.ruleForPackage(parsed.packageName);
+    if (appRule != null) {
+      if (appRule.allowedCommands.isNotEmpty && !appRule.allowedCommands.contains(parsed.command)) {
+        return;
+      }
+      final minConfidence = appRule.minConfidence ?? _policy.minConfidence;
+      if (parsed.confidence < minConfidence) {
+        return;
+      }
+    } else if (parsed.confidence < _policy.minConfidence) {
+      return;
+    }
+
+    if (_policy.dryRun) {
+      developer.log(
+        'notification-command dry_run: ${parsed.packageName} ${parsed.command}',
+        name: 'NotificationBuzzService',
+      );
       return;
     }
 
@@ -101,8 +135,84 @@ class NotificationBuzzService {
     unawaited(_applyNotificationCommand(parsed));
   }
 
+  Future<bool> ingestExternalCommand({
+    required String raw,
+    String source = 'discord_bot',
+    String packageName = 'com.discord',
+    String? messageId,
+    double confidence = 0.95,
+  }) async {
+    final parsed = _normalizeIncomingEvent({
+      'source': source,
+      'package': packageName,
+      'raw': raw,
+      'content': raw,
+      'text': raw,
+      'message_id': messageId,
+      'confidence': confidence,
+    });
+    if (parsed == null) {
+      return false;
+    }
+    if (parsed.source != 'notification' && parsed.source != 'discord_bot') {
+      return false;
+    }
+    if (!_policy.enabled) {
+      return false;
+    }
+    if (_policy.allowSources.isNotEmpty && !_policy.allowSources.contains(parsed.source)) {
+      return false;
+    }
+    if (_policy.packageAllowlist.isNotEmpty && !_policy.packageAllowlist.contains(parsed.packageName)) {
+      return false;
+    }
+    if (_policy.packageBlocklist.contains(parsed.packageName)) {
+      return false;
+    }
+
+    final appRule = _policy.ruleForPackage(parsed.packageName);
+    if (appRule != null) {
+      if (appRule.allowedCommands.isNotEmpty && !appRule.allowedCommands.contains(parsed.command)) {
+        return false;
+      }
+      final minConfidence = appRule.minConfidence ?? _policy.minConfidence;
+      if (parsed.confidence < minConfidence) {
+        return false;
+      }
+    } else if (parsed.confidence < _policy.minConfidence) {
+      return false;
+    }
+
+    if (_policy.dryRun) {
+      developer.log(
+        'external-command dry_run: ${parsed.packageName} ${parsed.command}',
+        name: 'NotificationBuzzService',
+      );
+      return true;
+    }
+
+    final nowMs = DateTime.now().millisecondsSinceEpoch;
+    if (_isInCooldown(nowMs)) {
+      return false;
+    }
+    if (_isDeduped(parsed, nowMs)) {
+      return false;
+    }
+    if (_breachesRateLimit(nowMs)) {
+      _cooldownUntilMs =
+          nowMs + (_policy.emergencyCooldownSeconds.clamp(5, 600) * 1000);
+      return false;
+    }
+
+    _markActuation(nowMs);
+    unawaited(_applyNotificationCommand(parsed));
+    return true;
+  }
+
   Future<void> _applyNotificationCommand(NotificationCommand parsed) async {
     final appRule = _policy.ruleForPackage(parsed.packageName);
+    final loopCap = appRule?.maxLoopCount ?? _policy.buzzMaxQueueAdd;
+    final maxDurationMs = appRule?.maxDurationMs ?? _policy.maxDurationMs;
 
     if (parsed.command == 'zap') {
       final hasPavlok = await BleChannel.pavlokIsConnectedNative();
@@ -115,11 +225,20 @@ class NotificationBuzzService {
       }
       final scaledStrength =
           (parsed.strength * (appRule?.strengthScale ?? 1.0)).round();
-      final strength = scaledStrength.clamp(1, _policy.zapMaxStrength);
+      final zapStrengthCap = appRule?.maxZapStrength ?? _policy.zapMaxStrength;
+      final strength = scaledStrength.clamp(1, zapStrengthCap);
       final intensity = ((strength / 100) * 255).round().clamp(1, 255);
       final durationMs =
-          parsed.durationMs.clamp(_policy.minDurationMs, _policy.maxDurationMs);
-      await BleChannel.pavlokZap(intensity: intensity, durationMs: durationMs);
+          parsed.durationMs.clamp(_policy.minDurationMs, maxDurationMs);
+      final repeats = parsed.repeatCount.clamp(1, loopCap);
+      for (var i = 0; i < repeats; i++) {
+        await BleChannel.pavlokZap(intensity: intensity, durationMs: durationMs);
+        if (i < repeats - 1) {
+          await Future<void>.delayed(
+            Duration(milliseconds: _randomPulseGapMs(durationMs: durationMs)),
+          );
+        }
+      }
       return;
     }
 
@@ -133,13 +252,14 @@ class NotificationBuzzService {
     }
 
     final effectiveCount = parsed.loop
-        ? parsed.count.clamp(1, _policy.buzzMaxQueueAdd)
+        ? parsed.count.clamp(1, loopCap)
         : 1;
     final durationMs =
-        parsed.durationMs.clamp(_policy.minDurationMs, _policy.maxDurationMs);
+        parsed.durationMs.clamp(_policy.minDurationMs, maxDurationMs);
     for (var i = 0; i < effectiveCount; i++) {
-      _buzzDurationsMs.add(durationMs);
+      _buzzDurationsMs.add(_randomizedPulseDurationMs(durationMs));
     }
+    await _maybeSpeakQlTts(parsed.raw);
     if (!_running) {
       unawaited(_drainQueue());
     }
@@ -158,7 +278,11 @@ class NotificationBuzzService {
         }
         final durationMs = _buzzDurationsMs.removeFirst();
         await _runGuardedBuzzWithHrSafety(durationMs: durationMs);
-        await Future<void>.delayed(Duration(milliseconds: _randomPulseGapMs()));
+        _buzzExecutedCount += 1;
+        unawaited(_publishBuzzCountNotification());
+        await Future<void>.delayed(
+          Duration(milliseconds: _randomPulseGapMs(durationMs: durationMs)),
+        );
       }
     } finally {
       _running = false;
@@ -393,9 +517,47 @@ class NotificationBuzzService {
     return normalized == '1' || normalized == 'true' || normalized == 'yes' || normalized == 'on';
   }
 
-  int _randomPulseGapMs() {
-    final span = (_pulseGapMaxMs - _pulseGapMinMs) + 1;
+  int _randomizedPulseDurationMs(int maxDurationMs) {
+    final boundedMax = maxDurationMs.clamp(800, 600000);
+    if (boundedMax <= 800) {
+      return boundedMax;
+    }
+    final span = (boundedMax - 800) + 1;
+    return 800 + _rng.nextInt(span);
+  }
+
+  int _randomPulseGapMs({required int durationMs}) {
+    final dynamicMax = durationMs.clamp(_pulseGapMinMs, _pulseGapMaxMs);
+    final span = (dynamicMax - _pulseGapMinMs) + 1;
     return _pulseGapMinMs + _rng.nextInt(span);
+  }
+
+  Future<void> _publishBuzzCountNotification() async {
+    try {
+      await DeviceCommandChannel.sendNotification(
+        title: 'Buzz Activity',
+        body: 'Buzz count this session: $_buzzExecutedCount',
+        channelId: 'tpe_edge_status',
+      );
+    } catch (_) {
+      // Best-effort status notification.
+    }
+  }
+
+  Future<void> _maybeSpeakQlTts(String raw) async {
+    final lower = raw.toLowerCase();
+    if (!RegExp(r'\bql\b').hasMatch(lower)) {
+      return;
+    }
+    final hasHeadphones = await DeviceCommandChannel.isHeadphonesConnected();
+    if (!hasHeadphones) {
+      return;
+    }
+    try {
+      await DeviceCommandChannel.speakText('QL notification command received.');
+    } catch (_) {
+      // Best-effort TTS.
+    }
   }
 
   Future<void> _initPolicyPipeline() async {
@@ -443,6 +605,9 @@ class NotificationBuzzService {
 
     final raw = (event['raw']?.toString() ?? '').trim();
     final commandText = _composeCommandText(event);
+    if (packageName.contains('discord') && !RegExp(r'\bql\b').hasMatch(commandText.toLowerCase())) {
+      return null;
+    }
     final parsedFromRaw = _parseRawCommand(commandText);
 
     final command = (parsedFromRaw?.command ??
@@ -466,6 +631,12 @@ class NotificationBuzzService {
     final loop = command == 'buzz'
       ? (parsedFromRaw?.loop ?? (event['loop'] == true))
       : false;
+    final repeatCount = command == 'zap'
+      ? (parsedFromRaw?.repeatCount ??
+          (event['repeat_count'] is num
+            ? (event['repeat_count'] as num).toInt().clamp(1, 50)
+            : 1))
+      : 1;
     final strength = parsedFromRaw?.strength ??
         (event['strength'] is num
             ? (event['strength'] as num).toInt().clamp(1, 100)
@@ -481,6 +652,11 @@ class NotificationBuzzService {
     final confidenceBoost =
         (parsedFromRaw?.hadStructuredArgs ?? false) ? 0.05 : 0.0;
     final confidence = (baseConfidence + confidenceBoost).clamp(0.0, 1.0);
+    final messageId = (event['discord_message_id']?.toString().trim().isNotEmpty == true)
+      ? event['discord_message_id'].toString().trim()
+      : (event['message_id']?.toString().trim().isNotEmpty == true)
+        ? event['message_id'].toString().trim()
+        : null;
 
     return NotificationCommand(
       source: source,
@@ -488,10 +664,12 @@ class NotificationBuzzService {
       command: command,
       count: count,
       loop: loop,
+      repeatCount: repeatCount,
       strength: strength,
       durationMs: durationMs,
       confidence: confidence,
       raw: raw.isNotEmpty ? raw : commandText,
+      messageId: messageId,
     );
   }
 
@@ -541,13 +719,16 @@ class NotificationBuzzService {
     if (buzzIndex >= 0) {
       final seconds = _extractBuzzSeconds(tokens, buzzIndex);
       final loop = tokens.contains('loop');
+      final loopCount = loop
+          ? (_extractLoopCount(tokens, buzzIndex) ?? (seconds ?? 1))
+          : 1;
       final parsedDurationMs = _extractDurationMs(tokens, buzzIndex);
       final durationMs = seconds != null
           ? seconds * 1000
           : parsedDurationMs;
       return _ParsedRawCommand(
         command: 'buzz',
-        count: loop ? (seconds ?? 1) : 1,
+        count: loopCount,
         loop: loop,
         durationMs: durationMs,
         hadStructuredArgs: loop || seconds != null || durationMs != null,
@@ -558,10 +739,15 @@ class NotificationBuzzService {
     if (zapIndex >= 0) {
       final strength =
           _extractStrength(tokens, zapIndex) ?? _policy.zapDefaultStrength;
+      final loop = tokens.contains('loop');
+      final repeatCount = loop
+          ? (_extractLoopCount(tokens, zapIndex) ?? 1)
+          : 1;
       return _ParsedRawCommand(
         command: 'zap',
         strength: strength,
-        hadStructuredArgs: strength != _policy.zapDefaultStrength,
+        repeatCount: repeatCount,
+        hadStructuredArgs: strength != _policy.zapDefaultStrength || loop,
       );
     }
 
@@ -605,6 +791,15 @@ class NotificationBuzzService {
       }
     }
     return null;
+  }
+
+  int? _extractLoopCount(List<String> tokens, int commandIndex) {
+    final loopIndex = tokens.indexOf('loop');
+    if (loopIndex >= 0 && loopIndex + 1 < tokens.length) {
+      final n = int.tryParse(tokens[loopIndex + 1]);
+      if (n != null) return n.clamp(1, 300);
+    }
+    return _extractCount(tokens, commandIndex);
   }
 
   int? _extractStrength(List<String> tokens, int commandIndex) {
@@ -662,8 +857,9 @@ class NotificationBuzzService {
   bool _isInCooldown(int nowMs) => nowMs < _cooldownUntilMs;
 
   bool _isDeduped(NotificationCommand command, int nowMs) {
+    final compactRaw = command.raw.trim().toLowerCase().replaceAll(RegExp(r'\s+'), ' ');
     final signature =
-        '${command.source}|${command.packageName}|${command.command}|${command.count}|${command.loop}|${command.strength}|${command.durationMs}';
+        '${command.messageId ?? ''}|${command.packageName}|${command.command}|${command.count}|${command.loop}|${command.repeatCount}|${command.strength}|${command.durationMs}|$compactRaw';
     _recentSignatures.removeWhere(
       (_, seenAt) => nowMs - seenAt > _policy.dedupeWindowMs,
     );
@@ -747,8 +943,8 @@ class NotificationCommandPolicy {
         enabled: true,
         dryRun: false,
         minConfidence: 0.82,
-        allowSources: {'notification', 'screen'},
-        packageAllowlist: <String>{},
+        allowSources: {'notification', 'screen', 'discord_bot'},
+        packageAllowlist: {'com.discord'},
         packageBlocklist: {
           'com.hound.controller',
           'com.google.android.inputmethod.latin',
@@ -760,13 +956,13 @@ class NotificationCommandPolicy {
         maxDedupSignatures: 256,
         buzzLevel: 10,
         buzzLoopMultiplier: 2,
-        buzzMaxQueueAdd: 24,
+        buzzMaxQueueAdd: 10,
         buzzGapMs: 700,
         defaultDurationMs: 500,
         minDurationMs: 100,
-        maxDurationMs: 4 * 1000,
-        zapDefaultStrength: 40,
-        zapMaxStrength: 80,
+        maxDurationMs: 20 * 1000,
+        zapDefaultStrength: 20,
+        zapMaxStrength: 20,
         allowBuzzWithoutHrData: true,
         noHrBuzzLevel: 7,
         noHrMaxDurationMs: 1200,
@@ -775,6 +971,9 @@ class NotificationCommandPolicy {
             allowedCommands: {'buzz', 'zap'},
             minConfidence: 0.72,
             strengthScale: 1.0,
+            maxDurationMs: 600 * 1000,
+            maxLoopCount: 25,
+            maxZapStrength: 20,
           ),
           'com.google.android.apps.messaging': NotificationCommandAppRule(
             allowedCommands: {'buzz'},
@@ -861,7 +1060,7 @@ class NotificationCommandPolicy {
           ? (raw['min_duration_ms'] as num).toInt().clamp(10, 2000)
           : defaults.minDurationMs,
       maxDurationMs: raw['max_duration_ms'] is num
-          ? (raw['max_duration_ms'] as num).toInt().clamp(100, 30000)
+          ? (raw['max_duration_ms'] as num).toInt().clamp(100, 600000)
           : defaults.maxDurationMs,
       zapDefaultStrength: raw['zap_default_strength'] is num
           ? (raw['zap_default_strength'] as num).toInt().clamp(1, 100)
@@ -902,11 +1101,17 @@ class NotificationCommandAppRule {
     required this.allowedCommands,
     this.minConfidence,
     this.strengthScale = 1.0,
+    this.maxDurationMs,
+    this.maxLoopCount,
+    this.maxZapStrength,
   });
 
   final Set<String> allowedCommands;
   final double? minConfidence;
   final double strengthScale;
+  final int? maxDurationMs;
+  final int? maxLoopCount;
+  final int? maxZapStrength;
 
   factory NotificationCommandAppRule.fromMap(Map<String, dynamic> raw) {
     Set<String> commands = <String>{};
@@ -925,6 +1130,15 @@ class NotificationCommandAppRule {
       strengthScale: raw['strength_scale'] is num
           ? (raw['strength_scale'] as num).toDouble().clamp(0.1, 3.0)
           : 1.0,
+        maxDurationMs: raw['max_duration_ms'] is num
+          ? (raw['max_duration_ms'] as num).toInt().clamp(100, 600000)
+          : null,
+        maxLoopCount: raw['max_loop_count'] is num
+          ? (raw['max_loop_count'] as num).toInt().clamp(1, 300)
+          : null,
+        maxZapStrength: raw['max_zap_strength'] is num
+          ? (raw['max_zap_strength'] as num).toInt().clamp(1, 100)
+          : null,
     );
   }
 }
@@ -936,10 +1150,12 @@ class NotificationCommand {
     required this.command,
     required this.count,
     required this.loop,
+    required this.repeatCount,
     required this.strength,
     required this.durationMs,
     required this.confidence,
     required this.raw,
+    this.messageId,
   });
 
   final String source;
@@ -947,10 +1163,12 @@ class NotificationCommand {
   final String command;
   final int count;
   final bool loop;
+  final int repeatCount;
   final int strength;
   final int durationMs;
   final double confidence;
   final String raw;
+  final String? messageId;
 }
 
 class _ParsedRawCommand {
@@ -958,6 +1176,7 @@ class _ParsedRawCommand {
     required this.command,
     this.count = 1,
     this.loop = false,
+    this.repeatCount = 1,
     this.strength = 64,
     this.durationMs,
     this.hadStructuredArgs = false,
@@ -966,6 +1185,7 @@ class _ParsedRawCommand {
   final String command;
   final int count;
   final bool loop;
+  final int repeatCount;
   final int strength;
   final int? durationMs;
   final bool hadStructuredArgs;

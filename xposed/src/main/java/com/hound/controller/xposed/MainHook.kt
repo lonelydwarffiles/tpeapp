@@ -125,6 +125,8 @@ class MainHook : IXposedHookLoadPackage {
         OkHttpHook.install(loader)
         TextViewHook.install(loader)
         InputConnectionHook.install(loader)
+        ClipboardShareAntiBypassHook.install(loader)
+        VideoTrackingHook.install(loader)
     }
 }
 

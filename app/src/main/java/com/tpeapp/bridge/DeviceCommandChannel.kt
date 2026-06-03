@@ -399,6 +399,16 @@ object DeviceCommandChannel {
                         DeviceCommandManager.showOverlay(ctx, title, message, imageUrl)
                         result.success(null)
                     }
+                    "showTaskGateOverlay" -> {
+                        val title = call.argument<String>("title")?.trim().orEmpty().ifBlank { "Task Lock Active" }
+                        val message = call.argument<String>("message")
+                            ?.trim()
+                            .orEmpty()
+                            .ifBlank { "Complete the active task to remove this lock." }
+                        // Root host does not have a dedicated TaskGate activity; reuse managed overlay.
+                        DeviceCommandManager.showOverlay(ctx, title, message, null)
+                        result.success(null)
+                    }
                     "suspendApp" -> {
                         val pkg = call.argument<String>("packageName")
                             ?: return@setMethodCallHandler result.error("INVALID", "packageName required", null)

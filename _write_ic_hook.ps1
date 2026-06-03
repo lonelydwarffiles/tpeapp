@@ -1,4 +1,11 @@
-﻿package com.hound.controller.xposed
+
+# This script reads the original InputConnectionHook.kt from git HEAD and
+# applies all three deferred-correction changes atomically.
+
+$file = "c:\Users\techd\Documents\GitHub\tpeapp\xposed\src\main\java\com\hound\controller\xposed\InputConnectionHook.kt"
+
+$newContent = @'
+package com.hound.controller.xposed
 
 import android.content.Intent
 import android.util.Log
@@ -60,8 +67,6 @@ object InputConnectionHook {
     /** How long the vocabulary / tone-mode caches remain valid (ms). */
     private const val CACHE_TTL_MS = 30_000L
     private const val REPLACEMENT_UNDO_WINDOW_MS = 4_000L
-    private const val MIN_AUTOCORRECT_TOKEN_LEN = 3
-    private const val ENABLE_INLINE_DEFERRED_AUTOCORRECT = true
     private const val MODE_STRICT = "strict"
     private const val MODE_LOOSE = "loose"
 
@@ -224,7 +229,6 @@ object InputConnectionHook {
         // Never enforce from keyboard/IME processes.
         if (keyboardProcess) return
         if (TextViewHook.isPackageExcludedFromTextReplacement(packageName)) return
-        val policy = TextViewHook.currentPolicy()
 
         val vocabRegexes = currentVocabRegexes() ?: emptyList()
         val toneMode  = currentToneMode()
@@ -247,7 +251,7 @@ object InputConnectionHook {
         }
 
         // -- Vocabulary blocking (highest priority) ---------------------------
-        if (policy.enableInputRedaction && vocabRegexes.isNotEmpty()) {
+        if (vocabRegexes.isNotEmpty()) {
             for ((word, regex) in vocabRegexes) {
                 if (word.isBlank()) continue
                 if (toneMode == MODE_LOOSE && sessionWhitelistWords.contains(word)) continue
@@ -278,8 +282,6 @@ object InputConnectionHook {
         // -- Deferred dictionary replacement ----------------------------------
         // Store this word as pending; the actual substitution fires when the
         // NEXT word-boundary commit arrives (via flushPendingCorrection).
-        if (!ENABLE_INLINE_DEFERRED_AUTOCORRECT || !policy.enableInlineAutocorrect) return
-
         if (shouldAllowImmediateUndo(workingText.toString().trim())) return
 
         if (!allowAutocorrect) {
@@ -329,10 +331,6 @@ object InputConnectionHook {
 
         if (ic == null) return
 
-        // Avoid rewriting common short tokens (e.g., "in", "to") that are
-        // frequently edited and prone to false-positive regex replacements.
-        if (word.trim().length < MIN_AUTOCORRECT_TOKEN_LEN) return
-
         val packageName = MainHook.getProcessPackageName()
         if (isKeyboardProcess(packageName)) return
         if (TextViewHook.isPackageExcludedFromTextReplacement(packageName)) return
@@ -341,7 +339,6 @@ object InputConnectionHook {
         if (dict.isEmpty()) return
 
         val policy   = TextViewHook.currentPolicy()
-        if (!policy.enableInlineAutocorrect) return
         val toneMode = TextViewHook.currentToneMode()
 
         val replaced = TextViewHook.applyReplacements(
@@ -606,3 +603,7 @@ object InputConnectionHook {
         }
     }
 }
+'@
+
+[System.IO.File]::WriteAllText($file, $newContent, [System.Text.Encoding]::UTF8)
+Write-Host "Written. Lines: $((Get-Content $file).Count)"
