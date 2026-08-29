@@ -1,4 +1,4 @@
-package com.tpeapp.review
+package com.hound.controller.review
 
 import android.app.Activity
 import android.content.Intent
@@ -10,15 +10,15 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.preference.PreferenceManager
-import com.tpeapp.R
-import com.tpeapp.databinding.ActivityReviewBinding
-import com.tpeapp.pairing.PairingActivity
+import com.hound.controller.R
+import com.hound.controller.databinding.ActivityReviewBinding
+import com.hound.controller.pairing.PairingActivity
 
 /**
  * ReviewActivity — "Start Review" screen that initiates peer screen-sharing.
  *
  * Flow:
- *  1. The user opens this activity (typically via the [com.tpeapp.ui.MainActivity] dashboard).
+ *  1. The user opens this activity (typically via the [com.hound.controller.ui.MainActivity] dashboard).
  *  2. [MediaProjectionManager] presents the system consent dialog.
  *  3. On approval, [ScreencastService] is started as a foreground service,
  *     which creates the [android.media.projection.MediaProjection] and delegates to

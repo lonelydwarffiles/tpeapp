@@ -1,12 +1,12 @@
-﻿package com.tpeapp.telemetry
+package com.hound.controller.telemetry
 
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.util.Log
 import androidx.preference.PreferenceManager
-import com.tpeapp.service.FilterService
-import com.tpeapp.webhook.WebhookManager
+import com.hound.controller.service.FilterService
+import com.hound.controller.webhook.WebhookManager
 import org.json.JSONObject
 
 /**

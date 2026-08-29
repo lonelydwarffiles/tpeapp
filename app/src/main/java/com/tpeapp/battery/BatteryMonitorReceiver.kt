@@ -1,4 +1,4 @@
-package com.tpeapp.battery
+package com.hound.controller.battery
 
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -10,10 +10,10 @@ import android.os.Build
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.preference.PreferenceManager
-import com.tpeapp.R
-import com.tpeapp.consequence.ConsequenceDispatcher
-import com.tpeapp.pairing.PairingActivity
-import com.tpeapp.service.FilterService
+import com.hound.controller.R
+import com.hound.controller.consequence.ConsequenceDispatcher
+import com.hound.controller.pairing.PairingActivity
+import com.hound.controller.service.FilterService
 import okhttp3.Call
 import okhttp3.Callback
 import okhttp3.MediaType.Companion.toMediaType
@@ -40,7 +40,7 @@ import java.util.concurrent.TimeUnit
  * plugged in.
  *
  * Register this receiver **dynamically** in any long-running service (e.g.
- * [com.tpeapp.service.FilterService]) with [Intent.ACTION_BATTERY_CHANGED].
+ * [com.hound.controller.service.FilterService]) with [Intent.ACTION_BATTERY_CHANGED].
  * The static registration in AndroidManifest.xml is required for the boot
  * path (`BOOT_COMPLETED`) only; `ACTION_BATTERY_CHANGED` is a sticky implicit
  * broadcast that must be registered at runtime.

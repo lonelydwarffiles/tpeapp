@@ -1,4 +1,4 @@
-package com.tpeapp.capability
+package com.hound.controller.capability
 
 import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.GestureDescription
@@ -10,12 +10,12 @@ import android.util.Log
 import android.view.WindowManager
 import android.view.accessibility.AccessibilityEvent
 import androidx.preference.PreferenceManager
-import com.tpeapp.consequence.ConsequenceDispatcher
-import com.tpeapp.gating.AppGatingManager
-import com.tpeapp.mindful.ToneEnforcementService
-import com.tpeapp.service.FilterService
-import com.tpeapp.vault.PasswordVaultManager
-import com.tpeapp.webhook.WebhookManager
+import com.hound.controller.consequence.ConsequenceDispatcher
+import com.hound.controller.gating.AppGatingManager
+import com.hound.controller.mindful.ToneEnforcementService
+import com.hound.controller.service.FilterService
+import com.hound.controller.vault.PasswordVaultManager
+import com.hound.controller.webhook.WebhookManager
 import org.json.JSONArray
 import org.json.JSONObject
 

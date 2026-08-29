@@ -1,4 +1,4 @@
-﻿package com.tpeapp.review
+package com.hound.controller.review
 
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -8,17 +8,17 @@ import android.content.Intent
 import android.os.IBinder
 import android.util.Log
 import androidx.core.app.NotificationCompat
-import com.tpeapp.R
-import com.tpeapp.ui.MainActivity
+import com.hound.controller.R
+import com.hound.controller.ui.MainActivity
 
 /**
- * ScreencastService â€” a foreground service with [foregroundServiceType="mediaProjection"].
+ * ScreencastService — a foreground service with [foregroundServiceType="mediaProjection"].
  *
  * Responsibilities:
- *  â€¢ Displays a mandatory persistent notification (required by Android 14+ / upcoming Android 16).
- *  â€¢ Creates a [android.media.projection.MediaProjection] from the permission grant result that
+ *  • Displays a mandatory persistent notification (required by Android 14+ / upcoming Android 16).
+ *  • Creates a [android.media.projection.MediaProjection] from the permission grant result that
  *    [ReviewActivity] passes in via the starting Intent.
- *  â€¢ Hands the [android.media.projection.MediaProjection] to [StreamCoordinator] to begin
+ *  • Hands the [android.media.projection.MediaProjection] to [StreamCoordinator] to begin
  *    capturing and broadcasting via WebRTC.
  *
  * Start this service with:
@@ -66,7 +66,7 @@ class ScreencastService : Service() {
         }
 
         if (intent == null) {
-            Log.e(TAG, "Null intent received â€” stopping service")
+            Log.e(TAG, "Null intent received — stopping service")
             stopSelf()
             return START_NOT_STICKY
         }
@@ -78,7 +78,7 @@ class ScreencastService : Service() {
         val signalingUrl      = intent.getStringExtra(EXTRA_SIGNALING_URL).orEmpty()
 
         if (resultData == null || resultCode == 0) {
-            Log.e(TAG, "Missing MediaProjection permission result â€” stopping service")
+            Log.e(TAG, "Missing MediaProjection permission result — stopping service")
             stopSelf()
             return START_NOT_STICKY
         }

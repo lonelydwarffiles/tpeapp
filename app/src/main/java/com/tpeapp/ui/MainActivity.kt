@@ -1,21 +1,25 @@
-package com.tpeapp.ui
+package com.hound.controller.ui
 
 import android.app.admin.DevicePolicyManager
 import android.content.ComponentName
 import android.content.Intent
+import android.net.Uri
+import android.os.Build
 import android.os.Bundle
+import android.os.PowerManager
+import android.provider.Settings
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
-import com.tpeapp.R
-import com.tpeapp.databinding.ActivityMainBinding
-import com.tpeapp.mdm.AppDeviceAdminReceiver
-import com.tpeapp.mdm.PartnerPinManager
-import com.tpeapp.checkin.CheckInActivity
-import com.tpeapp.questions.QuestionsActivity
-import com.tpeapp.review.ReviewActivity
-import com.tpeapp.service.FilterService
-import com.tpeapp.tasks.AssignTaskActivity
-import com.tpeapp.tasks.TaskListActivity
+import com.hound.controller.R
+import com.hound.controller.databinding.ActivityMainBinding
+import com.hound.controller.mdm.AppDeviceAdminReceiver
+import com.hound.controller.mdm.PartnerPinManager
+import com.hound.controller.checkin.CheckInActivity
+import com.hound.controller.questions.QuestionsActivity
+import com.hound.controller.review.ReviewActivity
+import com.hound.controller.service.FilterService
+import com.hound.controller.tasks.AssignTaskActivity
+import com.hound.controller.tasks.TaskListActivity
 
 /**
  * MainActivity — the sole transparent UI entry-point.
@@ -49,6 +53,7 @@ class MainActivity : AppCompatActivity() {
         setContentView(binding.root)
 
         startFilterService()
+        requestIgnoreBatteryOptimizationsIfNeeded()
         refreshAdminStatus()
         bindButtons()
     }
@@ -60,6 +65,19 @@ class MainActivity : AppCompatActivity() {
     private fun startFilterService() {
         val intent = Intent(this, FilterService::class.java)
         startForegroundService(intent)
+    }
+
+    private fun requestIgnoreBatteryOptimizationsIfNeeded() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return
+        val pm = getSystemService(PowerManager::class.java)
+        if (pm?.isIgnoringBatteryOptimizations(packageName) == true) return
+        runCatching {
+            startActivity(
+                Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+                    data = Uri.parse("package:$packageName")
+                }
+            )
+        }
     }
 
     // ------------------------------------------------------------------

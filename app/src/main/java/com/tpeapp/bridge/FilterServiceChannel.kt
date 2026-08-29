@@ -1,17 +1,21 @@
-package com.tpeapp.bridge
+package com.hound.controller.bridge
 
 import android.content.Context
 import android.content.Intent
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
 import androidx.preference.PreferenceManager
-import com.tpeapp.service.FilterService
+import com.hound.controller.service.FilterService
+import com.hound.controller.vpn.MitmCertificateAuthority
 import io.flutter.plugin.common.BinaryMessenger
 import io.flutter.plugin.common.MethodChannel
+import java.util.concurrent.Executors
 
 /**
  * FilterServiceChannel — MethodChannel bridge for [FilterService].
  *
- * Channel name: `com.tpeapp/filter_service`
+ * Channel name: `com.hound.controller/filter_service`
  *
  * Methods exposed to Dart:
  *  - `start`                                 → starts FilterService as a foreground service
@@ -28,6 +32,8 @@ object FilterServiceChannel {
 
     private const val TAG = "FilterServiceChannel"
     private const val CHANNEL = "com.hound.controller/filter_service"
+    private val diagnosticsExecutor = Executors.newSingleThreadExecutor()
+    private val mainHandler = Handler(Looper.getMainLooper())
 
     fun register(messenger: BinaryMessenger, context: Context) {
         MethodChannel(messenger, CHANNEL).setMethodCallHandler { call, result ->
@@ -180,6 +186,42 @@ object FilterServiceChannel {
                         )
                     }
                     result.success(json.toString())
+                }
+                "getInterceptionDiagnostics" -> {
+                    diagnosticsExecutor.execute {
+                        try {
+                            val trust = MitmCertificateAuthority.queryTrustStatus(ctx)
+                            val prefs = PreferenceManager.getDefaultSharedPreferences(ctx)
+                            prefs.edit()
+                                .putString(FilterService.PREF_INTERCEPT_CA_TRUST_SCOPE, trust.scope)
+                                .apply()
+
+                            val feedJson = prefs.getString(FilterService.PREF_INTERCEPT_SNI_FEED_JSON, "[]") ?: "[]"
+                            val feed = mutableListOf<Map<String, Any?>>()
+                            runCatching {
+                                val arr = org.json.JSONArray(feedJson)
+                                for (i in 0 until arr.length()) {
+                                    val item = arr.optJSONObject(i) ?: continue
+                                    feed += mapOf(
+                                        "host" to item.optString("host", ""),
+                                        "timestamp_ms" to item.optLong("timestamp_ms", 0L),
+                                    )
+                                }
+                            }
+
+                            val payload = mapOf(
+                                "ca_scope" to trust.scope,
+                                "ca_trusted_user" to trust.trustedInUserStore,
+                                "ca_trusted_system" to trust.trustedInSystemStore,
+                                "sni_feed" to feed,
+                                "updated_at_ms" to System.currentTimeMillis(),
+                            )
+                            mainHandler.post { result.success(payload) }
+                        } catch (e: Exception) {
+                            Log.e(TAG, "Failed to compute interception diagnostics", e)
+                            mainHandler.post { result.error("DIAG_ERROR", e.message, null) }
+                        }
+                    }
                 }
                 else -> result.notImplemented()
             }

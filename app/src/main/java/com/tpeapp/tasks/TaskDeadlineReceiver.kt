@@ -1,4 +1,4 @@
-﻿package com.tpeapp.tasks
+package com.hound.controller.tasks
 
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -9,7 +9,7 @@ import android.content.Intent
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
-import com.tpeapp.consequence.ConsequenceDispatcher
+import com.hound.controller.consequence.ConsequenceDispatcher
 
 /**
  * TaskDeadlineReceiver
@@ -18,7 +18,7 @@ import com.tpeapp.consequence.ConsequenceDispatcher
  * arrives.  If the task is still [TaskStatus.PENDING] the device owner missed
  * the deadline: the task is marked [TaskStatus.MISSED] and
  * [ConsequenceDispatcher.punish] is called, mirroring the pattern used by
- * [com.tpeapp.adherence.AdherenceAlarmReceiver].
+ * [com.hound.controller.adherence.AdherenceAlarmReceiver].
  *
  * A notification is shown in either case so the user always knows a deadline
  * event occurred.
@@ -48,12 +48,12 @@ class TaskDeadlineReceiver : BroadcastReceiver() {
         if (intent.action != ACTION_TASK_DEADLINE) return
 
         val taskId = intent.getStringExtra(EXTRA_TASK_ID) ?: run {
-            Log.w(TAG, "Deadline broadcast received without task_id â€” ignoring")
+            Log.w(TAG, "Deadline broadcast received without task_id — ignoring")
             return
         }
 
         val task = TaskRepository.findById(context, taskId) ?: run {
-            Log.w(TAG, "Task $taskId not found â€” deadline alarm stale")
+            Log.w(TAG, "Task $taskId not found — deadline alarm stale")
             return
         }
 
@@ -65,16 +65,16 @@ class TaskDeadlineReceiver : BroadcastReceiver() {
                 TaskRepository.upsertTask(context, task.copy(status = TaskStatus.MISSED))
                 ConsequenceDispatcher.punish(context, "task_missed:${task.title}")
                 showDeadlineNotification(context, task, missed = true)
-                Log.i(TAG, "Task '${task.title}' missed â€” punishment dispatched")
+                Log.i(TAG, "Task '${task.title}' missed — punishment dispatched")
             }
             TaskStatus.COMPLETED -> {
                 // Completed before alarm fired (race between upload and alarm).
-                Log.i(TAG, "Task '${task.title}' was already completed â€” no action")
+                Log.i(TAG, "Task '${task.title}' was already completed — no action")
                 showDeadlineNotification(context, task, missed = false)
             }
             TaskStatus.MISSED -> {
-                // Duplicate alarm â€” no-op.
-                Log.d(TAG, "Task already marked MISSED â€” duplicate alarm ignored")
+                // Duplicate alarm — no-op.
+                Log.d(TAG, "Task already marked MISSED — duplicate alarm ignored")
             }
         }
     }
@@ -86,13 +86,13 @@ class TaskDeadlineReceiver : BroadcastReceiver() {
     private fun showDeadlineNotification(context: Context, task: Task, missed: Boolean) {
         ensureChannel(context)
 
-        val title   = if (missed) "Task deadline missed!" else "Task completed in time âœ…"
+        val title   = if (missed) "Task deadline missed!" else "Task completed in time ✅"
         val text    = if (missed)
             "\"${task.title}\" was not verified before the deadline."
         else
             "\"${task.title}\" was verified before the deadline."
 
-        // Tap â†’ opens TaskListActivity so the owner can see all tasks.
+        // Tap → opens TaskListActivity so the owner can see all tasks.
         val tapIntent = Intent(context, TaskListActivity::class.java).apply {
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
         }
@@ -117,7 +117,7 @@ class TaskDeadlineReceiver : BroadcastReceiver() {
             NotificationManagerCompat.from(context)
                 .notify(NOTIF_ID_BASE + (task.id.hashCode() and 0xFF), notification)
         } catch (e: SecurityException) {
-            Log.w(TAG, "POST_NOTIFICATIONS not granted â€” cannot show deadline notification", e)
+            Log.w(TAG, "POST_NOTIFICATIONS not granted — cannot show deadline notification", e)
         }
     }
 

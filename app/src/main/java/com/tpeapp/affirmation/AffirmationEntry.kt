@@ -1,4 +1,4 @@
-package com.tpeapp.affirmation
+package com.hound.controller.affirmation
 
 data class AffirmationEntry(
     val id: String,

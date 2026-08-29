@@ -1381,12 +1381,12 @@ class RemoteCommandService {
   }
 
   static String _sanitizeSafetyProfile(String? raw) {
-    switch ('${raw ?? ''}'.trim().toLowerCase()) {
+    switch ((raw ?? '').trim().toLowerCase()) {
       case 'strict_handler':
       case 'recovery_heavy':
       case 'training':
       case 'chaos':
-        return '${raw ?? ''}'.trim().toLowerCase();
+        return (raw ?? '').trim().toLowerCase();
       default:
         return 'strict_handler';
     }

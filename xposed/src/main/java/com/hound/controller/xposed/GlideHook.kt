@@ -1,8 +1,8 @@
-﻿package com.hound.controller.xposed
+package com.hound.controller.xposed
 
 import android.graphics.Bitmap
 import android.util.Log
-import com.tpeapp.filter.IFilterCallback
+import com.hound.controller.filter.IFilterCallback
 import de.robv.android.xposed.XC_MethodHook
 import de.robv.android.xposed.XposedHelpers
 import kotlinx.coroutines.CompletableDeferred
@@ -26,7 +26,7 @@ import java.util.concurrent.atomic.AtomicLong
  *
  * Because the actual file write is delegated to a [Writer] callback, we
  * intercept at the [com.bumptech.glide.load.engine.EngineJob] bitmap-ready
- * callback instead â€” specifically `onResourceReady` â€” where we have access
+ * callback instead — specifically `onResourceReady` — where we have access
  * to the decoded [Bitmap] before it is placed into the memory/disk cache.
  *
  * If sensitive content is found the Bitmap pixels are replaced in-place
@@ -96,7 +96,7 @@ object GlideHook {
         }
     }
 
-    // Glide pool recycles bitmaps â€” hook acquire to catch recycled cases too.
+    // Glide pool recycles bitmaps — hook acquire to catch recycled cases too.
     private fun hookBitmapPool(loader: ClassLoader) {
         val bitmapResourceClass = XposedHelpers.findClassIfExists("com.bumptech.glide.load.resource.bitmap.BitmapResource", loader)
         if (bitmapResourceClass == null) {
@@ -213,7 +213,7 @@ object GlideHook {
     }
 
     private fun scanAndReplaceStrict(
-        service: com.tpeapp.filter.IFilterService,
+        service: com.hound.controller.filter.IFilterService,
         bitmap: Bitmap,
     ) {
         if (!MediaFilterRuntimeConfig.tryAcquireScanBudget()) return

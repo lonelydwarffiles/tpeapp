@@ -54,6 +54,14 @@ class FilterServiceChannel {
     return <String, dynamic>{};
   }
 
+    static Future<Map<String, dynamic>> getInterceptionDiagnostics() async {
+        final raw = await _channel.invokeMethod<dynamic>('getInterceptionDiagnostics');
+        if (raw is Map) {
+            return raw.map((key, value) => MapEntry(key.toString(), value));
+        }
+        return <String, dynamic>{};
+    }
+
   /// Returns the currently configured webhook URL, or null if not set.
   static Future<String?> getWebhookUrl() =>
       _channel.invokeMethod<String>('getWebhookUrl');

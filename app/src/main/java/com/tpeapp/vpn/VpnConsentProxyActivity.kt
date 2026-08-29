@@ -1,4 +1,4 @@
-package com.tpeapp.vpn
+package com.hound.controller.vpn
 
 import android.app.Activity
 import android.net.VpnService

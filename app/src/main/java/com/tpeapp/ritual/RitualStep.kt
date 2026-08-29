@@ -1,4 +1,4 @@
-package com.tpeapp.ritual
+package com.hound.controller.ritual
 
 data class RitualStep(
     val id: String,

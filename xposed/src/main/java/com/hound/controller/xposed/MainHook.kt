@@ -1,4 +1,4 @@
-﻿package com.hound.controller.xposed
+package com.hound.controller.xposed
 
 import android.content.ComponentName
 import android.content.Context
@@ -6,7 +6,8 @@ import android.content.Intent
 import android.content.ServiceConnection
 import android.os.IBinder
 import android.util.Log
-import com.tpeapp.filter.IFilterService
+import com.hound.controller.filter.IFilterService
+import com.hound.controller.filter.IOnnxIpcService
 import de.robv.android.xposed.IXposedHookLoadPackage
 import de.robv.android.xposed.callbacks.XC_LoadPackage
 
@@ -17,7 +18,7 @@ import de.robv.android.xposed.callbacks.XC_LoadPackage
  *  1. Checks if the package should be filtered (all packages by default).
  *  2. Installs the relevant hooks ([ImageViewHook], [GlideHook], [CoilHook],
  *     [OkHttpHook]).
- *  3. Lazily binds to [com.tpeapp.service.FilterService] the first time a hook
+ *  3. Lazily binds to [com.hound.controller.service.FilterService] the first time a hook
  *     needs to submit an image.
  */
 class MainHook : IXposedHookLoadPackage {
@@ -35,6 +36,10 @@ class MainHook : IXposedHookLoadPackage {
 
         /** Shared, lazily-initialised reference to the bound FilterService. */
         @Volatile var filterService: IFilterService? = null
+            private set
+
+        /** Shared, lazily-initialised reference to the bound ONNX IPC service. */
+        @Volatile var onnxIpcService: IOnnxIpcService? = null
             private set
 
         @Volatile private var hookedProcessPackageName: String = ""
@@ -90,6 +95,28 @@ class MainHook : IXposedHookLoadPackage {
             }
         }
 
+        fun ensureOnnxServiceBound(context: Context) {
+            if (onnxIpcService != null) return
+            synchronized(this) {
+                if (onnxIpcService != null) return
+                serviceContext = context.applicationContext
+                val intent = Intent("com.hound.controller.BIND_ONNX_IPC_SERVICE")
+                    .setPackage("com.hound.controller")
+                try {
+                    val bound = context.applicationContext.bindService(
+                        intent,
+                        onnxConnection,
+                        Context.BIND_AUTO_CREATE
+                    )
+                    if (!bound) {
+                        Log.e(TAG, "bindService(ONNX) returned false for package=${context.packageName}")
+                    }
+                } catch (t: Throwable) {
+                    Log.e(TAG, "bindService(ONNX) failed for package=${context.packageName}", t)
+                }
+            }
+        }
+
         private val connection = object : ServiceConnection {
             override fun onServiceConnected(name: ComponentName, service: IBinder) {
                 filterService = IFilterService.Stub.asInterface(service)
@@ -98,10 +125,25 @@ class MainHook : IXposedHookLoadPackage {
 
             override fun onServiceDisconnected(name: ComponentName) {
                 filterService = null
-                Log.w(TAG, "FilterService disconnected â€” will rebind on next hook call")
+                Log.w(TAG, "FilterService disconnected — will rebind on next hook call")
                 // Re-bind so transient disconnects heal automatically.
                 serviceContext?.let { ctx ->
                     ensureServiceBound(ctx)
+                }
+            }
+        }
+
+        private val onnxConnection = object : ServiceConnection {
+            override fun onServiceConnected(name: ComponentName, service: IBinder) {
+                onnxIpcService = IOnnxIpcService.Stub.asInterface(service)
+                Log.i(TAG, "OnnxIpcService connected in ${serviceContext?.packageName}")
+            }
+
+            override fun onServiceDisconnected(name: ComponentName) {
+                onnxIpcService = null
+                Log.w(TAG, "OnnxIpcService disconnected — will rebind on next hook call")
+                serviceContext?.let { ctx ->
+                    ensureOnnxServiceBound(ctx)
                 }
             }
         }
@@ -119,6 +161,8 @@ class MainHook : IXposedHookLoadPackage {
         Log.d(TAG, "Hooking package: $pkg")
 
         val loader = lpparam.classLoader
+
+        GlideSingleRequestHook.install(loader)
 
         // Media filtering is network-layer only to avoid UI-thread freezes.
         OkHttpHook.install(loader)

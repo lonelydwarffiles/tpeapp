@@ -1,4 +1,4 @@
-package com.tpeapp.consequence
+package com.hound.controller.consequence
 
 import android.os.Bundle
 import android.os.CountDownTimer
@@ -11,9 +11,9 @@ import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.core.content.ContextCompat
 import androidx.preference.PreferenceManager
-import com.tpeapp.databinding.ActivityCornerTimeBinding
-import com.tpeapp.service.FilterService
-import com.tpeapp.webhook.WebhookManager
+import com.hound.controller.databinding.ActivityCornerTimeBinding
+import com.hound.controller.service.FilterService
+import com.hound.controller.webhook.WebhookManager
 import org.json.JSONObject
 import java.util.Locale
 import java.util.concurrent.TimeUnit
@@ -21,7 +21,7 @@ import java.util.concurrent.TimeUnit
 /**
  * CornerTimeActivity — full-screen countdown lock with front-camera preview.
  *
- * Launched by [com.tpeapp.mqtt.PartnerMqttService] via full-screen intent when the
+ * Launched by [com.hound.controller.mqtt.PartnerMqttService] via full-screen intent when the
  * Dom sends a START_CORNER_TIME MQTT command.
  *
  * The back button is suppressed.  When the timer expires the activity fires a
@@ -56,10 +56,10 @@ class CornerTimeActivity : AppCompatActivity() {
         setContentView(binding.root)
 
         val durationMinutes = intent.getIntExtra(EXTRA_DURATION_MINUTES, 5)
-        val title = intent.getStringExtra(EXTRA_TITLE) ?: getString(com.tpeapp.R.string.corner_time_title)
+        val title = intent.getStringExtra(EXTRA_TITLE) ?: getString(com.hound.controller.R.string.corner_time_title)
 
         binding.tvCornerTimeTitle.text = title
-        binding.tvCornerTimeInstruction.text = getString(com.tpeapp.R.string.corner_time_instruction)
+        binding.tvCornerTimeInstruction.text = getString(com.hound.controller.R.string.corner_time_instruction)
 
         startCamera()
         startCountdown(durationMinutes)
@@ -114,7 +114,7 @@ class CornerTimeActivity : AppCompatActivity() {
 
             override fun onFinish() {
                 binding.tvCountdown.text = "00:00"
-                binding.tvCornerTimeInstruction.text = getString(com.tpeapp.R.string.corner_time_done)
+                binding.tvCornerTimeInstruction.text = getString(com.hound.controller.R.string.corner_time_done)
                 ConsequenceDispatcher.reward(this@CornerTimeActivity, "corner_time_complete")
                 dispatchWebhook()
                 finish()

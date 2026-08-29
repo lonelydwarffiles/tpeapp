@@ -1,4 +1,4 @@
-package com.tpeapp.censor
+package com.hound.controller.censor
 
 import android.content.Context
 import android.graphics.Bitmap
@@ -11,6 +11,8 @@ import ai.onnxruntime.OrtEnvironment
 import ai.onnxruntime.OrtSession
 import java.io.ByteArrayOutputStream
 import java.nio.FloatBuffer
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.math.max
 import kotlin.random.Random
@@ -30,7 +32,7 @@ import kotlin.random.Random
 class CensorshipEngine(
     private val context: Context,
     private val modelAssetName: String = "320.ort",
-    private val defaultForbiddenClassIds: Set<Int> = setOf(2, 3, 4, 6, 14),
+    private val defaultForbiddenClassIds: Set<Int> = setOf(11, 13, 14, 17),
     private val scoreThreshold: Float = 0.55f,
 ) : AutoCloseable {
 
@@ -51,6 +53,7 @@ class CensorshipEngine(
     private val closed = AtomicBoolean(false)
     private val env: OrtEnvironment = OrtEnvironment.getEnvironment()
     private val session: OrtSession = createSession()
+    private val inferenceExecutor = Executors.newSingleThreadExecutor()
 
     private fun createSession(): OrtSession {
         val modelBytes = runCatching {
@@ -280,34 +283,92 @@ class CensorshipEngine(
     ): CensorResult {
         ensureOpen()
 
-        val inputData = preprocess(src)
-        val inputName = session.inputNames.first()
+        val task = inferenceExecutor.submit<CensorResult> {
+            censorBitmapInternal(src, censorStyle, forbiddenClassIds)
+        }
+        return try {
+            task.get(1500, TimeUnit.MILLISECONDS)
+        } catch (timeout: java.util.concurrent.TimeoutException) {
+            task.cancel(true)
+            Log.w(TAG, "censorBitmap timed out after 1500ms; passthrough fallback")
+            CensorResult(false, emptyList(), safeCopy(src))
+        } catch (e: Exception) {
+            Log.e(TAG, "censorBitmap wrapper failed; passthrough", e)
+            CensorResult(false, emptyList(), safeCopy(src))
+        }
+    }
 
-        val tensor = OnnxTensor.createTensor(
-            env,
-            FloatBuffer.wrap(inputData),
-            longArrayOf(1, CHANNELS.toLong(), MODEL_SIZE.toLong(), MODEL_SIZE.toLong()),
-        )
+    private fun censorBitmapInternal(
+        src: Bitmap,
+        censorStyle: String,
+        forbiddenClassIds: Set<Int>,
+    ): CensorResult {
+        ensureOpen()
+
+        val inputData = try {
+            preprocess(src)
+        } catch (oom: OutOfMemoryError) {
+            Log.e(TAG, "OOM during preprocess; returning passthrough", oom)
+            return CensorResult(false, emptyList(), safeCopy(src))
+        }
+
+        val inputName = session.inputNames.first()
+        val tensor = try {
+            OnnxTensor.createTensor(
+                env,
+                FloatBuffer.wrap(inputData),
+                longArrayOf(1, CHANNELS.toLong(), MODEL_SIZE.toLong(), MODEL_SIZE.toLong()),
+            )
+        } catch (oom: OutOfMemoryError) {
+            Log.e(TAG, "OOM creating ONNX tensor; returning passthrough", oom)
+            return CensorResult(false, emptyList(), safeCopy(src))
+        }
 
         val output = try {
             session.run(mapOf(inputName to tensor))
+        } catch (e: Exception) {
+            Log.e(TAG, "ONNX inference failed; returning passthrough", e)
+            return CensorResult(false, emptyList(), safeCopy(src))
         } finally {
+            // tensor must be closed regardless of whether run() succeeds or throws.
             tensor.close()
         }
 
-        val matrix = try {
-            @Suppress("UNCHECKED_CAST")
-            output[0].value as Array<Array<FloatArray>>
-        } catch (t: Throwable) {
-            output.close()
-            Log.e(TAG, "Unexpected YOLO output shape", t)
-            return CensorResult(false, emptyList(), src.copy(src.config ?: Bitmap.Config.ARGB_8888, true))
-        }
+        try {
+            val matrix = try {
+                @Suppress("UNCHECKED_CAST")
+                output[0].value as Array<Array<FloatArray>>
+            } catch (t: Throwable) {
+                Log.e(TAG, "Unexpected YOLO output shape", t)
+                return CensorResult(false, emptyList(), safeCopy(src))
+            }
 
-        val boxes = processOutput(matrix, src, forbiddenClassIds)
-        val outBitmap = applySelectiveCensorWithStyle(src, boxes, censorStyle)
-        output.close()
-        return CensorResult(boxes.isNotEmpty(), boxes, outBitmap)
+            val boxes = processOutput(matrix, src, forbiddenClassIds)
+
+            val outBitmap = try {
+                applySelectiveCensorWithStyle(src, boxes, censorStyle)
+            } catch (oom: OutOfMemoryError) {
+                Log.e(TAG, "OOM during censor apply; returning passthrough", oom)
+                return CensorResult(false, emptyList(), safeCopy(src))
+            }
+
+            return CensorResult(boxes.isNotEmpty(), boxes, outBitmap)
+        } finally {
+            // Guarantee OrtSession.Result is always released, even if processOutput
+            // or applySelectiveCensorWithStyle throws an uncaught exception.
+            output.close()
+        }
+    }
+
+    /**
+     * Returns a mutable copy of [src], or [src] itself if the copy would OOM.
+     * Callers must treat the returned bitmap as potentially the original and
+     * must not recycle it unconditionally.
+     */
+    private fun safeCopy(src: Bitmap): Bitmap = try {
+        src.copy(src.config ?: Bitmap.Config.ARGB_8888, true)
+    } catch (_: OutOfMemoryError) {
+        src
     }
 
     fun hasForbiddenContent(
@@ -360,6 +421,7 @@ class CensorshipEngine(
 
     override fun close() {
         if (!closed.compareAndSet(false, true)) return
+        runCatching { inferenceExecutor.shutdownNow() }
         runCatching { session.close() }
     }
 }

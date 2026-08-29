@@ -1,4 +1,4 @@
-﻿package com.tpeapp.ritual
+package com.hound.controller.ritual
 
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -41,7 +41,7 @@ class RitualAlarmReceiver : BroadcastReceiver() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        val title = if (isMorning) "ðŸŒ… Morning Ritual Required" else "ðŸŒ™ Evening Ritual Required"
+        val title = if (isMorning) "🌅 Morning Ritual Required" else "🌙 Evening Ritual Required"
 
         val notification = NotificationCompat.Builder(context, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.ic_media_play)
@@ -57,7 +57,7 @@ class RitualAlarmReceiver : BroadcastReceiver() {
         try {
             NotificationManagerCompat.from(context).notify(notifId, notification)
         } catch (e: SecurityException) {
-            Log.w(TAG, "Cannot post notification â€” launching directly", e)
+            Log.w(TAG, "Cannot post notification — launching directly", e)
             context.startActivity(activityIntent)
         }
 

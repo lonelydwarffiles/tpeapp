@@ -1,4 +1,4 @@
-package com.tpeapp.bridge
+package com.hound.controller.bridge
 
 import android.content.Intent
 import android.net.Uri
@@ -6,29 +6,29 @@ import android.os.Bundle
 import android.os.PowerManager
 import android.provider.Settings
 import android.util.Log
-import com.tpeapp.service.CoreServiceKeeper
+import com.hound.controller.service.CoreServiceKeeper
 import io.flutter.embedding.android.FlutterFragmentActivity
 import io.flutter.embedding.engine.FlutterEngine
 
 /**
  * TpeFlutterActivity — the Flutter host activity for the TPE app.
  *
- * Replaces the old Jetpack-only [com.tpeapp.ui.MainActivity].  All UI is now
+ * Replaces the old Jetpack-only [com.hound.controller.ui.MainActivity].  All UI is now
  * rendered by the Flutter engine; the native Kotlin layer exposes the following
  * services to Dart via MethodChannels:
  *
  *  | Channel                          | Bridge class                  |
  *  |----------------------------------|-------------------------------|
- *  | com.tpeapp/filter_service        | [FilterServiceChannel]        |
- *  | com.tpeapp/device_admin          | [DeviceAdminChannel]          |
- *  | com.tpeapp/partner_pin           | [PartnerPinChannel]           |
- *  | com.tpeapp/ble                   | [BleChannel]                  |
- *  | com.tpeapp/mqtt_events           | [MqttChannel]                 |
- *  | com.tpeapp/device_commands       | [DeviceCommandChannel]        |
- *  | com.tpeapp/screen_share          | [ScreenShareChannel]          |
- *  | com.tpeapp/remote_control        | [RemoteControlChannel]        |
- *  | com.tpeapp/text_replacement      | [TextReplacementChannel]      |
- *  | com.tpeapp/password_vault        | [PasswordVaultChannel]        |
+ *  | com.hound.controller/filter_service        | [FilterServiceChannel]        |
+ *  | com.hound.controller/device_admin          | [DeviceAdminChannel]          |
+ *  | com.hound.controller/partner_pin           | [PartnerPinChannel]           |
+ *  | com.hound.controller/ble                   | [BleChannel]                  |
+ *  | com.hound.controller/mqtt_events           | [MqttChannel]                 |
+ *  | com.hound.controller/device_commands       | [DeviceCommandChannel]        |
+ *  | com.hound.controller/screen_share          | [ScreenShareChannel]          |
+ *  | com.hound.controller/remote_control        | [RemoteControlChannel]        |
+ *  | com.hound.controller/text_replacement      | [TextReplacementChannel]      |
+ *  | com.hound.controller/password_vault        | [PasswordVaultChannel]        |
  *
  * The Xposed module, FilterService, AppDeviceAdminReceiver, PartnerMqttService,
  * and all background workers remain purely native and are NOT changed.

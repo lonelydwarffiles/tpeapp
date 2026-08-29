@@ -1,4 +1,4 @@
-package com.tpeapp.handler
+package com.hound.controller.handler
 
 import android.content.BroadcastReceiver
 import android.content.Intent
@@ -20,11 +20,11 @@ import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.ListAdapter
 import androidx.recyclerview.widget.RecyclerView
 import com.bumptech.glide.Glide
-import com.tpeapp.R
-import com.tpeapp.databinding.ActivityHandlerChatBinding
-import com.tpeapp.mqtt.PartnerMqttService
-import com.tpeapp.service.FilterService
-import com.tpeapp.ui.MainActivity
+import com.hound.controller.R
+import com.hound.controller.databinding.ActivityHandlerChatBinding
+import com.hound.controller.mqtt.PartnerMqttService
+import com.hound.controller.service.FilterService
+import com.hound.controller.ui.MainActivity
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext

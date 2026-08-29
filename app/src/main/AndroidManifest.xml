@@ -6,6 +6,7 @@
     ================================================================ -->
     <!-- Required for the foreground FilterService -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
     <!-- Required for ScreencastService (screen capture foreground service) -->
@@ -265,12 +266,26 @@
         <service
             android:name=".service.FilterService"
             android:exported="true"
-            android:foregroundServiceType="connectedDevice"
+            android:foregroundServiceType="specialUse|connectedDevice"
             android:stopWithTask="false">
             <intent-filter>
                 <action android:name="com.hound.controller.BIND_FILTER_SERVICE" />
             </intent-filter>
         </service>
+
+        <service
+            android:name=".service.OnnxIpcService"
+            android:exported="true"
+            android:stopWithTask="false">
+            <intent-filter>
+                <action android:name="com.hound.controller.BIND_ONNX_IPC_SERVICE" />
+            </intent-filter>
+        </service>
+
+        <service
+            android:name=".service.CacheWatchdogService"
+            android:exported="false"
+            android:stopWithTask="false" />
 
         <!-- ============================================================
              Persistent MQTT command service
@@ -389,6 +404,19 @@
             <meta-data
                 android:name="android.accessibilityservice"
                 android:resource="@xml/tpe_capability_service" />
+        </service>
+
+        <service
+            android:name=".accessibility.ScreenScannerService"
+            android:exported="false"
+            android:label="Screen Scanner Service"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/screen_scanner_service" />
         </service>
 
         <!-- ============================================================

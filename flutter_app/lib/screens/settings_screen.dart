@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -7,6 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../channels/accessibility_setup_channel.dart';
 import '../channels/device_command_channel.dart';
 import '../channels/device_admin_channel.dart';
+import '../channels/filter_service_channel.dart';
 import '../channels/remote_control_channel.dart';
 import '../channels/text_replacement_channel.dart';
 import '../services/api_service.dart';
@@ -68,7 +68,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Map<String, dynamic>? _vpnStatus;
   List<Map<String, dynamic>> _vpnApps = const [];
   Set<String> _splitTunnelBypassPackages = <String>{};
+  bool _splitTunnelEnabled = false;
   bool _mitmEnabled = false;
+  Map<String, dynamic> _interceptionDiagnostics = const {};
+  Timer? _interceptionTicker;
 
   late SharedPreferences _prefs;
 
@@ -98,8 +101,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final textReplacementDict = await _safeDict(TextReplacementChannel.getDict);
     final textReplacementPolicy = await _safeDict(TextReplacementChannel.getPolicy);
     final vpnStatus = await _safeVpnStatus();
+    final splitConfig = await _safeSplitTunnelConfig();
     final vpnApps = await _safeVpnApps();
-    final selectedBypassPackages = _loadSplitTunnelBypassPackagesFromPrefs()..add(_kAndroidAutoPackage);
+    final interceptionDiagnostics = await _safeInterceptionDiagnostics();
+    final selectedBypassPackages = _splitPackagesFromConfig(splitConfig);
+    final splitEnabled = splitConfig['enabled'] == true;
     final mitmEnabled = vpnStatus['mitm_enabled'] == true;
     setState(() {
       _adminActive = active;
@@ -124,11 +130,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _vpnStatus = vpnStatus;
       _vpnApps = vpnApps;
       _splitTunnelBypassPackages = selectedBypassPackages;
+      _splitTunnelEnabled = splitEnabled;
       _mitmEnabled = mitmEnabled;
+      _interceptionDiagnostics = interceptionDiagnostics;
       _loadingVpn = false;
     });
 
-    if (!_loadSplitTunnelBypassPackagesFromPrefs().contains(_kAndroidAutoPackage)) {
+    _interceptionTicker?.cancel();
+    _interceptionTicker = Timer.periodic(const Duration(seconds: 2), (_) {
+      unawaited(_refreshInterceptionDiagnostics());
+    });
+
+    if (!_splitTunnelBypassPackages.contains(_kAndroidAutoPackage)) {
       unawaited(_saveSplitTunnelPolicy(showSnackBar: false));
     }
   }
@@ -171,6 +184,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
   }
 
+  Future<Map<String, dynamic>> _safeSplitTunnelConfig() async {
+    try {
+      return await DeviceCommandChannel.getSplitTunnelConfig().timeout(_channelTimeout) ?? const {};
+    } catch (_) {
+      return const {};
+    }
+  }
+
   Future<Map<String, dynamic>> _safeVpnStatus() async {
     try {
       return await DeviceCommandChannel.getVpnStatus().timeout(_channelTimeout) ?? const {};
@@ -179,32 +200,52 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
   }
 
+  Future<Map<String, dynamic>> _safeInterceptionDiagnostics() async {
+    try {
+      return await FilterServiceChannel.getInterceptionDiagnostics()
+          .timeout(const Duration(seconds: 3));
+    } catch (_) {
+      return const {};
+    }
+  }
+
+  Future<void> _refreshInterceptionDiagnostics() async {
+    final diagnostics = await _safeInterceptionDiagnostics();
+    if (!mounted) return;
+    setState(() {
+      _interceptionDiagnostics = diagnostics;
+    });
+  }
+
+  @override
+  void dispose() {
+    _interceptionTicker?.cancel();
+    super.dispose();
+  }
+
   Future<List<Map<String, dynamic>>> _safeVpnApps() async {
     try {
       return await DeviceCommandChannel
-          .getInstalledAppsForVpn(includeSystem: true, includeDisabled: false)
+          .listInstalledAppsForSplitTunnel()
           .timeout(_channelTimeout);
     } catch (_) {
       return const [];
     }
   }
 
-  Set<String> _loadSplitTunnelBypassPackagesFromPrefs() {
-    final raw = (_prefs.getString('vpn_policy_json') ?? '').trim();
-    if (raw.isEmpty) return <String>{};
-    try {
-      final decoded = jsonDecode(raw);
-      if (decoded is! Map) return <String>{};
-      final dynamic allowed = decoded['allowed_packages'] ?? decoded['allowedPackages'];
-      if (allowed is! List) return <String>{};
-
-      return allowed
-          .map((entry) => entry.toString().trim())
-          .where((entry) => entry.isNotEmpty)
-          .toSet();
-    } catch (_) {
-      return <String>{};
+  Set<String> _splitPackagesFromConfig(Map<String, dynamic> config) {
+    final raw = config['selected_packages'];
+    final values = <String>{};
+    if (raw is List) {
+      for (final item in raw) {
+        final pkg = item.toString().trim();
+        if (pkg.isNotEmpty) {
+          values.add(pkg);
+        }
+      }
     }
+    values.add(_kAndroidAutoPackage);
+    return values;
   }
 
   Future<void> _refreshAccessibility() async {
@@ -660,11 +701,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
     try {
       setState(() => _loadingVpn = true);
       final status = await _safeVpnStatus();
+      final splitConfig = await _safeSplitTunnelConfig();
       final apps = await _safeVpnApps();
       if (!mounted) return;
       setState(() {
         _vpnStatus = status;
         _vpnApps = apps;
+        _splitTunnelBypassPackages = _splitPackagesFromConfig(splitConfig);
+        _splitTunnelEnabled = splitConfig['enabled'] == true;
         _mitmEnabled = status['mitm_enabled'] == true;
         _loadingVpn = false;
       });
@@ -679,43 +723,21 @@ class _SettingsScreenState extends State<SettingsScreen> {
     try {
       setState(() => _savingSplitTunnel = true);
 
-      final raw = (_prefs.getString('vpn_policy_json') ?? '').trim();
-      final policy = <String, dynamic>{};
-      if (raw.isNotEmpty) {
-        final decoded = jsonDecode(raw);
-        if (decoded is Map) {
-          decoded.forEach((key, value) {
-            policy[key.toString()] = value;
-          });
-        }
-      }
-
       final selected = _splitTunnelBypassPackages
           .map((pkg) => pkg.trim())
           .where((pkg) => pkg.isNotEmpty)
           .toList()
         ..sort();
-
-      if (selected.isEmpty) {
-        policy.remove('allowed_packages');
-        policy.remove('allowedPackages');
-        policy['restriction_mode'] = 'off';
-      } else {
-        policy['restriction_mode'] = 'allow_list';
-        policy['allowed_packages'] = selected;
-      }
-
-      final policyJson = jsonEncode(policy);
-      await DeviceCommandChannel.setVpnPolicy(
-        vpnPolicyJson: policyJson,
-        providerMode: 'local_capture',
+      await DeviceCommandChannel.setSplitTunnelConfig(
+        enabled: _splitTunnelEnabled,
+        packages: selected,
       );
-      await _prefs.setString('vpn_policy_json', policyJson);
 
       await _emitBehavior(
         event: 'vpn_split_tunnel_updated',
         reason: 'settings',
         payload: {
+          'enabled': _splitTunnelEnabled,
           'bypass_count': selected.length,
           'android_auto_bypassed': selected.contains(_kAndroidAutoPackage),
         },
@@ -745,8 +767,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
         return StatefulBuilder(
           builder: (context, setLocalState) {
             final filtered = _vpnApps.where((app) {
-              final label = (app['app_name'] ?? '').toString().toLowerCase();
-              final pkg = (app['package_name'] ?? '').toString().toLowerCase();
+              final label = (app['label'] ?? '').toString().toLowerCase();
+              final pkg = (app['package'] ?? '').toString().toLowerCase();
               if (query.isEmpty) return true;
               return label.contains(query) || pkg.contains(query);
             }).toList();
@@ -775,8 +797,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         itemCount: filtered.length,
                         itemBuilder: (_, index) {
                           final app = filtered[index];
-                          final pkg = (app['package_name'] ?? '').toString();
-                          final appName = (app['app_name'] ?? pkg).toString();
+                          final pkg = (app['package'] ?? '').toString();
+                          final appName = (app['label'] ?? pkg).toString();
                           final selected = localSelected.contains(pkg);
                           return CheckboxListTile(
                             dense: true,
@@ -826,7 +848,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Future<void> _prepareMitmCaInstall() async {
     try {
       final payload = await DeviceCommandChannel.prepareMitmCaInstall();
+      await DeviceCommandChannel.enableVpnMitm();
       await _refreshVpnStatus();
+      await _refreshInterceptionDiagnostics();
       if (!mounted) return;
       final alias = payload?['alias']?.toString();
       ScaffoldMessenger.of(context).showSnackBar(
@@ -855,6 +879,30 @@ class _SettingsScreenState extends State<SettingsScreen> {
       await _refreshVpnStatus();
     } catch (error) {
       _showActionError('set MITM enabled', error);
+    }
+  }
+
+  Color _caScopeColor(String scope) {
+    switch (scope) {
+      case 'system':
+        return Colors.green;
+      case 'user':
+        return Colors.amber;
+      default:
+        return Colors.red;
+    }
+  }
+
+  String _caScopeLabel(String scope) {
+    switch (scope) {
+      case 'system':
+        return 'System Trusted';
+      case 'user':
+        return 'User Store Only';
+      case 'missing':
+        return 'CA Missing';
+      default:
+        return 'Untrusted';
     }
   }
 
@@ -1148,6 +1196,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       'Bypass apps: ${_splitTunnelBypassPackages.length} '
                       '(Android Auto always included)',
                     ),
+                    SwitchListTile(
+                      title: const Text('Enable split tunneling'),
+                      subtitle: const Text('Selected apps bypass the VPN tunnel.'),
+                      value: _splitTunnelEnabled,
+                      onChanged: _savingSplitTunnel
+                          ? null
+                          : (enabled) {
+                              setState(() => _splitTunnelEnabled = enabled);
+                              unawaited(_saveSplitTunnelPolicy());
+                            },
+                      contentPadding: EdgeInsets.zero,
+                    ),
                     const SizedBox(height: 8),
                     Wrap(
                       spacing: 8,
@@ -1204,6 +1264,89 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       value: _mitmEnabled,
                       onChanged: _setMitmEnabled,
                       contentPadding: EdgeInsets.zero,
+                    ),
+                    const SizedBox(height: 12),
+                    Card(
+                      child: Padding(
+                        padding: const EdgeInsets.all(12),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Interception Diagnostics Dashboard',
+                              style: Theme.of(context).textTheme.titleSmall,
+                            ),
+                            const SizedBox(height: 8),
+                            Builder(
+                              builder: (_) {
+                                final scope = (_interceptionDiagnostics['ca_scope'] ?? 'untrusted')
+                                    .toString()
+                                    .trim()
+                                    .toLowerCase();
+                                final color = _caScopeColor(scope);
+                                return Row(
+                                  children: [
+                                    Icon(Icons.verified, color: color),
+                                    const SizedBox(width: 8),
+                                    Text('CA Trust: ${_caScopeLabel(scope)}'),
+                                  ],
+                                );
+                              },
+                            ),
+                            const SizedBox(height: 8),
+                            Text(
+                              'SNI Connection Activity Feed',
+                              style: Theme.of(context).textTheme.labelLarge,
+                            ),
+                            const SizedBox(height: 6),
+                            Container(
+                              constraints: const BoxConstraints(maxHeight: 180),
+                              decoration: BoxDecoration(
+                                border: Border.all(color: Theme.of(context).dividerColor),
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: Builder(
+                                builder: (_) {
+                                  final raw = _interceptionDiagnostics['sni_feed'];
+                                  final feed = raw is List ? raw : const [];
+                                  if (feed.isEmpty) {
+                                    return const Padding(
+                                      padding: EdgeInsets.all(10),
+                                      child: Text('No intercepted host activity yet.'),
+                                    );
+                                  }
+                                  final entries = feed
+                                      .whereType<Map>()
+                                      .map((e) => e.map((k, v) => MapEntry(k.toString(), v)))
+                                      .toList()
+                                      .reversed
+                                      .take(30)
+                                      .toList();
+                                  return ListView.builder(
+                                    itemCount: entries.length,
+                                    itemBuilder: (_, index) {
+                                      final item = entries[index];
+                                      final host = (item['host'] ?? '').toString();
+                                      final ts = item['timestamp_ms'];
+                                      final time = ts is num
+                                          ? DateTime.fromMillisecondsSinceEpoch(ts.toInt())
+                                          : null;
+                                      final subtitle = time == null
+                                          ? ''
+                                          : '${time.hour.toString().padLeft(2, '0')}:${time.minute.toString().padLeft(2, '0')}:${time.second.toString().padLeft(2, '0')}';
+                                      return ListTile(
+                                        dense: true,
+                                        title: Text(host),
+                                        subtitle: subtitle.isEmpty ? null : Text(subtitle),
+                                      );
+                                    },
+                                  );
+                                },
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
                     ),
                   ],
                 ),

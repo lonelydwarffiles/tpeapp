@@ -1,4 +1,4 @@
-package com.tpeapp.mindful
+package com.hound.controller.mindful
 
 import android.accessibilityservice.AccessibilityService
 import android.Manifest
@@ -13,11 +13,11 @@ import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import androidx.core.content.ContextCompat
 import androidx.preference.PreferenceManager
-import com.tpeapp.consequence.ConsequenceDispatcher
-import com.tpeapp.mindful.HonorificManager
-import com.tpeapp.mindful.PermissionToSpeakManager
-import com.tpeapp.service.FilterService
-import com.tpeapp.webhook.WebhookManager
+import com.hound.controller.consequence.ConsequenceDispatcher
+import com.hound.controller.mindful.HonorificManager
+import com.hound.controller.mindful.PermissionToSpeakManager
+import com.hound.controller.service.FilterService
+import com.hound.controller.webhook.WebhookManager
 import org.json.JSONArray
 import org.json.JSONObject
 import kotlin.random.Random

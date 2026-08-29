@@ -1,9 +1,9 @@
-package com.tpeapp.bridge
+package com.hound.controller.bridge
 
 import android.content.Context
 import android.util.Log
 import androidx.preference.PreferenceManager
-import com.tpeapp.service.FilterService
+import com.hound.controller.service.FilterService
 import io.flutter.plugin.common.BinaryMessenger
 import io.flutter.plugin.common.MethodChannel
 import org.json.JSONObject
@@ -11,7 +11,7 @@ import org.json.JSONObject
 /**
  * TextReplacementChannel — MethodChannel bridge for the text-replacement dictionary.
  *
- * Channel name: `com.tpeapp/text_replacement`
+ * Channel name: `com.hound.controller/text_replacement`
  *
  * The dictionary is stored as a JSON string in [PreferenceManager.getDefaultSharedPreferences]
  * under the key [FilterService.PREF_TEXT_REPLACEMENT_DICT].  The LSPosed module reads the

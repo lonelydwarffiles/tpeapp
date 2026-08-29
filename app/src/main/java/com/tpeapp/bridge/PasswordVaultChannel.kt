@@ -1,18 +1,18 @@
-package com.tpeapp.bridge
+package com.hound.controller.bridge
 
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.provider.Settings
 import android.util.Log
-import com.tpeapp.vault.PasswordVaultManager
+import com.hound.controller.vault.PasswordVaultManager
 import io.flutter.plugin.common.BinaryMessenger
 import io.flutter.plugin.common.MethodChannel
 
 /**
  * PasswordVaultChannel — MethodChannel bridge for [PasswordVaultManager].
  *
- * Channel name: `com.tpeapp/password_vault`
+ * Channel name: `com.hound.controller/password_vault`
  *
  * Methods exposed to Dart:
  *  - `getEntries`                                         → List<Map>  (passwords redacted)

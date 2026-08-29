@@ -1,8 +1,8 @@
 // IFilterService.aidl
 // Primary IPC contract exposed by FilterService to any bound client.
-package com.tpeapp.filter;
+package com.hound.controller.filter;
 
-import com.tpeapp.filter.IFilterCallback;
+import com.hound.controller.filter.IFilterCallback;
 
 interface IFilterService {
 

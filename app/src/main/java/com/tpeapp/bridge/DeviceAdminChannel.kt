@@ -1,4 +1,4 @@
-package com.tpeapp.bridge
+package com.hound.controller.bridge
 
 import android.app.admin.DevicePolicyManager
 import android.content.ComponentName
@@ -7,8 +7,8 @@ import android.net.Uri
 import android.os.Build
 import android.os.PowerManager
 import android.provider.Settings
-import com.tpeapp.mdm.AppDeviceAdminReceiver
-import com.tpeapp.mdm.PartnerPinManager
+import com.hound.controller.mdm.AppDeviceAdminReceiver
+import com.hound.controller.mdm.PartnerPinManager
 import io.flutter.embedding.android.FlutterFragmentActivity
 import io.flutter.plugin.common.BinaryMessenger
 import io.flutter.plugin.common.MethodChannel
@@ -16,7 +16,7 @@ import io.flutter.plugin.common.MethodChannel
 /**
  * DeviceAdminChannel — MethodChannel bridge for Device Admin and partner-PIN management.
  *
- * Channel name: `com.tpeapp/device_admin`
+ * Channel name: `com.hound.controller/device_admin`
  *
  * Methods exposed to Dart:
  *  - `isAdminActive`                       → Boolean

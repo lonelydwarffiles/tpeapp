@@ -1,4 +1,4 @@
-package com.tpeapp.tasks
+package com.hound.controller.tasks
 
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -9,8 +9,8 @@ import androidx.preference.PreferenceManager
 import androidx.work.CoroutineWorker
 import androidx.work.ForegroundInfo
 import androidx.work.WorkerParameters
-import com.tpeapp.pairing.PairingActivity
-import com.tpeapp.service.FilterService
+import com.hound.controller.pairing.PairingActivity
+import com.hound.controller.service.FilterService
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request

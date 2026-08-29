@@ -1,13 +1,10 @@
-package com.tpeapp.vpn
+package com.hound.controller.vpn
 
 import android.content.Context
-import android.graphics.BitmapFactory
 import androidx.preference.PreferenceManager
-import com.tpeapp.censor.CensorshipEngine
-import com.tpeapp.service.FilterService
-import java.io.BufferedInputStream
-import java.io.BufferedOutputStream
+import com.hound.controller.service.FilterService
 import java.io.ByteArrayOutputStream
+import java.io.IOException
 import java.io.InputStream
 import java.io.OutputStream
 import java.net.InetAddress
@@ -16,14 +13,23 @@ import java.net.ServerSocket
 import java.net.Socket
 import java.util.Locale
 import java.util.concurrent.atomic.AtomicBoolean
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.runBlocking
 import kotlin.concurrent.thread
+import org.json.JSONArray
+import org.json.JSONObject
 
 /**
- * Lightweight local MITM proxy used by the VPN TCP relay.
+ * High-throughput local TCP relay used by the VPN tunnel.
  *
  * Protocol from VPN -> proxy per accepted socket:
- *   TPE-TARGET <ip>:<port>\n
+ *   TPE-TARGET <host>:<port>\n
  * followed by the raw client TCP stream.
+ *
+ * This class never decrypts, rewrites, or otherwise modifies TCP payloads.
+ * It only performs metadata sampling (SNI/HTTP Host) from client bytes.
  */
 class LocalMitmProxy(
     private val context: Context,
@@ -31,17 +37,13 @@ class LocalMitmProxy(
 ) {
 
     companion object {
-        private const val HEADER_DELIMITER = "\r\n\r\n"
-        private const val MAX_HEADER_BYTES = 64 * 1024
-        private const val MAX_IMAGE_BYTES = 8 * 1024 * 1024
+        private const val STREAM_BUFFER_SIZE = 64 * 1024
+        private const val PROBE_MAX_BYTES = 16 * 1024
     }
 
     private val running = AtomicBoolean(false)
     private var server: ServerSocket? = null
     private var acceptThread: Thread? = null
-
-    @Volatile
-    private var censorEngine: CensorshipEngine? = null
 
     fun start(): Int {
         if (!running.compareAndSet(false, true)) {
@@ -52,7 +54,7 @@ class LocalMitmProxy(
             bind(InetSocketAddress(InetAddress.getByName("127.0.0.1"), 0))
         }
         server = socket
-        acceptThread = thread(start = true, isDaemon = true, name = "tpe-mitm-accept") {
+        acceptThread = thread(start = true, isDaemon = true, name = "tpe-proxy-accept") {
             acceptLoop(socket)
         }
         return socket.localPort
@@ -64,8 +66,6 @@ class LocalMitmProxy(
         server = null
         acceptThread?.interrupt()
         acceptThread = null
-        runCatching { censorEngine?.close() }
-        censorEngine = null
     }
 
     private fun acceptLoop(serverSocket: ServerSocket) {
@@ -77,7 +77,7 @@ class LocalMitmProxy(
                 continue
             }
 
-            thread(start = true, isDaemon = true, name = "tpe-mitm-client") {
+            thread(start = true, isDaemon = true, name = "tpe-proxy-client") {
                 handleClient(client)
             }
         }
@@ -85,14 +85,107 @@ class LocalMitmProxy(
 
     private fun handleClient(client: Socket) {
         client.use { local ->
-            val input = BufferedInputStream(local.getInputStream())
-            val output = BufferedOutputStream(local.getOutputStream())
-            val target = readTargetLine(input) ?: return
+            runCatching { local.keepAlive = true }
+            val clientIn = local.getInputStream()
+            val clientOut = local.getOutputStream()
+            val target = readTargetLine(clientIn) ?: return
 
-            if (target.port == 80) {
-                handleHttpFlow(input, output, target)
-            } else {
-                handlePassThrough(input, output, target)
+            val upstream = Socket()
+            try {
+                protectSocket(upstream)
+                runCatching { upstream.keepAlive = true }
+                upstream.connect(InetSocketAddress(target.host, target.port), 8000)
+
+                val destinationIp = upstream.inetAddress?.hostAddress ?: target.host
+                val upstreamIn = upstream.getInputStream()
+                val upstreamOut = upstream.getOutputStream()
+
+                runBlocking {
+                    coroutineScope {
+                        val upstreamToClient = async(Dispatchers.IO) {
+                            pipe(upstreamIn, clientOut)
+                        }
+                        val clientToUpstream = async(Dispatchers.IO) {
+                            pipeClientToUpstream(
+                                input = clientIn,
+                                output = upstreamOut,
+                                target = target,
+                                destinationIp = destinationIp,
+                            )
+                            runCatching { upstreamOut.flush() }
+                            runCatching { upstream.shutdownOutput() }
+                        }
+                        clientToUpstream.await()
+                        upstreamToClient.await()
+                    }
+                }
+            } catch (_: IOException) {
+                // Transport errors are expected on mobile network changes.
+            } finally {
+                runCatching { upstream.close() }
+            }
+        }
+    }
+
+    private fun pipe(input: InputStream, output: OutputStream) {
+        val buffer = ByteArray(STREAM_BUFFER_SIZE)
+        while (true) {
+            val read = try {
+                input.read(buffer)
+            } catch (_: IOException) {
+                return
+            }
+            if (read <= 0) return
+            try {
+                output.write(buffer, 0, read)
+            } catch (_: IOException) {
+                return
+            }
+        }
+    }
+
+    private fun pipeClientToUpstream(
+        input: InputStream,
+        output: OutputStream,
+        target: ProxyTarget,
+        destinationIp: String,
+    ) {
+        val buffer = ByteArray(STREAM_BUFFER_SIZE)
+        val probe = ByteArrayOutputStream(PROBE_MAX_BYTES)
+        var metadataLogged = false
+        while (true) {
+            val read = try {
+                input.read(buffer)
+            } catch (_: IOException) {
+                return
+            }
+            if (read <= 0) {
+                if (!metadataLogged) {
+                    val fallback = target.host.takeUnless { isIpLiteralHost(it) }
+                    recordMetadata(destinationIp = destinationIp, domain = fallback)
+                }
+                return
+            }
+
+            if (!metadataLogged) {
+                val remaining = PROBE_MAX_BYTES - probe.size()
+                if (remaining > 0) {
+                    probe.write(buffer, 0, minOf(read, remaining))
+                }
+                val sampled = probe.toByteArray()
+                val domain = parseTlsClientHelloSni(sampled)
+                    ?: parseHttpHost(sampled)
+                    ?: target.host.takeUnless { isIpLiteralHost(it) }
+                if (!domain.isNullOrBlank() || probe.size() >= PROBE_MAX_BYTES) {
+                    recordMetadata(destinationIp = destinationIp, domain = domain)
+                    metadataLogged = true
+                }
+            }
+
+            try {
+                output.write(buffer, 0, read)
+            } catch (_: IOException) {
+                return
             }
         }
     }
@@ -115,212 +208,121 @@ class LocalMitmProxy(
         return ProxyTarget(host, port)
     }
 
-    private fun handlePassThrough(clientIn: InputStream, clientOut: OutputStream, target: ProxyTarget) {
-        val upstream = Socket()
-        try {
-            protectSocket(upstream)
-            upstream.connect(InetSocketAddress(target.host, target.port), 8000)
-            val upIn = BufferedInputStream(upstream.getInputStream())
-            val upOut = BufferedOutputStream(upstream.getOutputStream())
-
-            val upstreamToClient = thread(start = true, isDaemon = true) {
-                copyStream(upIn, clientOut)
+    private fun parseHttpHost(payload: ByteArray): String? {
+        if (payload.isEmpty()) return null
+        val text = payload.toString(Charsets.ISO_8859_1)
+        val headerEnd = text.indexOf("\r\n\r\n")
+        if (headerEnd <= 0) return null
+        val head = text.substring(0, headerEnd)
+        for (line in head.split("\r\n")) {
+            if (line.startsWith("Host:", ignoreCase = true)) {
+                return line.substringAfter(':').trim().substringBefore(':').ifBlank { null }
             }
-            copyStream(clientIn, upOut)
-            runCatching { upstream.shutdownOutput() }
-            upstreamToClient.join(250)
-        } finally {
-            runCatching { upstream.close() }
         }
+        return null
     }
 
-    private fun handleHttpFlow(clientIn: BufferedInputStream, clientOut: BufferedOutputStream, target: ProxyTarget) {
-        val upstream = Socket()
-        try {
-            protectSocket(upstream)
-            upstream.connect(InetSocketAddress(target.host, target.port), 8000)
-            val upIn = BufferedInputStream(upstream.getInputStream())
-            val upOut = BufferedOutputStream(upstream.getOutputStream())
+    private fun parseTlsClientHelloSni(payload: ByteArray): String? {
+        if (payload.size < 5) return null
+        if ((payload[0].toInt() and 0xFF) != 22) return null
+        if ((payload[5].toInt() and 0xFF) != 1) return null
 
-            val requestHeader = readHeaderBlock(clientIn) ?: return
-            upOut.write(requestHeader)
-            val requestContentLength = parseContentLength(requestHeader)
-            if (requestContentLength > 0) {
-                relayFixedLength(clientIn, upOut, requestContentLength)
-            }
-            upOut.flush()
+        val recordLen = readU16(payload, 3)
+        if (payload.size < 5 + recordLen || recordLen < 42) return null
 
-            val responseHeader = readHeaderBlock(upIn) ?: return
-            val contentType = parseHeaderValue(responseHeader, "content-type")?.lowercase(Locale.US).orEmpty()
-            val encoding = parseHeaderValue(responseHeader, "content-encoding")?.lowercase(Locale.US).orEmpty()
-            val transferEncoding = parseHeaderValue(responseHeader, "transfer-encoding")?.lowercase(Locale.US).orEmpty()
-            val responseLength = parseContentLength(responseHeader)
+        var idx = 9
+        if (idx + 34 > payload.size) return null
+        idx += 34
 
-            val isImage = contentType.startsWith("image/")
-            val isRewritable = isImage && encoding.isEmpty() && transferEncoding.isEmpty() && responseLength in 1..MAX_IMAGE_BYTES
+        val sessionIdLen = readU8(payload, idx)
+        idx += 1 + sessionIdLen
+        if (idx + 2 > payload.size) return null
 
-            if (!isRewritable) {
-                clientOut.write(responseHeader)
-                clientOut.flush()
-                if (responseLength >= 0) {
-                    relayFixedLength(upIn, clientOut, responseLength)
-                } else {
-                    copyStream(upIn, clientOut)
+        val cipherSuitesLen = readU16(payload, idx)
+        idx += 2 + cipherSuitesLen
+        if (idx + 1 > payload.size) return null
+
+        val compressionMethodsLen = readU8(payload, idx)
+        idx += 1 + compressionMethodsLen
+        if (idx + 2 > payload.size) return null
+
+        val extensionsLen = readU16(payload, idx)
+        idx += 2
+        val extEnd = minOf(idx + extensionsLen, payload.size)
+
+        while (idx + 4 <= extEnd) {
+            val extType = readU16(payload, idx)
+            val extSize = readU16(payload, idx + 2)
+            idx += 4
+            if (idx + extSize > extEnd) break
+
+            if (extType == 0 && extSize >= 5) {
+                val sniListLen = readU16(payload, idx)
+                var sniIdx = idx + 2
+                val sniEnd = minOf(idx + extSize, sniIdx + sniListLen)
+                while (sniIdx + 3 <= sniEnd) {
+                    val nameType = readU8(payload, sniIdx)
+                    val nameLen = readU16(payload, sniIdx + 1)
+                    sniIdx += 3
+                    if (sniIdx + nameLen > sniEnd) break
+                    if (nameType == 0 && nameLen > 0) {
+                        return runCatching {
+                            payload.copyOfRange(sniIdx, sniIdx + nameLen).toString(Charsets.US_ASCII).trim()
+                        }.getOrNull()
+                    }
+                    sniIdx += nameLen
                 }
-                clientOut.flush()
-                return
             }
-
-            val originalBody = readFixedLength(upIn, responseLength)
-            val rewrittenBody = censorImageIfNeeded(originalBody, contentType)
-            val rewrittenHeader = rewriteContentLength(responseHeader, rewrittenBody.size)
-            clientOut.write(rewrittenHeader)
-            clientOut.write(rewrittenBody)
-            clientOut.flush()
-        } finally {
-            runCatching { upstream.close() }
+            idx += extSize
         }
+        return null
     }
 
-    private fun censorImageIfNeeded(imageBytes: ByteArray, contentType: String): ByteArray {
-        val source = BitmapFactory.decodeByteArray(imageBytes, 0, imageBytes.size) ?: return imageBytes
-        val style = currentCensorStyle()
-        val forbidden = currentForbiddenClassIds()
-        return try {
-            val result = engine().censorBitmap(source, censorStyle = style, forbiddenClassIds = forbidden)
-            val format = if (contentType.contains("png")) android.graphics.Bitmap.CompressFormat.PNG else android.graphics.Bitmap.CompressFormat.JPEG
-            val quality = if (format == android.graphics.Bitmap.CompressFormat.PNG) 100 else 95
-            ByteArrayOutputStream().use { os ->
-                result.outputBitmap.compress(format, quality, os)
-                val out = os.toByteArray()
-                if (!result.outputBitmap.isRecycled) result.outputBitmap.recycle()
-                out
-            }
-        } catch (_: Exception) {
-            imageBytes
-        } finally {
-            if (!source.isRecycled) source.recycle()
+    private fun recordMetadata(destinationIp: String, domain: String?) {
+        val normalizedDomain = domain?.trim()?.trimEnd('.')?.lowercase(Locale.US).orEmpty()
+        val normalizedIp = destinationIp.trim()
+        if (normalizedDomain.isBlank() && normalizedIp.isBlank()) return
+
+        val now = System.currentTimeMillis()
+        val prefs = PreferenceManager.getDefaultSharedPreferences(context)
+        val raw = prefs.getString(FilterService.PREF_INTERCEPT_SNI_FEED_JSON, "[]")?.trim().orEmpty()
+        val arr = runCatching { JSONArray(raw.ifBlank { "[]" }) }.getOrElse { JSONArray() }
+
+        arr.put(JSONObject().apply {
+            put("host", normalizedDomain)
+            put("domain", normalizedDomain)
+            put("timestamp_ms", now)
+            put("destination_ip", normalizedIp)
+        })
+        while (arr.length() > 120) {
+            arr.remove(0)
         }
+        prefs.edit().putString(FilterService.PREF_INTERCEPT_SNI_FEED_JSON, arr.toString()).apply()
+
+        TpeVpnPolicyManager.addFlowSample(
+            context = context,
+            endpointKey = if (normalizedIp.isBlank()) null else normalizedIp,
+            domain = normalizedDomain.ifBlank { null },
+            packageName = null,
+        )
     }
 
-    private fun engine(): CensorshipEngine {
-        val existing = censorEngine
-        if (existing != null) return existing
-        val created = CensorshipEngine(context)
-        censorEngine = created
-        return created
-    }
-
-    private fun currentCensorStyle(): String {
-        val prefs = PreferenceManager.getDefaultSharedPreferences(context)
-        return prefs.getString(FilterService.PREF_MEDIA_CENSOR_STYLE, "pixelate")?.trim().orEmpty().ifBlank { "pixelate" }
-    }
-
-    private fun currentForbiddenClassIds(): Set<Int> {
-        val prefs = PreferenceManager.getDefaultSharedPreferences(context)
-        val raw = prefs.getString(FilterService.PREF_MEDIA_FORBIDDEN_CLASS_IDS, "[2,3,4,6,14]")?.trim().orEmpty()
+    private fun isIpLiteralHost(host: String): Boolean {
+        val normalized = host.trim()
+        if (normalized.isBlank()) return false
         return runCatching {
-            val arr = org.json.JSONArray(raw)
-            buildSet {
-                for (i in 0 until arr.length()) {
-                    add(arr.optInt(i, -1))
-                }
-            }.filter { it >= 0 }.toSet().ifEmpty { setOf(2, 3, 4, 6, 14) }
-        }.getOrDefault(setOf(2, 3, 4, 6, 14))
+            InetAddress.getByName(normalized).hostAddress.equals(normalized, ignoreCase = true)
+        }.getOrDefault(false)
     }
 
-    private fun readHeaderBlock(input: BufferedInputStream): ByteArray? {
-        val out = ByteArrayOutputStream(1024)
-        val needle = HEADER_DELIMITER.toByteArray(Charsets.US_ASCII)
-        var match = 0
-        while (out.size() < MAX_HEADER_BYTES) {
-            val b = input.read()
-            if (b < 0) return null
-            out.write(b)
-            if (b.toByte() == needle[match]) {
-                match += 1
-                if (match == needle.size) {
-                    return out.toByteArray()
-                }
-            } else {
-                match = if (b.toByte() == needle[0]) 1 else 0
-            }
-        }
-        return null
+    private fun readU8(data: ByteArray, offset: Int): Int {
+        if (offset !in data.indices) return 0
+        return data[offset].toInt() and 0xFF
     }
 
-    private fun parseContentLength(headerBytes: ByteArray): Int {
-        val value = parseHeaderValue(headerBytes, "content-length") ?: return -1
-        return value.toIntOrNull() ?: -1
-    }
-
-    private fun parseHeaderValue(headerBytes: ByteArray, name: String): String? {
-        val text = headerBytes.toString(Charsets.ISO_8859_1)
-        val lines = text.split("\r\n")
-        for (line in lines) {
-            val idx = line.indexOf(':')
-            if (idx <= 0) continue
-            val key = line.substring(0, idx).trim().lowercase(Locale.US)
-            if (key == name) {
-                return line.substring(idx + 1).trim()
-            }
-        }
-        return null
-    }
-
-    private fun rewriteContentLength(headerBytes: ByteArray, bodyLength: Int): ByteArray {
-        val text = headerBytes.toString(Charsets.ISO_8859_1)
-        val lines = text.split("\r\n").toMutableList()
-        var replaced = false
-        for (i in lines.indices) {
-            val line = lines[i]
-            if (line.lowercase(Locale.US).startsWith("content-length:")) {
-                lines[i] = "Content-Length: $bodyLength"
-                replaced = true
-                break
-            }
-        }
-        if (!replaced) {
-            val insertIdx = lines.indexOfFirst { it.isEmpty() }.takeIf { it >= 0 } ?: lines.size
-            lines.add(insertIdx, "Content-Length: $bodyLength")
-        }
-        return lines.joinToString("\r\n").toByteArray(Charsets.ISO_8859_1)
-    }
-
-    private fun relayFixedLength(input: InputStream, output: OutputStream, length: Int) {
-        var remaining = length
-        val buffer = ByteArray(16 * 1024)
-        while (remaining > 0) {
-            val chunk = minOf(buffer.size, remaining)
-            val read = input.read(buffer, 0, chunk)
-            if (read <= 0) return
-            output.write(buffer, 0, read)
-            remaining -= read
-        }
-    }
-
-    private fun readFixedLength(input: InputStream, length: Int): ByteArray {
-        val out = ByteArrayOutputStream(length)
-        relayFixedLength(input, out, length)
-        return out.toByteArray()
-    }
-
-    private fun copyStream(input: InputStream, output: OutputStream) {
-        val buffer = ByteArray(16 * 1024)
-        while (true) {
-            val read = try {
-                input.read(buffer)
-            } catch (_: Exception) {
-                return
-            }
-            if (read <= 0) return
-            try {
-                output.write(buffer, 0, read)
-                output.flush()
-            } catch (_: Exception) {
-                return
-            }
-        }
+    private fun readU16(data: ByteArray, offset: Int): Int {
+        if (offset < 0 || offset + 1 >= data.size) return 0
+        return ((data[offset].toInt() and 0xFF) shl 8) or (data[offset + 1].toInt() and 0xFF)
     }
 
     private data class ProxyTarget(

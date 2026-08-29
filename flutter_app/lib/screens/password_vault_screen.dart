@@ -448,7 +448,7 @@ class _PasswordVaultScreenState extends State<PasswordVaultScreen> {
     );
     if (confirmed != true) return;
 
-    final count = await PasswordVaultChannel.importEntries(entries!);
+    final count = await PasswordVaultChannel.importEntries(entries);
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Imported $count new credential(s).')),

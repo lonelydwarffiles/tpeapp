@@ -1,4 +1,4 @@
-package com.tpeapp.device
+package com.hound.controller.device
 
 import android.annotation.SuppressLint
 import android.app.AlarmManager
@@ -20,12 +20,12 @@ import android.provider.AlarmClock
 import android.speech.tts.TextToSpeech
 import android.util.Log
 import androidx.preference.PreferenceManager
-import com.tpeapp.bridge.TpeFlutterActivity
-import com.tpeapp.mdm.AppDeviceAdminReceiver
-import com.tpeapp.mindful.MindfulNotificationService
-import com.tpeapp.pairing.PairingActivity
-import com.tpeapp.service.FilterService
-import com.tpeapp.webhook.WebhookManager
+import com.hound.controller.bridge.TpeFlutterActivity
+import com.hound.controller.mdm.AppDeviceAdminReceiver
+import com.hound.controller.mindful.MindfulNotificationService
+import com.hound.controller.pairing.PairingActivity
+import com.hound.controller.service.FilterService
+import com.hound.controller.webhook.WebhookManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -622,7 +622,7 @@ object DeviceCommandManager {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
         val notification = androidx.core.app.NotificationCompat.Builder(context, channel)
-            .setSmallIcon(com.tpeapp.R.drawable.ic_shield)
+            .setSmallIcon(com.hound.controller.R.drawable.ic_shield)
             .setContentTitle(title)
             .setContentText(body)
             .setStyle(androidx.core.app.NotificationCompat.BigTextStyle().bigText(body))

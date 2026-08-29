@@ -3,13 +3,13 @@
 -keep class org.tensorflow.lite.** { *; }
 
 # Keep AIDL generated stubs
--keep class com.tpeapp.filter.** { *; }
+-keep class com.hound.controller.filter.** { *; }
 
 # Keep Device Admin receiver
--keep class com.tpeapp.mdm.AppDeviceAdminReceiver { *; }
+-keep class com.hound.controller.mdm.AppDeviceAdminReceiver { *; }
 
 # Keep partner command service
--keep class com.tpeapp.fcm.PartnerFcmService { *; }
+-keep class com.hound.controller.fcm.PartnerFcmService { *; }
 
 # Keep Glide generated API
 -keep public class * implements com.bumptech.glide.module.GlideModule

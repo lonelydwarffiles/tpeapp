@@ -1,4 +1,4 @@
-package com.tpeapp.oversight
+package com.hound.controller.oversight
 
 import android.content.Context
 import android.util.Log
@@ -18,9 +18,9 @@ import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import androidx.work.workDataOf
-import com.tpeapp.pairing.PairingActivity
-import com.tpeapp.service.FilterService
-import com.tpeapp.webhook.WebhookManager
+import com.hound.controller.pairing.PairingActivity
+import com.hound.controller.service.FilterService
+import com.hound.controller.webhook.WebhookManager
 import kotlinx.coroutines.suspendCancellableCoroutine
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.MultipartBody

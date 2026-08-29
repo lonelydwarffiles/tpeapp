@@ -518,7 +518,7 @@ class _EdgeControlsScreenState extends State<EdgeControlsScreen> {
                     ),
                     const SizedBox(height: 8),
                     DropdownButtonFormField<String>(
-                      value: data.edgeSafetyProfile,
+                      initialValue: data.edgeSafetyProfile,
                       decoration: const InputDecoration(labelText: 'Safety profile'),
                       items: const [
                         DropdownMenuItem(value: 'strict_handler', child: Text('Strict Handler')),

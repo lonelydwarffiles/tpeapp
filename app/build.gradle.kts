@@ -6,7 +6,7 @@ plugins {
 }
 
 android {
-    namespace  = "com.tpeapp"
+    namespace  = "com.hound.controller"
     compileSdk = 35
 
     defaultConfig {
@@ -54,6 +54,7 @@ android {
         }
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
+            excludes += "/META-INF/versions/*/OSGI-INF/MANIFEST.MF"
         }
     }
 }
@@ -116,6 +117,7 @@ dependencies {
     // X.509 certificate generation for local MITM CA bootstrapping
     implementation("org.bouncycastle:bcprov-jdk18on:1.78.1")
     implementation("org.bouncycastle:bcpkix-jdk18on:1.78.1")
+    implementation("org.brotli:dec:0.1.2")
 
     // ── Flutter embedding ─────────────────────────────────────────────────────
     // When building with `flutter build apk` (or `flutter run`), the Flutter
@@ -126,7 +128,7 @@ dependencies {
     //   implementation("io.flutter:flutter_embedding_release:<engine-version>")
     // and ensure the libflutter.so artifact is present in jniLibs/arm64-v8a/.
     //
-    // TpeFlutterActivity (com.tpeapp.bridge.TpeFlutterActivity) must be declared
+    // TpeFlutterActivity (com.hound.controller.bridge.TpeFlutterActivity) must be declared
     // as the launcher <activity> in AndroidManifest.xml, replacing the old
-    // com.tpeapp.ui.MainActivity entry.
+    // com.hound.controller.ui.MainActivity entry.
 }

@@ -1,4 +1,4 @@
-package com.tpeapp.gating
+package com.hound.controller.gating
 
 import android.content.Context
 import android.location.Location
@@ -11,8 +11,8 @@ import com.google.android.gms.location.LocationRequest
 import com.google.android.gms.location.LocationResult
 import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.Priority
-import com.tpeapp.service.FilterService
-import com.tpeapp.webhook.WebhookManager
+import com.hound.controller.service.FilterService
+import com.hound.controller.webhook.WebhookManager
 import org.json.JSONArray
 import org.json.JSONObject
 

@@ -1,9 +1,9 @@
-package com.tpeapp.bridge
+package com.hound.controller.bridge
 
 import android.content.Context
 import android.util.Log
 import androidx.preference.PreferenceManager
-import com.tpeapp.review.RootChecker
+import com.hound.controller.review.RootChecker
 import io.flutter.plugin.common.BinaryMessenger
 import io.flutter.plugin.common.MethodChannel
 import kotlinx.coroutines.CoroutineScope
@@ -15,7 +15,7 @@ import kotlinx.coroutines.launch
  * RemoteControlChannel — MethodChannel bridge that exposes the gesture-injection
  * mode selector and root-availability query to Flutter.
  *
- * Channel name: `com.tpeapp/remote_control`
+ * Channel name: `com.hound.controller/remote_control`
  *
  * ## Injection modes
  *
@@ -23,7 +23,7 @@ import kotlinx.coroutines.launch
  * |-----------------|------------------------------------------------------------------|
  * | `auto`          | Try root first (if available), fall back to AccessibilityService |
  * | `root`          | Always use `su -c input tap X Y`; fail silently if not rooted   |
- * | `accessibility` | Always use [com.tpeapp.capability.TpeCapabilityService.dispatchGesture]; fail silently if not enabled |
+ * | `accessibility` | Always use [com.hound.controller.capability.TpeCapabilityService.dispatchGesture]; fail silently if not enabled |
  *
  * The selected mode is persisted in default SharedPreferences under
  * [PREF_INJECTION_MODE] and read by [ScreenShareChannel] on every `injectTap`

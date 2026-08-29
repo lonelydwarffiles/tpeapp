@@ -1,4 +1,4 @@
-﻿package com.tpeapp.affirmation
+package com.hound.controller.affirmation
 
 import android.app.AlarmManager
 import android.app.NotificationChannel
@@ -12,7 +12,7 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 
 /**
- * MantraAlarmReceiver â€” fires at configurable intervals to surface an
+ * MantraAlarmReceiver — fires at configurable intervals to surface an
  * [AffirmationActivity] the sub must complete.
  *
  * Self-reschedules after each fire using [AffirmationRepository.getMantraIntervalMinutes].
@@ -49,7 +49,7 @@ class MantraAlarmReceiver : BroadcastReceiver() {
         if (!AffirmationRepository.isMantraEnabled(context)) return
 
         val entry = AffirmationRepository.getRandom(context) ?: run {
-            Log.d(TAG, "No affirmations configured â€” skipping")
+            Log.d(TAG, "No affirmations configured — skipping")
             scheduleNext(context)
             return
         }
@@ -69,7 +69,7 @@ class MantraAlarmReceiver : BroadcastReceiver() {
 
         val notification = NotificationCompat.Builder(context, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.ic_dialog_info)
-            .setContentTitle("ðŸ’­ Time for your affirmation")
+            .setContentTitle("💭 Time for your affirmation")
             .setContentText(entry.text)
             .setStyle(NotificationCompat.BigTextStyle().bigText(entry.text))
             .setPriority(NotificationCompat.PRIORITY_HIGH)
@@ -82,7 +82,7 @@ class MantraAlarmReceiver : BroadcastReceiver() {
         try {
             NotificationManagerCompat.from(context).notify(NOTIF_ID, notification)
         } catch (e: SecurityException) {
-            Log.w(TAG, "POST_NOTIFICATIONS not granted â€” launching directly", e)
+            Log.w(TAG, "POST_NOTIFICATIONS not granted — launching directly", e)
             context.startActivity(activityIntent)
         }
 

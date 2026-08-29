@@ -1,10 +1,10 @@
-package com.tpeapp.mindful
+package com.hound.controller.mindful
 
 import android.content.Context
 import android.util.Log
 import androidx.preference.PreferenceManager
-import com.tpeapp.service.FilterService
-import com.tpeapp.webhook.WebhookManager
+import com.hound.controller.service.FilterService
+import com.hound.controller.webhook.WebhookManager
 import org.json.JSONArray
 import org.json.JSONObject
 

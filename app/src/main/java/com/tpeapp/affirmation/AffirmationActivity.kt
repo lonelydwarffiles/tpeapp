@@ -1,14 +1,14 @@
-package com.tpeapp.affirmation
+package com.hound.controller.affirmation
 
 import android.os.Bundle
 import android.view.WindowManager
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.preference.PreferenceManager
-import com.tpeapp.R
-import com.tpeapp.databinding.ActivityAffirmationBinding
-import com.tpeapp.service.FilterService
-import com.tpeapp.webhook.WebhookManager
+import com.hound.controller.R
+import com.hound.controller.databinding.ActivityAffirmationBinding
+import com.hound.controller.service.FilterService
+import com.hound.controller.webhook.WebhookManager
 import org.json.JSONObject
 
 /**

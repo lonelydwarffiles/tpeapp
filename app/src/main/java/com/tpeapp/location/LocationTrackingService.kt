@@ -1,4 +1,4 @@
-package com.tpeapp.location
+package com.hound.controller.location
 
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -13,9 +13,9 @@ import android.os.IBinder
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.preference.PreferenceManager
-import com.tpeapp.R
-import com.tpeapp.pairing.PairingActivity
-import com.tpeapp.service.FilterService
+import com.hound.controller.R
+import com.hound.controller.pairing.PairingActivity
+import com.hound.controller.service.FilterService
 import okhttp3.Call
 import okhttp3.Callback
 import okhttp3.MediaType.Companion.toMediaType
@@ -33,7 +33,7 @@ import java.util.concurrent.TimeUnit
  * [LOCATION_ENDPOINT_PATH] (`/api/handler/device-status`).
  *
  * The service uses the platform [LocationManager] (same provider already used
- * by [com.tpeapp.gating.GeofenceManager]) so no new runtime permissions are
+ * by [com.hound.controller.gating.GeofenceManager]) so no new runtime permissions are
  * required beyond those already declared in the manifest.
  *
  * Start / stop the service via explicit [Intent]:

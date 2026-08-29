@@ -1,4 +1,4 @@
-package com.tpeapp.vault
+package com.hound.controller.vault
 
 import android.annotation.SuppressLint
 import android.app.assist.AssistStructure
@@ -16,7 +16,7 @@ import android.view.View
 import android.view.autofill.AutofillId
 import android.view.autofill.AutofillValue
 import android.widget.RemoteViews
-import com.tpeapp.R
+import com.hound.controller.R
 
 /**
  * VaultAutofillService — Android [AutofillService] that fills managed credentials

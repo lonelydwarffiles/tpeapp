@@ -1,4 +1,4 @@
-package com.tpeapp.adherence
+package com.hound.controller.adherence
 
 import android.Manifest
 import android.annotation.SuppressLint
@@ -28,8 +28,8 @@ import androidx.work.Data
 import androidx.work.ExistingWorkPolicy
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
-import com.tpeapp.consequence.ConsequenceDispatcher
-import com.tpeapp.databinding.ActivityAdherenceKioskBinding
+import com.hound.controller.consequence.ConsequenceDispatcher
+import com.hound.controller.databinding.ActivityAdherenceKioskBinding
 import java.io.File
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors

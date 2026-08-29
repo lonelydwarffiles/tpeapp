@@ -1,4 +1,4 @@
-package com.tpeapp.bridge
+package com.hound.controller.bridge
 
 import android.content.Context
 import android.content.Intent
@@ -6,10 +6,10 @@ import android.os.Handler
 import android.os.Looper
 import android.util.Log
 import androidx.preference.PreferenceManager
-import com.tpeapp.capability.TpeCapabilityService
-import com.tpeapp.review.RemoteInputDispatcher
-import com.tpeapp.review.RootChecker
-import com.tpeapp.review.ScreencastService
+import com.hound.controller.capability.TpeCapabilityService
+import com.hound.controller.review.RemoteInputDispatcher
+import com.hound.controller.review.RootChecker
+import com.hound.controller.review.ScreencastService
 import io.flutter.plugin.common.BinaryMessenger
 import io.flutter.plugin.common.MethodChannel
 import org.json.JSONObject
@@ -19,7 +19,7 @@ import org.json.JSONObject
  * [ScreenShareService] (which manages the WebRTC peer connection and the
  * remote-control DataChannel) and the native gesture-injection layer.
  *
- * Channel name: `com.tpeapp/screen_share`
+ * Channel name: `com.hound.controller/screen_share`
  *
  * Methods exposed to Dart:
  *

@@ -1,4 +1,4 @@
-package com.tpeapp.mindful
+package com.hound.controller.mindful
 
 import android.content.Context
 import androidx.preference.PreferenceManager
@@ -13,7 +13,7 @@ import androidx.preference.PreferenceManager
  *
  * The flag is persisted in [SharedPreferences] under [PREF_STRICT_TONE_MODE]
  * and can be toggled remotely by the Accountability Partner via
- * [com.tpeapp.mqtt.PartnerMqttService].
+ * [com.hound.controller.mqtt.PartnerMqttService].
  */
 object ComplianceManager {
 
@@ -30,7 +30,7 @@ object ComplianceManager {
 
     /**
     * Persists the strict tone mode flag.  Intended to be called only by
-    * [com.tpeapp.mqtt.PartnerMqttService] when an MQTT payload is received.
+    * [com.hound.controller.mqtt.PartnerMqttService] when an MQTT payload is received.
      */
     fun setStrictToneMode(context: Context, enabled: Boolean) {
         PreferenceManager.getDefaultSharedPreferences(context)

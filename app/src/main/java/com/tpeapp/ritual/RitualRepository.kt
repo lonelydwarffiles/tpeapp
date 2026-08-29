@@ -1,4 +1,4 @@
-package com.tpeapp.ritual
+package com.hound.controller.ritual
 
 import android.app.AlarmManager
 import android.app.PendingIntent

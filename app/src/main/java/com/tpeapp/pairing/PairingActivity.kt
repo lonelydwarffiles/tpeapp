@@ -1,4 +1,4 @@
-package com.tpeapp.pairing
+package com.hound.controller.pairing
 
 import android.Manifest
 import android.content.Intent
@@ -23,10 +23,10 @@ import com.google.mlkit.vision.barcode.BarcodeScannerOptions
 import com.google.mlkit.vision.barcode.BarcodeScanning
 import com.google.mlkit.vision.barcode.common.Barcode
 import com.google.mlkit.vision.common.InputImage
-import com.tpeapp.databinding.ActivityPairingBinding
-import com.tpeapp.handler.HandlerChatActivity
-import com.tpeapp.mqtt.PartnerMqttService
-import com.tpeapp.ui.MainActivity
+import com.hound.controller.databinding.ActivityPairingBinding
+import com.hound.controller.handler.HandlerChatActivity
+import com.hound.controller.mqtt.PartnerMqttService
+import com.hound.controller.ui.MainActivity
 import okhttp3.Call
 import okhttp3.Callback
 import okhttp3.MediaType.Companion.toMediaType
@@ -340,12 +340,12 @@ class PairingActivity : AppCompatActivity() {
                             .putString(PartnerMqttService.PREF_MQTT_PASSWORD, mqttPassword)
                             .putString(PartnerMqttService.PREF_MQTT_TOPIC_PREFIX, mqttTopicPrefix)
                             .putString(
-                                com.tpeapp.service.FilterService.PREF_WEBHOOK_URL,
+                                com.hound.controller.service.FilterService.PREF_WEBHOOK_URL,
                                 "$endpoint/api/tpe/webhook"
                             )
                         if (webhookSecret.isNotBlank()) {
                             editor.putString(
-                                com.tpeapp.service.FilterService.PREF_WEBHOOK_BEARER_TOKEN,
+                                com.hound.controller.service.FilterService.PREF_WEBHOOK_BEARER_TOKEN,
                                 webhookSecret
                             )
                         }

@@ -1,4 +1,4 @@
-package com.tpeapp.device
+package com.hound.controller.device
 
 import android.app.KeyguardManager
 import android.content.Intent
@@ -7,7 +7,7 @@ import android.os.Bundle
 import android.util.Log
 import android.view.WindowManager
 import androidx.appcompat.app.AppCompatActivity
-import com.tpeapp.databinding.ActivityOverlayBinding
+import com.hound.controller.databinding.ActivityOverlayBinding
 
 /**
  * OverlayActivity — a full-screen, lock-screen-aware activity used for:

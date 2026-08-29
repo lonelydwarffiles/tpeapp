@@ -1,4 +1,4 @@
-package com.tpeapp.mdm
+package com.hound.controller.mdm
 
 import android.app.admin.DeviceAdminReceiver
 import android.content.Context
@@ -17,7 +17,7 @@ import android.util.Log
  * 2. The Accountability Partner sets a PIN that must be entered before the
  *    user can deactivate the admin (mirroring parental-control behaviour).
  *
- * **Partner PIN guard** is implemented in [com.tpeapp.mdm.PartnerPinManager].
+ * **Partner PIN guard** is implemented in [com.hound.controller.mdm.PartnerPinManager].
  */
 class AppDeviceAdminReceiver : DeviceAdminReceiver() {
 

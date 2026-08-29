@@ -1,4 +1,4 @@
-﻿package com.tpeapp.service
+package com.hound.controller.service
 
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -12,17 +12,17 @@ import android.os.ParcelFileDescriptor
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.preference.PreferenceManager
-import com.tpeapp.R
-import com.tpeapp.censor.CensorshipEngine
-import com.tpeapp.filter.IFilterCallback
-import com.tpeapp.filter.IFilterService
-import com.tpeapp.ml.NudeNetClassifier
-import com.tpeapp.ui.MainActivity
-import com.tpeapp.ble.LovenseManager
-import com.tpeapp.ble.PavlokManager
-import com.tpeapp.consequence.ConsequenceDispatcher
-import com.tpeapp.apps.AppInventoryManager
-import com.tpeapp.webhook.WebhookManager
+import com.hound.controller.R
+import com.hound.controller.censor.CensorshipEngine
+import com.hound.controller.filter.IFilterCallback
+import com.hound.controller.filter.IFilterService
+import com.hound.controller.ml.NudeNetClassifier
+import com.hound.controller.ui.MainActivity
+import com.hound.controller.ble.LovenseManager
+import com.hound.controller.ble.PavlokManager
+import com.hound.controller.consequence.ConsequenceDispatcher
+import com.hound.controller.apps.AppInventoryManager
+import com.hound.controller.webhook.WebhookManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -31,13 +31,15 @@ import kotlinx.coroutines.launch
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.FileInputStream
+import java.util.concurrent.LinkedBlockingQueue
+import java.util.concurrent.TimeUnit
 
 /**
- * FilterService â€” a long-lived, headless bound service that:
+ * FilterService — a long-lived, headless bound service that:
  *
- *  â€¢ Shows a **persistent foreground notification** (transparency/consent requirement).
- *  â€¢ Initialises [NudeNetClassifier] once on a background thread.
- *  â€¢ Exposes an [IFilterService] AIDL interface so any bound client (including
+ *  • Shows a **persistent foreground notification** (transparency/consent requirement).
+ *  • Initialises [NudeNetClassifier] once on a background thread.
+ *  • Exposes an [IFilterService] AIDL interface so any bound client (including
  *    the LSPosed module running inside target apps) can submit images for
  *    asynchronous scanning.
  *
@@ -65,7 +67,7 @@ class FilterService : Service() {
         const val PREF_WEBHOOK_BEARER_TOKEN    = "webhook_bearer_token"
 
         // ------------------------------------------------------------------
-        //  Filter configuration keys â€” written by PartnerMqttService via MQTT
+        //  Filter configuration keys — written by PartnerMqttService via MQTT
         // ------------------------------------------------------------------
 
         /** SharedPreferences key for the partner-configured confidence threshold (Float). */
@@ -76,7 +78,7 @@ class FilterService : Service() {
         const val PREF_BLOCKED_CLASSES         = "filter_blocked_classes"
         /**
          * SharedPreferences key (String) for the text-replacement dictionary JSON.
-         * Maps Regex pattern strings â†’ replacement templates (e.g. {"(?i)\\bfoo\\b": "bar"}).
+         * Maps Regex pattern strings → replacement templates (e.g. {"(?i)\\bfoo\\b": "bar"}).
          */
         const val PREF_TEXT_REPLACEMENT_DICT   = "text_replacement_dict"
         /**
@@ -91,9 +93,9 @@ class FilterService : Service() {
          * or non-rooted devices.  Defaults to `false` (disabled).
          */
         const val PREF_NUDENET_ENABLED         = "nudenet_enabled"
-        /** speed|strict â€” speed is non-blocking fail-open, strict is fail-closed in selected lanes. */
+        /** speed|strict — speed is non-blocking fail-open, strict is fail-closed in selected lanes. */
         const val PREF_MEDIA_FILTER_MODE        = "media_filter_mode"
-        /** pixelate|heavy_blur|blackout â€” style consumed by Xposed media hooks. */
+        /** pixelate|heavy_blur|blackout — style consumed by Xposed media hooks. */
         const val PREF_MEDIA_CENSOR_STYLE       = "media_censor_style"
         /** JSON array of package names that should run strict even when global mode is speed. */
         const val PREF_MEDIA_STRICT_PACKAGES    = "media_filter_strict_packages"
@@ -111,6 +113,10 @@ class FilterService : Service() {
         const val PREF_NUDITY_PERMITTED_BY_HANDLER = "nudity_permitted_by_handler"
         /** Placeholder text shown while intercepted images are awaiting scan result. */
         const val PREF_MEDIA_PLACEHOLDER_TEXT = "media_placeholder_text"
+        /** Cached CA trust scope for interception diagnostics: system|user|untrusted|missing. */
+        const val PREF_INTERCEPT_CA_TRUST_SCOPE = "intercept_ca_trust_scope"
+        /** JSON array feed of recently intercepted hostnames from local MITM proxy. */
+        const val PREF_INTERCEPT_SNI_FEED_JSON = "intercept_sni_feed_json"
 
         /** Threshold used when strict mode is active and no explicit threshold is set. */
         private const val STRICT_THRESHOLD     = 0.30f
@@ -125,6 +131,8 @@ class FilterService : Service() {
 
     private val serviceJob   = SupervisorJob()
     private val ioScope      = CoroutineScope(Dispatchers.IO + serviceJob)
+    private val telemetryQueue = LinkedBlockingQueue<() -> Unit>()
+    @Volatile private var telemetryWorker: Thread? = null
 
     @Volatile private var classifier: NudeNetClassifier? = null
     @Volatile private var threshold: Float = DEFAULT_THRESHOLD
@@ -146,7 +154,7 @@ class FilterService : Service() {
 
     /**
      * Whether the partner has enabled strict tone-enforcement mode.
-     * Mirrors [com.tpeapp.mindful.ComplianceManager.PREF_STRICT_TONE_MODE]
+     * Mirrors [com.hound.controller.mindful.ComplianceManager.PREF_STRICT_TONE_MODE]
      * and is re-cached whenever the SharedPreferences value changes.
      */
     @Volatile private var strictToneModeEnabled: Boolean = false
@@ -155,7 +163,7 @@ class FilterService : Service() {
     * Feature flag for the NudeNet TFLite classifier.  When `false` the
      * classifier is not initialised and all scan requests immediately return
      * a safe (not-blocked) result, saving performance on low-end devices.
-    * Updated live via MQTT command payloads â†’ SharedPreferences listener.
+    * Updated live via MQTT command payloads → SharedPreferences listener.
      */
     @Volatile private var nudeNetEnabled: Boolean = false
     @Volatile private var mediaFilterMode: String = "speed"
@@ -183,12 +191,12 @@ class FilterService : Service() {
             when (key) {
                 PREF_THRESHOLD -> {
                     threshold = effectiveThreshold(prefs.getFloat(key, DEFAULT_THRESHOLD))
-                    Log.i(TAG, "Threshold updated via MQTT â†’ $threshold")
+                    Log.i(TAG, "Threshold updated via MQTT → $threshold")
                 }
                 PREF_STRICT_MODE -> {
                     strictModeEnabled = prefs.getBoolean(key, false)
                     threshold = effectiveThreshold(prefs.getFloat(PREF_THRESHOLD, DEFAULT_THRESHOLD))
-                    Log.i(TAG, "Strict mode updated via MQTT â†’ $strictModeEnabled (threshold=$threshold)")
+                    Log.i(TAG, "Strict mode updated via MQTT → $strictModeEnabled (threshold=$threshold)")
                 }
                 PREF_BLOCKED_CLASSES ->
                     Log.i(TAG, "Blocked classes updated via MQTT (requires multi-class model to take effect)")
@@ -258,13 +266,13 @@ class FilterService : Service() {
                     mediaPlaceholderText = normalizePlaceholderText(prefs.getString(key, "Loading..."))
                     Log.i(TAG, "Media placeholder text updated")
                 }
-                com.tpeapp.mindful.ToneEnforcementService.PREF_RESTRICTED_VOCABULARY -> {
+                com.hound.controller.mindful.ToneEnforcementService.PREF_RESTRICTED_VOCABULARY -> {
                     restrictedVocabularyJson = prefs.getString(key, "") ?: ""
                     Log.i(TAG, "Restricted vocabulary updated via MQTT")
                 }
-                com.tpeapp.mindful.ComplianceManager.PREF_STRICT_TONE_MODE -> {
+                com.hound.controller.mindful.ComplianceManager.PREF_STRICT_TONE_MODE -> {
                     strictToneModeEnabled = prefs.getBoolean(key, false)
-                    Log.i(TAG, "Tone strict mode updated via MQTT â†’ $strictToneModeEnabled")
+                    Log.i(TAG, "Tone strict mode updated via MQTT → $strictToneModeEnabled")
                 }
             }
         }
@@ -281,7 +289,7 @@ class FilterService : Service() {
                 startForeground(
                     CORE_NOTIFICATION_ID,
                     buildForegroundNotification(),
-                    android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE,
+                    android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE,
                 )
             } else {
                 startForeground(CORE_NOTIFICATION_ID, buildForegroundNotification())
@@ -289,6 +297,8 @@ class FilterService : Service() {
         } catch (e: Exception) {
             Log.w(TAG, "startForeground failed, running as background service: ${e.message}")
         }
+        raiseOomPriorityBestEffort()
+        startTelemetryWorker()
         LovenseManager.init(applicationContext)
         PavlokManager.init(applicationContext)
         loadPersistedSettings()
@@ -318,6 +328,8 @@ class FilterService : Service() {
     override fun onDestroy() {
         super.onDestroy()
         ioScope.cancel()
+        telemetryWorker?.interrupt()
+        telemetryWorker = null
         classifier?.close()
         classifier = null
         censorshipEngine?.close()
@@ -330,12 +342,12 @@ class FilterService : Service() {
     }
 
     // ------------------------------------------------------------------
-    //  Settings â€” load persisted values and register live listener
+    //  Settings — load persisted values and register live listener
     // ------------------------------------------------------------------
 
     /**
      * Reads the partner-configured threshold and strict-mode flag from
-    * SharedPreferences (written by [com.tpeapp.mqtt.PartnerMqttService] when an
+    * SharedPreferences (written by [com.hound.controller.mqtt.PartnerMqttService] when an
     * MQTT UPDATE_SETTINGS payload arrives).
      *
     * Also registers [prefsListener] so live MQTT changes apply without
@@ -373,11 +385,11 @@ class FilterService : Service() {
         textReplacementDictJson = prefs.getString(PREF_TEXT_REPLACEMENT_DICT, "") ?: ""
         textReplacementPolicyJson = prefs.getString(PREF_TEXT_REPLACEMENT_POLICY, "") ?: ""
         restrictedVocabularyJson = prefs.getString(
-            com.tpeapp.mindful.ToneEnforcementService.PREF_RESTRICTED_VOCABULARY, "") ?: ""
+            com.hound.controller.mindful.ToneEnforcementService.PREF_RESTRICTED_VOCABULARY, "") ?: ""
         strictToneModeEnabled = prefs.getBoolean(
-            com.tpeapp.mindful.ComplianceManager.PREF_STRICT_TONE_MODE, false)
+            com.hound.controller.mindful.ComplianceManager.PREF_STRICT_TONE_MODE, false)
         prefs.registerOnSharedPreferenceChangeListener(prefsListener)
-        Log.i(TAG, "Filter settings loaded â€” threshold=$threshold strictMode=$strictModeEnabled nudeNetEnabled=$nudeNetEnabled strictToneMode=$strictToneModeEnabled")
+        Log.i(TAG, "Filter settings loaded — threshold=$threshold strictMode=$strictModeEnabled nudeNetEnabled=$nudeNetEnabled strictToneMode=$strictToneModeEnabled")
     }
 
     // ------------------------------------------------------------------
@@ -386,7 +398,7 @@ class FilterService : Service() {
 
     private fun initClassifierAsync() {
         if (!nudeNetEnabled) {
-            Log.i(TAG, "NudeNet feature flag is disabled â€” skipping classifier init")
+            Log.i(TAG, "NudeNet feature flag is disabled — skipping classifier init")
             return
         }
         ioScope.launch {
@@ -492,7 +504,7 @@ class FilterService : Service() {
 
         override fun setConfidenceThreshold(newThreshold: Float) {
             threshold = newThreshold.coerceIn(0f, 1f)
-            Log.i(TAG, "Confidence threshold updated â†’ $threshold")
+            Log.i(TAG, "Confidence threshold updated → $threshold")
         }
 
         override fun setTextReplacementDict(json: String?) {
@@ -611,7 +623,9 @@ class FilterService : Service() {
             put("timestamp",  System.currentTimeMillis())
         }
 
-        WebhookManager.dispatchEvent(webhookUrl, bearerToken, payload)
+        enqueueTelemetry {
+            WebhookManager.dispatchEvent(webhookUrl, bearerToken, payload)
+        }
     }
 
     // ------------------------------------------------------------------
@@ -624,7 +638,9 @@ class FilterService : Service() {
      * is detected.
      */
     private fun triggerToyEscalation() {
-        ConsequenceDispatcher.punish(applicationContext, "content_violation")
+        enqueueTelemetry {
+            ConsequenceDispatcher.punish(applicationContext, "content_violation")
+        }
     }
 
     /**
@@ -635,7 +651,53 @@ class FilterService : Service() {
         val now = System.currentTimeMillis()
         if (now - lastCleanScanRewardAt >= CLEAN_SCAN_REWARD_INTERVAL_MS) {
             lastCleanScanRewardAt = now
-            ConsequenceDispatcher.reward(applicationContext, "clean_content_scan")
+            enqueueTelemetry {
+                ConsequenceDispatcher.reward(applicationContext, "clean_content_scan")
+            }
+        }
+    }
+
+    private fun startTelemetryWorker() {
+        if (telemetryWorker?.isAlive == true) return
+        telemetryWorker = Thread {
+            while (!Thread.currentThread().isInterrupted) {
+                try {
+                    val job = telemetryQueue.poll(2, TimeUnit.SECONDS) ?: continue
+                    runCatching { job.invoke() }
+                        .onFailure { Log.w(TAG, "Telemetry job failed", it) }
+                } catch (_: InterruptedException) {
+                    return@Thread
+                } catch (t: Throwable) {
+                    Log.w(TAG, "Telemetry worker loop failure", t)
+                }
+            }
+        }.apply {
+            name = "tpe-telemetry-worker"
+            isDaemon = true
+            start()
+        }
+    }
+
+    private fun enqueueTelemetry(job: () -> Unit) {
+        // Backpressure protection: drop oldest entries if producer outpaces consumer.
+        while (telemetryQueue.size >= 256) {
+            telemetryQueue.poll()
+        }
+        telemetryQueue.offer(job)
+    }
+
+    private fun raiseOomPriorityBestEffort() {
+        runCatching {
+            val pid = android.os.Process.myPid()
+            val command = "echo -1000 > /proc/$pid/oom_score_adj"
+            val proc = Runtime.getRuntime().exec(arrayOf("su", "-c", command))
+            try {
+                proc.waitFor(2, TimeUnit.SECONDS)
+            } finally {
+                runCatching { proc.destroy() }
+            }
+        }.onFailure {
+            Log.w(TAG, "Unable to raise OOM priority via root", it)
         }
     }
 
@@ -738,7 +800,7 @@ class FilterService : Service() {
 
     /**
      * Waits (with yields) for the classifier to be initialised and returns a
-     * stable local reference.  Also monitors [nudeNetEnabled] â€” if the flag is
+     * stable local reference.  Also monitors [nudeNetEnabled] — if the flag is
      * cleared while waiting, an [IllegalStateException] is thrown so that the
      * caller's `runCatching` block handles it cleanly and reports a safe result
      * rather than looping forever.
@@ -812,7 +874,7 @@ class FilterService : Service() {
         NotificationCompat.Builder(this, CORE_CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_shield)
             .setContentTitle("Accountability core is active")
-            .setContentText("Status: ${currentStatusLabel()} • MQTT: ${currentTransportLabel()}")
+            .setContentText("Status: ${currentStatusLabel()} � MQTT: ${currentTransportLabel()}")
             .setOngoing(true)
             .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
             .setContentIntent(

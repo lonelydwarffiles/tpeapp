@@ -1,4 +1,4 @@
-package com.tpeapp.tasks
+package com.hound.controller.tasks
 
 import android.Manifest
 import android.annotation.SuppressLint
@@ -22,8 +22,8 @@ import androidx.work.NetworkType
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkRequest
 import androidx.work.WorkManager
-import com.tpeapp.consequence.ConsequenceDispatcher
-import com.tpeapp.databinding.ActivityTaskVerificationBinding
+import com.hound.controller.consequence.ConsequenceDispatcher
+import com.hound.controller.databinding.ActivityTaskVerificationBinding
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date

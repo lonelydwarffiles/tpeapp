@@ -138,7 +138,7 @@ class _KioskTaskOverlayState extends State<KioskTaskOverlay> {
         return PopScope(
           canPop: false,
           child: Material(
-            color: Colors.black.withOpacity(0.92),
+            color: Colors.black.withValues(alpha: 0.92),
             child: SafeArea(
               child: Center(
                 child: Padding(
@@ -149,7 +149,7 @@ class _KioskTaskOverlayState extends State<KioskTaskOverlay> {
                     decoration: BoxDecoration(
                       color: cs.surfaceContainerHigh,
                       borderRadius: BorderRadius.circular(20),
-                      border: Border.all(color: cs.primary.withOpacity(0.45)),
+                      border: Border.all(color: cs.primary.withValues(alpha: 0.45)),
                     ),
                     child: Column(
                       mainAxisSize: MainAxisSize.min,

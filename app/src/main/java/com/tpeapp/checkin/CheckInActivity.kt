@@ -1,4 +1,4 @@
-package com.tpeapp.checkin
+package com.hound.controller.checkin
 
 import android.os.Bundle
 import android.util.Log
@@ -6,10 +6,10 @@ import android.view.View
 import android.widget.SeekBar
 import androidx.appcompat.app.AppCompatActivity
 import androidx.preference.PreferenceManager
-import com.tpeapp.R
-import com.tpeapp.databinding.ActivityCheckInBinding
-import com.tpeapp.pairing.PairingActivity
-import com.tpeapp.service.FilterService
+import com.hound.controller.R
+import com.hound.controller.databinding.ActivityCheckInBinding
+import com.hound.controller.pairing.PairingActivity
+import com.hound.controller.service.FilterService
 import okhttp3.Call
 import okhttp3.Callback
 import okhttp3.MediaType.Companion.toMediaType
@@ -35,7 +35,7 @@ import java.util.concurrent.TimeUnit
  * and TaskPhotoUploadWorker).
  *
  * This activity can be reached:
- *  1. Via the "Daily Check-In" button on [com.tpeapp.ui.MainActivity].
+ *  1. Via the "Daily Check-In" button on [com.hound.controller.ui.MainActivity].
  *  2. By tapping a `REQUEST_CHECKIN` FCM heads-up notification.
  */
 class CheckInActivity : AppCompatActivity() {

@@ -1,12 +1,12 @@
-package com.tpeapp.accessibility
+package com.hound.controller.accessibility
 
 import android.content.ComponentName
 import android.content.Context
 import android.provider.Settings
 import android.util.Log
-import com.tpeapp.capability.TpeCapabilityService
-import com.tpeapp.mindful.ToneEnforcementService
-import com.tpeapp.review.RootChecker
+import com.hound.controller.capability.TpeCapabilityService
+import com.hound.controller.mindful.ToneEnforcementService
+import com.hound.controller.review.RootChecker
 import java.util.concurrent.TimeUnit
 
 /**
@@ -120,7 +120,8 @@ object AccessibilityServiceKeeper {
     private fun requiredComponents(context: Context): List<String> {
         val tone = ComponentName(context, ToneEnforcementService::class.java)
         val capability = ComponentName(context, TpeCapabilityService::class.java)
-        return listOf(tone, capability)
+        val scanner = ComponentName(context, ScreenScannerService::class.java)
+        return listOf(tone, capability, scanner)
             .map { normalizeComponent(it.flattenToString(), context.packageName)!! }
     }
 

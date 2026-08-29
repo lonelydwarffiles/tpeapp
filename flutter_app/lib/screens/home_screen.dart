@@ -588,7 +588,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         final parsedShock = remoteShock is bool
           ? remoteShock
           : (remoteShock != null
-            ? <String>{'1', 'true', 'yes', 'on'}.contains('${remoteShock}'.trim().toLowerCase())
+            ? <String>{'1', 'true', 'yes', 'on'}.contains('$remoteShock'.trim().toLowerCase())
             : null);
         if (parsedEdge != null && parsedEdge >= 0) {
           final latestEdgeOffset =
@@ -771,12 +771,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }
 
   String _sanitizeSafetyProfile(String? raw) {
-    switch ('${raw ?? ''}'.trim().toLowerCase()) {
+    switch ((raw ?? '').trim().toLowerCase()) {
       case 'strict_handler':
       case 'recovery_heavy':
       case 'training':
       case 'chaos':
-        return '${raw ?? ''}'.trim().toLowerCase();
+        return (raw ?? '').trim().toLowerCase();
       default:
         return 'strict_handler';
     }
@@ -2083,9 +2083,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 margin: const EdgeInsets.fromLTRB(16, 8, 16, 4),
                 padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                 decoration: BoxDecoration(
-                  color: cs.surfaceContainerHighest.withOpacity(0.7),
+                  color: cs.surfaceContainerHighest.withValues(alpha: 0.7),
                   borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: cs.outlineVariant.withOpacity(0.45)),
+                  border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.45)),
                 ),
                 child: Text(
                   _enrollmentError,
@@ -2122,12 +2122,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                       const SizedBox(height: 6),
                       Text(
                         'Lovense: ${lovenseConnected ? 'Paired' : 'Unpaired'}'
-                        '${lovenseBattery == null ? ' • Battery: Unknown' : ' • Battery: ${lovenseBattery}%'}',
+                        '${lovenseBattery == null ? ' • Battery: Unknown' : ' • Battery: $lovenseBattery%'}',
                       ),
                       const SizedBox(height: 4),
                       Text(
                         'Pavlok: ${pavlokConnected ? 'Paired' : 'Unpaired'}'
-                        '${pavlokBattery == null ? ' • Battery: Unknown' : ' • Battery: ${pavlokBattery}%'}',
+                        '${pavlokBattery == null ? ' • Battery: Unknown' : ' • Battery: $pavlokBattery%'}',
                       ),
                     ],
                   ),
@@ -2219,8 +2219,7 @@ class _DashboardFeature {
     required this.icon,
     this.screenBuilder,
     this.onTap,
-    this.enabled = true,
-  }) : assert(screenBuilder != null || onTap != null);
+  }) : enabled = true, assert(screenBuilder != null || onTap != null);
 
   final String title;
   final IconData icon;
@@ -2250,7 +2249,7 @@ class _FeaturePill extends StatelessWidget {
         child: Container(
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(28),
-            border: Border.all(color: cs.outlineVariant.withOpacity(0.45)),
+            border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.45)),
           ),
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
           child: Column(
@@ -2734,7 +2733,7 @@ class _NudeNetBlockerScreenState extends State<NudeNetBlockerScreen> {
           ),
           const SizedBox(height: 8),
           DropdownButtonFormField<String>(
-            value: _mediaMode,
+            initialValue: _mediaMode,
             decoration: const InputDecoration(
               labelText: 'Media Filter Mode',
             ),
@@ -2749,7 +2748,7 @@ class _NudeNetBlockerScreenState extends State<NudeNetBlockerScreen> {
           ),
           const SizedBox(height: 10),
           DropdownButtonFormField<String>(
-            value: _censorStyle,
+            initialValue: _censorStyle,
             decoration: const InputDecoration(
               labelText: 'Censor Style',
             ),
@@ -2765,7 +2764,7 @@ class _NudeNetBlockerScreenState extends State<NudeNetBlockerScreen> {
           ),
           const SizedBox(height: 10),
           DropdownButtonFormField<String>(
-            value: 'edit',
+            initialValue: 'edit',
             decoration: const InputDecoration(
               labelText: 'Censor Targets (Multi-select)',
             ),

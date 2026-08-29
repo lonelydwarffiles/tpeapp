@@ -1,4 +1,4 @@
-package com.tpeapp.mindful
+package com.hound.controller.mindful
 
 import android.content.Context
 import androidx.preference.PreferenceManager

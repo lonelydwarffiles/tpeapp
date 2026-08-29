@@ -1,4 +1,4 @@
-﻿package com.hound.controller
+package com.hound.controller
 
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -31,8 +31,8 @@ import androidx.core.content.ContextCompat
 import androidx.core.app.NotificationCompat
 import androidx.health.connect.client.HealthConnectClient
 import androidx.health.connect.client.PermissionController
-import com.tpeapp.bridge.BleChannel
-import com.tpeapp.filter.IFilterService
+import com.hound.controller.bridge.BleChannel
+import com.hound.controller.filter.IFilterService
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodCall

@@ -1,4 +1,4 @@
-package com.tpeapp.vpn
+package com.hound.controller.vpn
 
 import android.app.Notification
 import android.app.NotificationChannel
@@ -7,23 +7,30 @@ import android.app.Activity
 import android.content.Context
 import android.content.Intent
 import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
+import android.net.Network
 import android.net.VpnService
 import android.os.Build
 import android.os.ParcelFileDescriptor
 import android.system.OsConstants
 import androidx.preference.PreferenceManager
+import com.hound.controller.service.FilterService
 import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.io.IOException
+import java.io.ByteArrayOutputStream
 import java.net.DatagramPacket
 import java.net.DatagramSocket
 import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.Socket
 import java.util.TreeMap
+import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.random.Random
+import org.json.JSONArray
+import org.json.JSONObject
 
 /**
  * Local VPN tunnel with in-process forwarding.
@@ -35,12 +42,8 @@ import kotlin.random.Random
 class TrafficCaptureVpnService : VpnService() {
 
     companion object {
-        private const val PREF_VPN_MITM_ENABLED = "vpn_mitm_enabled"
-    }
-
-    companion object {
-        private const val ACTION_CONNECT = "com.tpeapp.vpn.CONNECT"
-        private const val ACTION_DISCONNECT = "com.tpeapp.vpn.DISCONNECT"
+        private const val ACTION_CONNECT = "com.hound.controller.vpn.CONNECT"
+        private const val ACTION_DISCONNECT = "com.hound.controller.vpn.DISCONNECT"
         private const val ANDROID_AUTO_PACKAGE = "com.google.android.projection.gearhead"
         private const val CHANNEL_ID = "tpe_vpn"
         private const val NOTIFICATION_ID = 44071
@@ -108,19 +111,29 @@ class TrafficCaptureVpnService : VpnService() {
     private var tunnelFd: ParcelFileDescriptor? = null
     private var tunnelThread: Thread? = null
     private var cleanupThread: Thread? = null
-    private var mitmProxy: LocalMitmProxy? = null
-    private var mitmPort: Int = -1
     private val running = AtomicBoolean(false)
     private val writeLock = Any()
 
-    private val udpSessions = ConcurrentHashMap<UdpKey, UdpSession>()
+    private val udpSessions = ConcurrentHashMap<TpeUdpKey, TpeUdpSession>()
     private val tcpSessions = ConcurrentHashMap<TcpKey, TcpSession>()
     private val connectivityManager by lazy { getSystemService(ConnectivityManager::class.java) }
-
-    private val stats = TunnelStats()
-
     @Volatile
-    private var blockedRulesCache: List<String> = emptyList()
+    private var activeDnsResolver: InetAddress? = null
+    private val networkCallback = object : ConnectivityManager.NetworkCallback() {
+        override fun onAvailable(network: Network) {
+            refreshActiveDnsResolver(network)
+        }
+
+        override fun onCapabilitiesChanged(network: Network, networkCapabilities: NetworkCapabilities) {
+            refreshActiveDnsResolver(network)
+        }
+
+        override fun onLost(network: Network) {
+            // No-op: passthrough sockets naturally reconnect on client retries.
+        }
+    }
+
+    private val stats = TpeTunnelStats()
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
@@ -139,9 +152,9 @@ class TrafficCaptureVpnService : VpnService() {
     }
 
     private fun startTunnel() {
-        val policy = VpnPolicyManager.localTunnelPolicy(this)
+        val policy = TpeVpnPolicyManager.localTunnelPolicy(this)
         if (!policy.useLocalTunnel) {
-            VpnPolicyManager.setTunnelRuntime(this, active = false, error = "Local tunnel mode not enabled")
+            TpeVpnPolicyManager.setTunnelRuntime(this, active = false, error = "Local tunnel mode not enabled")
             return
         }
 
@@ -150,26 +163,15 @@ class TrafficCaptureVpnService : VpnService() {
         try {
             ensureNotificationChannel()
             startForeground(NOTIFICATION_ID, buildNotification("Network forwarding active"))
-            blockedRulesCache = VpnPolicyManager.blockedDomainRules(this)
-            val proxy = LocalMitmProxy(
-                context = applicationContext,
-                protectSocket = { socket -> protect(socket) },
-            )
-            val proxyPort = proxy.start()
-            if (proxyPort <= 0) {
-                VpnPolicyManager.setTunnelRuntime(this, active = false, error = "MITM proxy failed to start")
-                stopForeground(STOP_FOREGROUND_REMOVE)
-                return
-            }
-            mitmProxy = proxy
-            mitmPort = proxyPort
 
             val builder = Builder()
                 .setSession("TPE Network Policy")
                 .setMtu(1500)
                 .setBlocking(true)
                 .addAddress("10.7.0.2", 32)
+                .addAddress("2001:db8::1", 64)
                 .addRoute("0.0.0.0", 0)
+                .addRoute("::", 0)
 
             if (policy.captureIpv6) {
                 builder.addAddress("fd66:66:66::2", 128)
@@ -180,13 +182,14 @@ class TrafficCaptureVpnService : VpnService() {
 
             val established = builder.establish()
             if (established == null) {
-                VpnPolicyManager.setTunnelRuntime(this, active = false, error = "VpnService establish() returned null")
+                TpeVpnPolicyManager.setTunnelRuntime(this, active = false, error = "VpnService establish() returned null")
                 stopForeground(STOP_FOREGROUND_REMOVE)
                 return
             }
 
             tunnelFd = established
-            VpnPolicyManager.setTunnelRuntime(this, active = true)
+            TpeVpnPolicyManager.setTunnelRuntime(this, active = true)
+            runCatching { connectivityManager?.registerDefaultNetworkCallback(networkCallback) }
 
             running.set(true)
             tunnelThread = Thread {
@@ -205,7 +208,7 @@ class TrafficCaptureVpnService : VpnService() {
                 start()
             }
         } catch (e: Exception) {
-            VpnPolicyManager.setTunnelRuntime(this, active = false, error = e.message ?: "failed to start tunnel")
+            TpeVpnPolicyManager.setTunnelRuntime(this, active = false, error = e.message ?: "failed to start tunnel")
             stopForeground(STOP_FOREGROUND_REMOVE)
         }
     }
@@ -217,9 +220,7 @@ class TrafficCaptureVpnService : VpnService() {
         cleanupThread?.interrupt()
         cleanupThread = null
 
-        runCatching { mitmProxy?.stop() }
-        mitmProxy = null
-        mitmPort = -1
+        runCatching { connectivityManager?.unregisterNetworkCallback(networkCallback) }
 
         for ((_, session) in udpSessions) {
             session.close()
@@ -237,11 +238,26 @@ class TrafficCaptureVpnService : VpnService() {
         }
         tunnelFd = null
 
-        VpnPolicyManager.setTunnelRuntime(this, active = false)
+        TpeVpnPolicyManager.setTunnelRuntime(this, active = false)
         stopForeground(STOP_FOREGROUND_REMOVE)
     }
 
-    private fun applyAppRoutingPolicy(builder: Builder, policy: VpnPolicyManager.LocalTunnelPolicy) {
+    private fun applyAppRoutingPolicy(builder: Builder, policy: TpeVpnPolicyManager.LocalTunnelPolicy) {
+        val splitTunnelEnabled = TpeVpnPolicyManager.isSplitTunnelEnabled(this)
+        if (splitTunnelEnabled) {
+            // Split tunnel list is treated as bypass/off-tunnel apps.
+            val splitPackages = TpeVpnPolicyManager.splitTunnelPackages(this)
+            splitPackages.forEach { pkg ->
+                try {
+                    builder.addDisallowedApplication(pkg)
+                } catch (_: Throwable) {
+                    // App may be unavailable on this device.
+                }
+            }
+            runCatching { builder.addDisallowedApplication(packageName) }
+            return
+        }
+
         // Keep this app out of the tunnel so handler control traffic is never self-blocked.
         runCatching { builder.addDisallowedApplication(packageName) }
         // Keep Android Auto off-tunnel for projection and transport stability.
@@ -348,7 +364,7 @@ class TrafficCaptureVpnService : VpnService() {
             // Runtime failures are reflected by tunnel inactive state on shutdown.
         } finally {
             if (bytesAccum > 0L || packetsAccum > 0L) {
-                VpnPolicyManager.addCapturedTraffic(this, bytesAccum, packetsAccum)
+                TpeVpnPolicyManager.addCapturedTraffic(this, bytesAccum, packetsAccum)
             }
             flushForwardingStats()
         }
@@ -357,7 +373,7 @@ class TrafficCaptureVpnService : VpnService() {
     private fun flushStatsIfNeeded(bytesAccum: Long, packetsAccum: Long, lastFlush: Long): Triple<Long, Long, Long> {
         val now = System.currentTimeMillis()
         return if (now - lastFlush >= 1000L || packetsAccum >= 64L) {
-            VpnPolicyManager.addCapturedTraffic(this, bytesAccum, packetsAccum)
+            TpeVpnPolicyManager.addCapturedTraffic(this, bytesAccum, packetsAccum)
             flushForwardingStats()
             Triple(0L, 0L, now)
         } else {
@@ -377,10 +393,10 @@ class TrafficCaptureVpnService : VpnService() {
 
         if (forwarded > 0L) {
             // Approximate byte accounting from packet count keeps telemetry lightweight.
-            VpnPolicyManager.addForwardedTraffic(this, bytes = 0L, packets = forwarded)
+            TpeVpnPolicyManager.addForwardedTraffic(this, bytes = 0L, packets = forwarded)
         }
         if (dropped > 0L) {
-            VpnPolicyManager.addDroppedPackets(this, dropped)
+            TpeVpnPolicyManager.addDroppedPackets(this, dropped)
         }
     }
 
@@ -412,7 +428,18 @@ class TrafficCaptureVpnService : VpnService() {
             return
         }
 
-        val key = UdpKey(
+        val upstreamRemoteIp = if (udp.destinationPort == 53) {
+            val preferred = activeDnsResolver
+            if (preferred != null && preferred.address.size == 4) {
+                preferred
+            } else {
+                ip.destination
+            }
+        } else {
+            ip.destination
+        }
+
+        val key = TpeUdpKey(
             clientIp = ip.source,
             clientPort = udp.sourcePort,
             remoteIp = ip.destination,
@@ -423,9 +450,9 @@ class TrafficCaptureVpnService : VpnService() {
             val socket = DatagramSocket().apply {
                 soTimeout = 2000
                 protect(this)
-                connect(InetSocketAddress(ip.destination, udp.destinationPort))
+                connect(InetSocketAddress(upstreamRemoteIp, udp.destinationPort))
             }
-            UdpSession(socket)
+            TpeUdpSession(socket)
         }
         session.lastActivityMs = System.currentTimeMillis()
         if (session.metadataRecorded.compareAndSet(false, true)) {
@@ -434,24 +461,6 @@ class TrafficCaptureVpnService : VpnService() {
             } else {
                 null
             }
-            if (dnsDomain != null && shouldBlockDomain(dnsDomain)) {
-                val blockedPayload = PacketCodec.buildDnsBlockedResponse(udp.payload)
-                if (blockedPayload != null) {
-                    val blockedPacket = PacketCodec.buildUdpIpv4Packet(
-                        source = key.remoteIp,
-                        destination = key.clientIp,
-                        sourcePort = key.remotePort,
-                        destinationPort = key.clientPort,
-                        payload = blockedPayload,
-                    )
-                    synchronized(writeLock) {
-                        output.write(blockedPacket)
-                        output.flush()
-                    }
-                    VpnPolicyManager.addBlockedDomainEvent(this, dnsDomain)
-                    return
-                }
-            }
             recordFlowSample(
                 protocol = OsConstants.IPPROTO_UDP,
                 localPort = udp.sourcePort,
@@ -459,6 +468,7 @@ class TrafficCaptureVpnService : VpnService() {
                 remotePort = udp.destinationPort,
                 dnsDomain = dnsDomain,
             )
+            recordMetadataSample(remoteIp = ip.destination, domain = dnsDomain)
         }
 
         if (udp.payload.isNotEmpty()) {
@@ -546,9 +556,8 @@ class TrafficCaptureVpnService : VpnService() {
         }
 
         if (!existing.domainChecked && tcp.payload.isNotEmpty()) {
-            existing.domainChecked = true
             val tlsSni = if (existing.key.remotePort == 443) {
-                PacketCodec.parseTlsClientHelloSni(tcp.payload)
+                existing.observeClientPayloadForSni(tcp.payload)
             } else {
                 null
             }
@@ -558,12 +567,19 @@ class TrafficCaptureVpnService : VpnService() {
                 null
             }
             val candidate = tlsSni ?: httpHost
-            if (candidate != null && shouldBlockDomain(candidate)) {
-                sendTcpRst(output, existing.key, tcp)
-                existing.close()
-                tcpSessions.remove(existing.key)
-                VpnPolicyManager.addBlockedDomainEvent(this, candidate)
-                return
+            if (tlsSni != null) {
+                existing.sniHost = tlsSni
+            }
+            existing.domainChecked = candidate != null || existing.key.remotePort != 443 || existing.tlsProbeConclusive
+            if (candidate != null && existing.domainSampleRecorded.compareAndSet(false, true)) {
+                recordFlowSample(
+                    protocol = OsConstants.IPPROTO_TCP,
+                    localPort = existing.key.clientPort,
+                    remoteIp = existing.key.remoteIp,
+                    remotePort = existing.key.remotePort,
+                    dnsDomain = candidate,
+                )
+                recordMetadataSample(remoteIp = existing.key.remoteIp, domain = candidate)
             }
         }
 
@@ -586,30 +602,13 @@ class TrafficCaptureVpnService : VpnService() {
 
     private fun openTcpSession(key: TcpKey, syn: ParsedTcpSegment, output: FileOutputStream) {
         val socket = Socket()
-        val useMitm = shouldUseMitmForPort(key.remotePort)
         runCatching {
             protect(socket)
             socket.tcpNoDelay = true
-            if (useMitm && mitmPort > 0) {
-                socket.connect(InetSocketAddress("127.0.0.1", mitmPort), 8000)
-            } else {
-                socket.connect(InetSocketAddress(key.remoteIp, key.remotePort), 8000)
-            }
+            socket.connect(InetSocketAddress(key.remoteIp, key.remotePort), 8000)
         }.onFailure {
             sendTcpRst(output, key, syn)
             return
-        }
-
-        if (useMitm && mitmPort > 0) {
-            runCatching {
-                val header = "TPE-TARGET ${key.remoteIp.hostAddress}:${key.remotePort}\n".toByteArray(Charsets.US_ASCII)
-                socket.getOutputStream().write(header)
-                socket.getOutputStream().flush()
-            }.onFailure {
-                runCatching { socket.close() }
-                sendTcpRst(output, key, syn)
-                return
-            }
         }
 
         val serverSeq = Random.nextInt(1, Int.MAX_VALUE / 2).toLong()
@@ -791,6 +790,7 @@ class TrafficCaptureVpnService : VpnService() {
 
         return runCatching {
             val out = session.socket.getOutputStream()
+
             for (chunk in chunksToWrite) {
                 if (chunk.isEmpty()) continue
                 out.write(chunk)
@@ -801,6 +801,17 @@ class TrafficCaptureVpnService : VpnService() {
             out.flush()
             true
         }.getOrElse { false }
+    }
+
+    private fun refreshActiveDnsResolver(network: Network?) {
+        val cm = connectivityManager ?: return
+        val dns = runCatching {
+            val props = cm.getLinkProperties(network ?: cm.activeNetwork)
+            props?.dnsServers?.firstOrNull { it.address.size == 4 }
+        }.getOrNull()
+        if (dns != null) {
+            activeDnsResolver = dns
+        }
     }
 
     private fun recordFlowSample(
@@ -818,12 +829,32 @@ class TrafficCaptureVpnService : VpnService() {
             append(remotePort)
         }
         val packageName = resolveOwnerPackage(protocol, localPort, remoteIp, remotePort)
-        VpnPolicyManager.addFlowSample(
+        TpeVpnPolicyManager.addFlowSample(
             context = this,
             endpointKey = endpoint,
             domain = dnsDomain,
             packageName = packageName,
         )
+    }
+
+    private fun recordMetadataSample(remoteIp: InetAddress, domain: String?) {
+        val normalizedDomain = domain?.trim()?.trimEnd('.')?.lowercase(Locale.US).orEmpty()
+        val destinationIp = remoteIp.hostAddress?.trim().orEmpty()
+        if (destinationIp.isBlank() && normalizedDomain.isBlank()) return
+
+        val prefs = PreferenceManager.getDefaultSharedPreferences(this)
+        val raw = prefs.getString(FilterService.PREF_INTERCEPT_SNI_FEED_JSON, "[]")?.trim().orEmpty()
+        val arr = runCatching { JSONArray(raw.ifBlank { "[]" }) }.getOrElse { JSONArray() }
+        arr.put(JSONObject().apply {
+            put("host", normalizedDomain)
+            put("domain", normalizedDomain)
+            put("destination_ip", destinationIp)
+            put("timestamp_ms", System.currentTimeMillis())
+        })
+        while (arr.length() > 120) {
+            arr.remove(0)
+        }
+        prefs.edit().putString(FilterService.PREF_INTERCEPT_SNI_FEED_JSON, arr.toString()).apply()
     }
 
     private fun resolveOwnerPackage(
@@ -845,32 +876,16 @@ class TrafficCaptureVpnService : VpnService() {
         }.getOrNull()
     }
 
-    private fun shouldBlockDomain(domain: String): Boolean {
-        val normalized = domain.trim().lowercase()
-        if (normalized.isBlank()) return false
-        val rules = blockedRulesCache
-        if (rules.isEmpty()) return false
-        return rules.any { rule ->
-            normalized == rule || normalized.endsWith(".$rule") || normalized.contains(rule)
-        }
-    }
-
-    private fun shouldUseMitmForPort(port: Int): Boolean {
-        if (port == 80) return true
-        if (port != 443) return false
-        return PreferenceManager.getDefaultSharedPreferences(applicationContext)
-            .getBoolean(PREF_VPN_MITM_ENABLED, false)
-    }
 }
 
-private data class UdpKey(
+private data class TpeUdpKey(
     val clientIp: InetAddress,
     val clientPort: Int,
     val remoteIp: InetAddress,
     val remotePort: Int,
 )
 
-private class UdpSession(
+private class TpeUdpSession(
     val socket: DatagramSocket,
 ) {
     val receiverStarted = AtomicBoolean(false)
@@ -893,19 +908,40 @@ private data class TcpKey(
 
 private class TcpSession(
     val key: TcpKey,
-    val socket: Socket,
+    @Volatile var socket: Socket,
     @Volatile var clientNextSeq: Long,
     @Volatile var serverSeq: Long,
     @Volatile var serverNextSeq: Long,
 ) {
     @Volatile var established: Boolean = false
     @Volatile var domainChecked: Boolean = false
+    val domainSampleRecorded = AtomicBoolean(false)
+    @Volatile var sniHost: String? = null
+    @Volatile var tlsProbeConclusive: Boolean = false
     val closed = AtomicBoolean(false)
     val lock = Any()
     val pendingClientSegments = TreeMap<Long, ByteArray>()
+    private val tlsProbeBuffer = ByteArrayOutputStream(512)
     @Volatile var retransmissions: Long = 0L
     @Volatile var outOfOrderSegments: Long = 0L
     @Volatile var lastActivityMs: Long = System.currentTimeMillis()
+
+    fun observeClientPayloadForSni(payload: ByteArray): String? {
+        if (payload.isEmpty()) return sniHost
+        synchronized(lock) {
+            if (tlsProbeBuffer.size() < 4096) {
+                val remaining = 4096 - tlsProbeBuffer.size()
+                val appendLen = minOf(remaining, payload.size)
+                if (appendLen > 0) {
+                    tlsProbeBuffer.write(payload, 0, appendLen)
+                }
+            }
+            val probe = PacketCodec.parseTlsClientHelloSniProbe(tlsProbeBuffer.toByteArray())
+            tlsProbeConclusive = probe.conclusive
+            if (!probe.sniHost.isNullOrBlank()) sniHost = probe.sniHost
+            return sniHost
+        }
+    }
 
     fun close() {
         if (!closed.compareAndSet(false, true)) return
@@ -913,7 +949,7 @@ private class TcpSession(
     }
 }
 
-private class TunnelStats {
+private class TpeTunnelStats {
     @Volatile var forwardedUdpPackets: Long = 0L
     @Volatile var droppedPackets: Long = 0L
 }
@@ -946,6 +982,11 @@ private data class ParsedTcpSegment(
 )
 
 private object PacketCodec {
+    data class TlsClientHelloProbe(
+        val sniHost: String?,
+        val conclusive: Boolean,
+        val shouldPassthrough: Boolean,
+    )
     fun parseIpv4(buffer: ByteArray, length: Int): ParsedIpv4Packet? {
         if (length < 20) return null
         val version = (buffer[0].toInt() ushr 4) and 0x0F
@@ -1040,54 +1081,102 @@ private object PacketCodec {
         return out
     }
 
-    fun parseTlsClientHelloSni(payload: ByteArray): String? {
-        if (payload.size < 5) return null
+    fun parseTlsClientHelloSniProbe(payload: ByteArray): TlsClientHelloProbe {
+        if (payload.size < 5) {
+            return TlsClientHelloProbe(sniHost = null, conclusive = false, shouldPassthrough = false)
+        }
         val contentType = payload[0].toInt() and 0xFF
-        if (contentType != 0x16) return null
+        if (contentType != 0x16) {
+            return TlsClientHelloProbe(sniHost = null, conclusive = true, shouldPassthrough = true)
+        }
+
         val recordLen = readU16(payload, 3)
-        if (payload.size < 5 + recordLen || recordLen < 42) return null
-        if ((payload[5].toInt() and 0xFF) != 0x01) return null
+        if (recordLen <= 0) {
+            return TlsClientHelloProbe(sniHost = null, conclusive = true, shouldPassthrough = true)
+        }
+        val recordEnd = 5 + recordLen
+        if (payload.size < recordEnd) {
+            return TlsClientHelloProbe(sniHost = null, conclusive = false, shouldPassthrough = false)
+        }
 
-        var idx = 5 + 4 // handshake header
-        idx += 2 // version
+        if ((payload[5].toInt() and 0xFF) != 0x01) {
+            return TlsClientHelloProbe(sniHost = null, conclusive = true, shouldPassthrough = true)
+        }
+
+        var idx = 5
+        if (idx + 4 > recordEnd) return TlsClientHelloProbe(null, false, false)
+        val hsLen = ((payload[idx + 1].toInt() and 0xFF) shl 16) or
+            ((payload[idx + 2].toInt() and 0xFF) shl 8) or
+            (payload[idx + 3].toInt() and 0xFF)
+        idx += 4
+        val hsEnd = minOf(recordEnd, idx + hsLen)
+        if (idx + 2 + 32 > hsEnd) return TlsClientHelloProbe(null, false, false)
+
+        idx += 2 // client_version
         idx += 32 // random
-        if (idx >= payload.size) return null
+        if (idx + 1 > hsEnd) return TlsClientHelloProbe(null, false, false)
 
-        val sessionLen = payload[idx].toInt() and 0xFF
-        idx += 1 + sessionLen
-        if (idx + 2 > payload.size) return null
-        val cipherLen = readU16(payload, idx)
-        idx += 2 + cipherLen
-        if (idx >= payload.size) return null
-        val compLen = payload[idx].toInt() and 0xFF
-        idx += 1 + compLen
-        if (idx + 2 > payload.size) return null
-        val extLen = readU16(payload, idx)
+        val sessionIdLen = payload[idx].toInt() and 0xFF
+        idx += 1
+        if (idx + sessionIdLen > hsEnd) return TlsClientHelloProbe(null, true, true)
+        idx += sessionIdLen
+
+        if (idx + 2 > hsEnd) return TlsClientHelloProbe(null, false, false)
+        val cipherSuitesLen = readU16(payload, idx)
         idx += 2
-        val extEnd = (idx + extLen).coerceAtMost(payload.size)
+        if (idx + cipherSuitesLen > hsEnd) return TlsClientHelloProbe(null, true, true)
+        idx += cipherSuitesLen
+
+        if (idx + 1 > hsEnd) return TlsClientHelloProbe(null, false, false)
+        val compressionLen = payload[idx].toInt() and 0xFF
+        idx += 1
+        if (idx + compressionLen > hsEnd) return TlsClientHelloProbe(null, true, true)
+        idx += compressionLen
+
+        if (idx + 2 > hsEnd) {
+            return TlsClientHelloProbe(sniHost = null, conclusive = true, shouldPassthrough = true)
+        }
+        val extensionsLen = readU16(payload, idx)
+        idx += 2
+        val extEnd = minOf(hsEnd, idx + extensionsLen)
 
         while (idx + 4 <= extEnd) {
             val extType = readU16(payload, idx)
             val extSize = readU16(payload, idx + 2)
             idx += 4
-            if (idx + extSize > extEnd) break
-            if (extType == 0x0000 && extSize >= 5) {
+            if (idx + extSize > extEnd) {
+                return TlsClientHelloProbe(sniHost = null, conclusive = true, shouldPassthrough = true)
+            }
+
+            if (extType == 0x0000) {
+                if (extSize < 5) {
+                    return TlsClientHelloProbe(sniHost = null, conclusive = true, shouldPassthrough = true)
+                }
+                val sniListLen = readU16(payload, idx)
                 var sniIdx = idx + 2
-                val sniEnd = idx + extSize
+                val sniEnd = minOf(idx + extSize, sniIdx + sniListLen)
                 while (sniIdx + 3 <= sniEnd) {
                     val nameType = payload[sniIdx].toInt() and 0xFF
                     val nameLen = readU16(payload, sniIdx + 1)
                     sniIdx += 3
                     if (sniIdx + nameLen > sniEnd) break
-                    if (nameType == 0 && nameLen > 0) {
-                        return payload.copyOfRange(sniIdx, sniIdx + nameLen).toString(Charsets.US_ASCII).lowercase()
+                    if (nameType == 0x00 && nameLen > 0) {
+                        val host = payload.copyOfRange(sniIdx, sniIdx + nameLen)
+                            .toString(Charsets.US_ASCII)
+                            .trim()
+                            .lowercase()
+                        if (host.isNotBlank()) {
+                            return TlsClientHelloProbe(sniHost = host, conclusive = true, shouldPassthrough = false)
+                        }
                     }
                     sniIdx += nameLen
                 }
+                return TlsClientHelloProbe(sniHost = null, conclusive = true, shouldPassthrough = true)
             }
             idx += extSize
         }
-        return null
+
+        return TlsClientHelloProbe(sniHost = null, conclusive = true, shouldPassthrough = true)
     }
 
     fun parseHttpHost(payload: ByteArray): String? {

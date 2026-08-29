@@ -1,7 +1,7 @@
 // IFilterCallback.aidl
 // Callback interface so callers receive the scan result asynchronously
 // without blocking the calling thread.
-package com.tpeapp.filter;
+package com.hound.controller.filter;
 
 oneway interface IFilterCallback {
     /**

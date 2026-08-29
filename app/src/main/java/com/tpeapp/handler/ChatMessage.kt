@@ -1,4 +1,4 @@
-package com.tpeapp.handler
+package com.hound.controller.handler
 
 /**
  * A single message in the conversation with "Handler", the AI companion.

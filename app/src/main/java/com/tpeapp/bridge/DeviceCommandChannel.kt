@@ -1,8 +1,9 @@
-package com.tpeapp.bridge
+package com.hound.controller.bridge
 
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.content.pm.ApplicationInfo
 import android.content.Intent
 import android.net.Uri
 import android.location.LocationManager
@@ -11,16 +12,16 @@ import android.provider.Settings
 import android.util.ArrayMap
 import android.util.Log
 import androidx.preference.PreferenceManager
-import com.tpeapp.apps.AppInventoryManager
-import com.tpeapp.device.DeviceCommandManager
-import com.tpeapp.handler.ChatRepository
-import com.tpeapp.handler.HandlerChatActivity
-import com.tpeapp.mqtt.PartnerMqttService
-import com.tpeapp.pairing.PairingActivity
-import com.tpeapp.service.FilterService
-import com.tpeapp.service.CoreServiceKeeper
-import com.tpeapp.vpn.MitmCertificateAuthority
-import com.tpeapp.vpn.VpnPolicyManager
+import com.hound.controller.apps.AppInventoryManager
+import com.hound.controller.device.DeviceCommandManager
+import com.hound.controller.handler.ChatRepository
+import com.hound.controller.handler.HandlerChatActivity
+import com.hound.controller.mqtt.PartnerMqttService
+import com.hound.controller.pairing.PairingActivity
+import com.hound.controller.service.FilterService
+import com.hound.controller.service.CoreServiceKeeper
+import com.hound.controller.vpn.MitmCertificateAuthority
+import com.hound.controller.vpn.TpeVpnPolicyManager
 import io.flutter.plugin.common.BinaryMessenger
 import io.flutter.plugin.common.MethodChannel
 import org.json.JSONArray
@@ -29,7 +30,7 @@ import org.json.JSONObject
 /**
  * DeviceCommandChannel — MethodChannel bridge for [DeviceCommandManager].
  *
- * Channel name: `com.tpeapp/device_commands`
+ * Channel name: `com.hound.controller/device_commands`
  *
  * Exposes every privileged device command to Dart so the Flutter settings /
  * admin screens can invoke them directly instead of waiting for an FCM push.
@@ -531,7 +532,7 @@ object DeviceCommandChannel {
                     "setVpnPolicy" -> {
                         val vpnPolicyJson = call.argument<String>("vpnPolicyJson")
                         val providerMode = call.argument<String>("providerMode")
-                        VpnPolicyManager.setPolicy(
+                        TpeVpnPolicyManager.setPolicy(
                             context = ctx,
                             policyJson = vpnPolicyJson,
                             providerMode = providerMode,
@@ -542,7 +543,7 @@ object DeviceCommandChannel {
                         val providerMode = call.argument<String>("providerMode")
                         val vpnProfileId = call.argument<String>("vpnProfileId")
                         val vpnPolicyJson = call.argument<String>("vpnPolicyJson")
-                        VpnPolicyManager.setProviderProfile(
+                        TpeVpnPolicyManager.setProviderProfile(
                             context = ctx,
                             providerMode = providerMode,
                             profileId = vpnProfileId,
@@ -551,40 +552,135 @@ object DeviceCommandChannel {
                         result.success(null)
                     }
                     "vpnConnect" -> {
-                        VpnPolicyManager.requestConnect(ctx)
+                        TpeVpnPolicyManager.requestConnect(ctx)
                         result.success(null)
                     }
                     "vpnDisconnect" -> {
-                        VpnPolicyManager.requestDisconnect(ctx)
+                        TpeVpnPolicyManager.requestDisconnect(ctx)
                         result.success(null)
                     }
                     "getVpnStatus" -> {
                         val payload = ArrayMap<String, Any?>()
-                        payload.putAll(VpnPolicyManager.statusSnapshot(ctx))
+                        payload.putAll(TpeVpnPolicyManager.statusSnapshot(ctx))
                         result.success(payload)
                     }
                     "prepareMitmCaInstall" -> {
                         val ca = MitmCertificateAuthority.ensure(ctx)
-                        VpnPolicyManager.recordMitmCaGenerated(ctx, ca.alias, ca.generatedAtMs)
+                        TpeVpnPolicyManager.recordMitmCaGenerated(ctx, ca.alias, ca.generatedAtMs)
 
-                        val installIntent = MitmCertificateAuthority.buildInstallIntent(ca).apply {
-                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                        }
-                        ctx.startActivity(installIntent)
-                        VpnPolicyManager.recordMitmCaInstallRequested(ctx)
+                        // Root-first privileged install only. We intentionally avoid
+                        // KeyChain user-cert installation UX because modern Android builds
+                        // may reject/ignore user CAs for many app trust policies.
+                        val injectResult = runCatching {
+                            MitmCertificateAuthority.tryInjectSystemCa(ctx, ca)
+                        }.getOrNull()
+                        TpeVpnPolicyManager.recordMitmCaInstallRequested(ctx)
 
                         val payload = ArrayMap<String, Any?>().apply {
                             put("alias", ca.alias)
                             put("generated_at_ms", ca.generatedAtMs)
                             put("certificate_pem", ca.certificatePem)
+                            put("cert_hash", injectResult?.certHash)
+                            put("filename", injectResult?.filename)
+                            put("system_store_injected", injectResult?.systemStoreInjected ?: false)
+                            put("apex_store_injected", injectResult?.apexStoreInjected ?: false)
+                            put("overlay_module_generated", injectResult?.overlayModuleGenerated ?: false)
+                            put("overlay_module_path", injectResult?.overlayModulePath)
+                            put("root_install_ok", injectResult?.anySuccess ?: false)
+                        }
+                        result.success(payload)
+                    }
+                    "injectSystemCa" -> {
+                        // Explicit command to (re-)inject the CA into the system trust store.
+                        // Requires root. Safe to call multiple times.
+                        val ca = MitmCertificateAuthority.ensure(ctx)
+                        val injectResult = runCatching {
+                            MitmCertificateAuthority.tryInjectSystemCa(ctx, ca)
+                        }.getOrElse { e ->
+                            return@setMethodCallHandler result.error(
+                                "INJECT_FAILED", e.message ?: "injection error", null
+                            )
+                        }
+                        val payload = ArrayMap<String, Any?>().apply {
+                            put("cert_hash", injectResult.certHash)
+                            put("filename", injectResult.filename)
+                            put("system_store_injected", injectResult.systemStoreInjected)
+                            put("apex_store_injected", injectResult.apexStoreInjected)
+                            put("overlay_module_generated", injectResult.overlayModuleGenerated)
+                            put("overlay_module_path", injectResult.overlayModulePath)
+                            put("any_success", injectResult.anySuccess)
                         }
                         result.success(payload)
                     }
                     "setVpnMitmEnabled" -> {
                         val enabled = call.argument<Boolean>("enabled")
                             ?: return@setMethodCallHandler result.error("INVALID", "enabled required", null)
-                        VpnPolicyManager.setMitmEnabled(ctx, enabled)
+                        TpeVpnPolicyManager.setMitmEnabled(ctx, enabled)
                         result.success(null)
+                    }
+                    "enableVpnMitm" -> {
+                        TpeVpnPolicyManager.setMitmEnabled(ctx, true)
+                        val payload = JSONObject()
+                        payload.put("ok", true)
+                        payload.put("mitm_enabled", true)
+                        payload.put("status", JSONObject(TpeVpnPolicyManager.statusSnapshot(ctx)))
+                        result.success(payload.toString())
+                    }
+                    "getSplitTunnelConfig" -> {
+                        val payload = ArrayMap<String, Any?>()
+                        payload["ok"] = true
+                        payload["enabled"] = TpeVpnPolicyManager.isSplitTunnelEnabled(ctx)
+                        payload["selected_packages"] = TpeVpnPolicyManager.splitTunnelPackages(ctx).toList()
+                        payload["default_package"] = TpeVpnPolicyManager.defaultSplitTunnelPackage()
+                        result.success(payload)
+                    }
+                    "setSplitTunnelConfig" -> {
+                        val enabled = call.argument<Boolean>("enabled") ?: false
+                        val requested = call.argument<List<String>>("packages")
+                            ?.map { it.trim() }
+                            ?.filter { it.isNotEmpty() }
+                            ?: emptyList()
+                        TpeVpnPolicyManager.setSplitTunnelEnabled(ctx, enabled)
+                        TpeVpnPolicyManager.setSplitTunnelPackages(ctx, requested)
+                        val payload = ArrayMap<String, Any?>()
+                        payload["ok"] = true
+                        payload["status"] = TpeVpnPolicyManager.statusSnapshot(ctx)
+                        result.success(payload)
+                    }
+                    "listInstalledAppsForSplitTunnel" -> {
+                        val payload = ArrayMap<String, Any?>()
+                        val packageManager = ctx.packageManager
+                        val apps = mutableListOf<Map<String, Any?>>()
+                        val installed = packageManager.getInstalledApplications(0)
+                            .sortedBy { app -> packageManager.getApplicationLabel(app).toString().lowercase() }
+
+                        installed.forEach { appInfo ->
+                            if (appInfo.packageName == ctx.packageName) return@forEach
+                            if ((appInfo.flags and ApplicationInfo.FLAG_SYSTEM) != 0 &&
+                                appInfo.packageName != TpeVpnPolicyManager.defaultSplitTunnelPackage()
+                            ) {
+                                return@forEach
+                            }
+                            apps += mapOf(
+                                "package" to appInfo.packageName,
+                                "label" to packageManager.getApplicationLabel(appInfo).toString(),
+                                "default_selected" to (appInfo.packageName == TpeVpnPolicyManager.defaultSplitTunnelPackage()),
+                            )
+                        }
+
+                        if (apps.none { it["package"] == TpeVpnPolicyManager.defaultSplitTunnelPackage() }) {
+                            apps += mapOf(
+                                "package" to TpeVpnPolicyManager.defaultSplitTunnelPackage(),
+                                "label" to "Android Auto",
+                                "default_selected" to true,
+                            )
+                        }
+
+                        payload["ok"] = true
+                        payload["apps"] = apps
+                        payload["selected_packages"] = TpeVpnPolicyManager.splitTunnelPackages(ctx).toList()
+                        payload["enabled"] = TpeVpnPolicyManager.isSplitTunnelEnabled(ctx)
+                        result.success(payload)
                     }
                     else -> result.notImplemented()
                 }

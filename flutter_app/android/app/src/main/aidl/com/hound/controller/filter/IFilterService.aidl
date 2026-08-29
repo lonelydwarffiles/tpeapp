@@ -1,7 +1,7 @@
-package com.tpeapp.filter;
+package com.hound.controller.filter;
 
 import android.os.ParcelFileDescriptor;
-import com.tpeapp.filter.IFilterCallback;
+import com.hound.controller.filter.IFilterCallback;
 
 interface IFilterService {
     oneway void scanImageBytes(long requestId, in byte[] imageData, IFilterCallback callback);

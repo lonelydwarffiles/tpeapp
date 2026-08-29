@@ -1,4 +1,4 @@
-package com.tpeapp.mqtt
+package com.hound.controller.mqtt
 
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -18,45 +18,45 @@ import android.os.Looper
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.preference.PreferenceManager
-import com.tpeapp.R
-import com.tpeapp.affirmation.AffirmationActivity
-import com.tpeapp.affirmation.AffirmationEntry
-import com.tpeapp.affirmation.AffirmationRepository
-import com.tpeapp.affirmation.MantraAlarmReceiver
-import com.tpeapp.apps.AppInventoryManager
-import com.tpeapp.ble.LovenseScheduleManager
-import com.tpeapp.checkin.CheckInActivity
-import com.tpeapp.consequence.ConsequenceEscalationHelper
-import com.tpeapp.consequence.CornerTimeActivity
-import com.tpeapp.device.DeviceCommandManager
-import com.tpeapp.bridge.MqttChannel
-import com.tpeapp.gating.AppGatingManager
-import com.tpeapp.gating.GeofenceEntry
-import com.tpeapp.gating.GeofenceBreachEvent
-import com.tpeapp.gating.GeofenceManager
-import com.tpeapp.handler.ChatRepository
-import com.tpeapp.handler.HandlerChatActivity
-import com.tpeapp.mindful.ComplianceManager
-import com.tpeapp.mindful.HonorificManager
-import com.tpeapp.mindful.MindfulNotificationService
-import com.tpeapp.mindful.PermissionToSpeakManager
-import com.tpeapp.mindful.ToneEnforcementService
-import com.tpeapp.questions.QuestionsActivity
-import com.tpeapp.review.ReviewActivity
-import com.tpeapp.review.ScreencastService
-import com.tpeapp.ritual.RitualRepository
-import com.tpeapp.ritual.RitualStep
-import com.tpeapp.service.FilterService
-import com.tpeapp.ble.LovenseManager
-import com.tpeapp.ble.PavlokManager
-import com.tpeapp.status.SubStatusManager
-import com.tpeapp.tasks.Task
-import com.tpeapp.tasks.TaskListActivity
-import com.tpeapp.tasks.TaskRepository
-import com.tpeapp.tasks.TaskStatus
-import com.tpeapp.vpn.VpnPolicyManager
-import com.tpeapp.vault.PasswordVaultManager
-import com.tpeapp.webhook.WebhookManager
+import com.hound.controller.R
+import com.hound.controller.affirmation.AffirmationActivity
+import com.hound.controller.affirmation.AffirmationEntry
+import com.hound.controller.affirmation.AffirmationRepository
+import com.hound.controller.affirmation.MantraAlarmReceiver
+import com.hound.controller.apps.AppInventoryManager
+import com.hound.controller.ble.LovenseScheduleManager
+import com.hound.controller.checkin.CheckInActivity
+import com.hound.controller.consequence.ConsequenceEscalationHelper
+import com.hound.controller.consequence.CornerTimeActivity
+import com.hound.controller.device.DeviceCommandManager
+import com.hound.controller.bridge.MqttChannel
+import com.hound.controller.gating.AppGatingManager
+import com.hound.controller.gating.GeofenceEntry
+import com.hound.controller.gating.GeofenceBreachEvent
+import com.hound.controller.gating.GeofenceManager
+import com.hound.controller.handler.ChatRepository
+import com.hound.controller.handler.HandlerChatActivity
+import com.hound.controller.mindful.ComplianceManager
+import com.hound.controller.mindful.HonorificManager
+import com.hound.controller.mindful.MindfulNotificationService
+import com.hound.controller.mindful.PermissionToSpeakManager
+import com.hound.controller.mindful.ToneEnforcementService
+import com.hound.controller.questions.QuestionsActivity
+import com.hound.controller.review.ReviewActivity
+import com.hound.controller.review.ScreencastService
+import com.hound.controller.ritual.RitualRepository
+import com.hound.controller.ritual.RitualStep
+import com.hound.controller.service.FilterService
+import com.hound.controller.ble.LovenseManager
+import com.hound.controller.ble.PavlokManager
+import com.hound.controller.status.SubStatusManager
+import com.hound.controller.tasks.Task
+import com.hound.controller.tasks.TaskListActivity
+import com.hound.controller.tasks.TaskRepository
+import com.hound.controller.tasks.TaskStatus
+import com.hound.controller.vpn.TpeVpnPolicyManager
+import com.hound.controller.vault.PasswordVaultManager
+import com.hound.controller.webhook.WebhookManager
 import org.eclipse.paho.client.mqttv3.IMqttActionListener
 import org.eclipse.paho.client.mqttv3.IMqttDeliveryToken
 import org.eclipse.paho.client.mqttv3.MqttAsyncClient
@@ -1402,7 +1402,7 @@ class PartnerMqttService : Service() {
         runCatching {
             val vpnPolicyJson = data["vpn_policy_json"]?.trim()?.takeIf { it.isNotBlank() }
             val providerMode = data["provider_mode"]?.trim()?.takeIf { it.isNotBlank() }
-            VpnPolicyManager.setPolicy(
+            TpeVpnPolicyManager.setPolicy(
                 context = applicationContext,
                 policyJson = vpnPolicyJson,
                 providerMode = providerMode,
@@ -1424,7 +1424,7 @@ class PartnerMqttService : Service() {
             val providerMode = data["provider_mode"]?.trim()?.takeIf { it.isNotBlank() }
             val profileId = data["vpn_profile_id"]?.trim()?.takeIf { it.isNotBlank() }
             val vpnPolicyJson = data["vpn_policy_json"]?.trim()?.takeIf { it.isNotBlank() }
-            VpnPolicyManager.setProviderProfile(
+            TpeVpnPolicyManager.setProviderProfile(
                 context = applicationContext,
                 providerMode = providerMode,
                 profileId = profileId,
@@ -1444,8 +1444,8 @@ class PartnerMqttService : Service() {
      */
     private fun handleVpnConnect(commandId: String? = null) {
         runCatching {
-            VpnPolicyManager.requestConnect(applicationContext)
-            val status = JSONObject(VpnPolicyManager.statusSnapshot(applicationContext)).toString()
+            TpeVpnPolicyManager.requestConnect(applicationContext)
+            val status = JSONObject(TpeVpnPolicyManager.statusSnapshot(applicationContext)).toString()
             dispatchMdmAck("VPN_CONNECT", commandId, detailsJson = status)
             Log.i(TAG, "VPN_CONNECT recorded")
         }.onFailure { e ->
@@ -1459,8 +1459,8 @@ class PartnerMqttService : Service() {
      */
     private fun handleVpnDisconnect(commandId: String? = null) {
         runCatching {
-            VpnPolicyManager.requestDisconnect(applicationContext)
-            val status = JSONObject(VpnPolicyManager.statusSnapshot(applicationContext)).toString()
+            TpeVpnPolicyManager.requestDisconnect(applicationContext)
+            val status = JSONObject(TpeVpnPolicyManager.statusSnapshot(applicationContext)).toString()
             dispatchMdmAck("VPN_DISCONNECT", commandId, detailsJson = status)
             Log.i(TAG, "VPN_DISCONNECT recorded")
         }.onFailure { e ->
@@ -1474,7 +1474,7 @@ class PartnerMqttService : Service() {
      */
     private fun handleVpnStatusPoll(commandId: String? = null) {
         runCatching {
-            val status = JSONObject(VpnPolicyManager.statusSnapshot(applicationContext)).toString()
+            val status = JSONObject(TpeVpnPolicyManager.statusSnapshot(applicationContext)).toString()
             dispatchMdmAck("VPN_STATUS_POLL", commandId, detailsJson = status)
             Log.i(TAG, "VPN_STATUS_POLL snapshot emitted")
         }.onFailure { e ->
@@ -2475,25 +2475,25 @@ class PartnerMqttService : Service() {
 
     private fun handleSetHandlerSystemPrompt(data: Map<String, String>) {
         val prompt = data["prompt"]?.takeIf { it.isNotBlank() } ?: return
-        com.tpeapp.handler.ChatRepository.setSystemPrompt(applicationContext, prompt)
+        com.hound.controller.handler.ChatRepository.setSystemPrompt(applicationContext, prompt)
         Log.i(TAG, "SET_HANDLER_SYSTEM_PROMPT updated")
     }
 
     private fun handleSetHandlerApiKey(data: Map<String, String>) {
         val key = data["api_key"]?.takeIf { it.isNotBlank() } ?: return
-        com.tpeapp.handler.ChatRepository.setApiKey(applicationContext, key)
+        com.hound.controller.handler.ChatRepository.setApiKey(applicationContext, key)
         Log.i(TAG, "SET_HANDLER_API_KEY updated")
     }
 
     private fun handleSetHandlerEndpoint(data: Map<String, String>) {
         val endpoint = data["endpoint"]?.takeIf { it.isNotBlank() } ?: return
-        com.tpeapp.handler.ChatRepository.setEndpoint(applicationContext, endpoint)
+        com.hound.controller.handler.ChatRepository.setEndpoint(applicationContext, endpoint)
         Log.i(TAG, "SET_HANDLER_ENDPOINT: $endpoint")
     }
 
     private fun handleSetHandlerModel(data: Map<String, String>) {
         val model = data["model"]?.takeIf { it.isNotBlank() } ?: return
-        com.tpeapp.handler.ChatRepository.setModel(applicationContext, model)
+        com.hound.controller.handler.ChatRepository.setModel(applicationContext, model)
         Log.i(TAG, "SET_HANDLER_MODEL: $model")
     }
 
@@ -2688,8 +2688,8 @@ class PartnerMqttService : Service() {
 
         // Persist so ReviewActivity can read them without needing extras.
         prefs().edit()
-            .putString(com.tpeapp.pairing.PairingActivity.PREF_PARTNER_SESSION_ID, sessionId)
-            .putString(com.tpeapp.pairing.PairingActivity.PREF_PARTNER_SIGNALING_URL, signalingUrl)
+            .putString(com.hound.controller.pairing.PairingActivity.PREF_PARTNER_SESSION_ID, sessionId)
+            .putString(com.hound.controller.pairing.PairingActivity.PREF_PARTNER_SIGNALING_URL, signalingUrl)
             .apply()
 
         val nm = getSystemService(NotificationManager::class.java)

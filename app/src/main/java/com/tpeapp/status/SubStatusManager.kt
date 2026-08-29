@@ -1,4 +1,4 @@
-package com.tpeapp.status
+package com.hound.controller.status
 
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -9,9 +9,9 @@ import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.preference.PreferenceManager
-import com.tpeapp.R
-import com.tpeapp.service.FilterService
-import com.tpeapp.ui.MainActivity
+import com.hound.controller.R
+import com.hound.controller.service.FilterService
+import com.hound.controller.ui.MainActivity
 
 /**
  * SubStatusManager — manages the sub's current status and shows a persistent

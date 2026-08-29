@@ -1,4 +1,4 @@
-package com.tpeapp.webhook
+package com.hound.controller.webhook
 
 import android.content.Context
 import android.util.Log
@@ -21,7 +21,7 @@ import java.util.concurrent.TimeUnit
  * All network calls are made asynchronously via [OkHttpClient.enqueue] so
  * callers are never blocked.
  *
- * Call [init] once from [com.tpeapp.TpeApplication.onCreate] so that all
+ * Call [init] once from [com.hound.controller.TpeApplication.onCreate] so that all
  * outbound webhook payloads are automatically enriched with the `device_id`
  * field required by the Camera-Site backend for multi-device routing.
  */
@@ -41,7 +41,7 @@ object WebhookManager {
     private var appContext: Context? = null
 
     /**
-     * Must be called once from [com.tpeapp.TpeApplication.onCreate].
+     * Must be called once from [com.hound.controller.TpeApplication.onCreate].
      * Stores the application context so that every [dispatchEvent] call can
      * automatically inject the `device_id` field into the outbound payload.
      */

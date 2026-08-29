@@ -911,6 +911,138 @@
 				"--no-daemon"
 			],
 			"isBackground": false
+		},
+		{
+			"label": "namespace-verify-app-build",
+			"type": "shell",
+			"command": ".\\gradlew.bat",
+			"args": [
+				":app:assembleDebug",
+				"--console=plain",
+				"--no-daemon"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "namespace-verify-xposed-build",
+			"type": "shell",
+			"command": ".\\gradlew.bat",
+			"args": [
+				":xposed:assembleDebug",
+				"--console=plain",
+				"--no-daemon"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "install-app-debug-now",
+			"type": "shell",
+			"command": ".\\gradlew.bat",
+			"args": [
+				":app:installDebug",
+				"--console=plain",
+				"--no-daemon"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "install-xposed-debug-now",
+			"type": "shell",
+			"command": ".\\gradlew.bat",
+			"args": [
+				":xposed:installDebug",
+				"--console=plain",
+				"--no-daemon"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "verify-mitm-refactor-build",
+			"type": "shell",
+			"command": ".\\gradlew.bat",
+			"args": [
+				":app:assembleDebug",
+				"--console=plain",
+				"--no-daemon"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "install-app-debug-now2",
+			"type": "shell",
+			"command": ".\\gradlew.bat",
+			"args": [
+				":app:installDebug",
+				"--console=plain",
+				"--no-daemon"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "install-app-debug-after-fix",
+			"type": "shell",
+			"command": ".\\gradlew.bat",
+			"args": [
+				":app:installDebug",
+				"--console=plain",
+				"--no-daemon"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "rebuild-install-after-bypass-fix",
+			"type": "shell",
+			"command": ".\\gradlew.bat",
+			"args": [
+				":app:installDebug",
+				"--console=plain",
+				"--no-daemon"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "install-after-loading-fix",
+			"type": "shell",
+			"command": ".\\gradlew.bat",
+			"args": [
+				":app:installDebug",
+				"--console=plain",
+				"--no-daemon"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "install-after-social-bypass-fix",
+			"type": "shell",
+			"command": ".\\gradlew.bat",
+			"args": [
+				":app:installDebug",
+				"--console=plain",
+				"--no-daemon"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "install-after-bypass-rollback",
+			"type": "shell",
+			"command": ".\\gradlew.bat",
+			"args": [
+				":app:installDebug",
+				"--console=plain",
+				"--no-daemon"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "install-after-async-io-refactor",
+			"type": "shell",
+			"command": ".\\gradlew.bat",
+			"args": [
+				":app:installDebug",
+				"--console=plain",
+				"--no-daemon"
+			],
+			"isBackground": false
 		}
 	]
 }

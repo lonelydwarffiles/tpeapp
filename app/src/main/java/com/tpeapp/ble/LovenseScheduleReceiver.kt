@@ -1,4 +1,4 @@
-﻿package com.tpeapp.ble
+package com.hound.controller.ble
 
 import android.content.BroadcastReceiver
 import android.content.Context
@@ -7,12 +7,12 @@ import android.os.Handler
 import android.os.Looper
 import android.util.Log
 import androidx.preference.PreferenceManager
-import com.tpeapp.service.FilterService
-import com.tpeapp.webhook.WebhookManager
+import com.hound.controller.service.FilterService
+import com.hound.controller.webhook.WebhookManager
 import org.json.JSONObject
 
 /**
- * LovenseScheduleReceiver â€” fires when a scheduled Lovense pattern alarm triggers.
+ * LovenseScheduleReceiver — fires when a scheduled Lovense pattern alarm triggers.
  * Vibrates for the configured duration, then stops and dispatches a webhook.
  */
 class LovenseScheduleReceiver : BroadcastReceiver() {

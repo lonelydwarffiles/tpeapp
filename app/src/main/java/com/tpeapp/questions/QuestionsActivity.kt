@@ -1,4 +1,4 @@
-package com.tpeapp.questions
+package com.hound.controller.questions
 
 import android.app.AlertDialog
 import android.os.Bundle
@@ -14,9 +14,9 @@ import androidx.preference.PreferenceManager
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
 import com.google.android.material.button.MaterialButton
-import com.tpeapp.R
-import com.tpeapp.databinding.ActivityQuestionsBinding
-import com.tpeapp.pairing.PairingActivity
+import com.hound.controller.R
+import com.hound.controller.databinding.ActivityQuestionsBinding
+import com.hound.controller.pairing.PairingActivity
 import okhttp3.Call
 import okhttp3.Callback
 import okhttp3.MediaType.Companion.toMediaType
@@ -55,7 +55,7 @@ class QuestionsActivity : AppCompatActivity() {
         /** SharedPreferences keys for admin HTTP Basic Auth credentials. */
         const val PREF_ADMIN_USER        = "admin_username"
         const val PREF_ADMIN_PASS        = "admin_password"
-        /** EncryptedSharedPreferences filename shared with [com.tpeapp.tasks.AssignTaskActivity]. */
+        /** EncryptedSharedPreferences filename shared with [com.hound.controller.tasks.AssignTaskActivity]. */
         const val PREF_ADMIN_PREFS_FILE  = "questions_admin_prefs"
 
         private val JSON_TYPE = "application/json".toMediaType()

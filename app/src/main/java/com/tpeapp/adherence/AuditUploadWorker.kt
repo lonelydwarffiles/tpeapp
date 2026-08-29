@@ -1,4 +1,4 @@
-package com.tpeapp.adherence
+package com.hound.controller.adherence
 
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -9,9 +9,9 @@ import androidx.preference.PreferenceManager
 import androidx.work.CoroutineWorker
 import androidx.work.ForegroundInfo
 import androidx.work.WorkerParameters
-import com.tpeapp.pairing.PairingActivity
-import com.tpeapp.service.FilterService
-import com.tpeapp.webhook.WebhookManager
+import com.hound.controller.pairing.PairingActivity
+import com.hound.controller.service.FilterService
+import com.hound.controller.webhook.WebhookManager
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.MultipartBody
 import okhttp3.OkHttpClient

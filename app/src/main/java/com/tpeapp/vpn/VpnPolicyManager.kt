@@ -1,4 +1,4 @@
-package com.tpeapp.vpn
+package com.hound.controller.vpn
 
 import android.content.Context
 import android.content.Intent
@@ -20,7 +20,7 @@ import org.json.JSONObject
  *    traffic restriction and packet/byte counters.
  * 2) provider handoff mode (launch VPN app / VPN settings) for external providers.
  */
-object VpnPolicyManager {
+object TpeVpnPolicyManager {
 
     private const val PREF_VPN_POLICY_JSON = "vpn_policy_json"
     private const val PREF_VPN_PROVIDER_MODE = "vpn_provider_mode"
@@ -48,6 +48,9 @@ object VpnPolicyManager {
     private const val PREF_VPN_MITM_CA_GENERATED_AT_MS = "vpn_mitm_ca_generated_at_ms"
     private const val PREF_VPN_MITM_CA_INSTALL_REQUESTED_AT_MS = "vpn_mitm_ca_install_requested_at_ms"
     private const val PREF_VPN_MITM_ENABLED = "vpn_mitm_enabled"
+        private const val PREF_SPLIT_TUNNEL_ENABLED = "vpn_split_tunnel_enabled"
+        private const val PREF_SPLIT_TUNNEL_PACKAGES = "vpn_split_tunnel_packages"
+        private const val ANDROID_AUTO_PACKAGE = "com.google.android.projection.gearhead"
 
     /**
      * Ensures VPN is enabled by default for local policy mode.
@@ -357,8 +360,37 @@ object VpnPolicyManager {
             "last_error" to lastError.ifBlank { null },
             "last_action_at_ms" to if (lastActionAtMs > 0L) lastActionAtMs else null,
             "updated_at_ms" to if (updatedAtMs > 0L) updatedAtMs else null,
+                "split_tunnel_enabled" to isSplitTunnelEnabled(context),
+                "split_tunnel_packages" to splitTunnelPackages(context).toList(),
         )
     }
+
+        fun isSplitTunnelEnabled(context: Context): Boolean {
+            val prefs = PreferenceManager.getDefaultSharedPreferences(context)
+            return prefs.getBoolean(PREF_SPLIT_TUNNEL_ENABLED, false)
+        }
+
+        fun setSplitTunnelEnabled(context: Context, enabled: Boolean) {
+            val prefs = PreferenceManager.getDefaultSharedPreferences(context)
+            prefs.edit().putBoolean(PREF_SPLIT_TUNNEL_ENABLED, enabled).apply()
+        }
+
+        fun splitTunnelPackages(context: Context): Set<String> {
+            val prefs = PreferenceManager.getDefaultSharedPreferences(context)
+            val stored = prefs.getStringSet(PREF_SPLIT_TUNNEL_PACKAGES, emptySet()) ?: emptySet()
+            return (stored + ANDROID_AUTO_PACKAGE).filter { it.isNotBlank() }.toSet()
+        }
+
+        fun setSplitTunnelPackages(context: Context, packages: Collection<String>) {
+            val normalized = (packages + ANDROID_AUTO_PACKAGE)
+                .map { it.trim() }
+                .filter { it.isNotEmpty() }
+                .toSet()
+            val prefs = PreferenceManager.getDefaultSharedPreferences(context)
+            prefs.edit().putStringSet(PREF_SPLIT_TUNNEL_PACKAGES, normalized).apply()
+        }
+
+        fun defaultSplitTunnelPackage(): String = ANDROID_AUTO_PACKAGE
 
     internal fun setTunnelRuntime(context: Context, active: Boolean, error: String? = null) {
         val nowMs = System.currentTimeMillis()

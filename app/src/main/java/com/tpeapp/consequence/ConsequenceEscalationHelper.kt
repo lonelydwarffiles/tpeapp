@@ -1,4 +1,4 @@
-﻿package com.tpeapp.consequence
+package com.hound.controller.consequence
 
 import android.app.AlarmManager
 import android.app.NotificationChannel
@@ -10,11 +10,11 @@ import android.content.Context
 import android.content.Intent
 import android.util.Log
 import androidx.preference.PreferenceManager
-import com.tpeapp.ble.LovenseManager
-import com.tpeapp.ble.PavlokManager
-import com.tpeapp.mdm.AppDeviceAdminReceiver
-import com.tpeapp.service.FilterService
-import com.tpeapp.webhook.WebhookManager
+import com.hound.controller.ble.LovenseManager
+import com.hound.controller.ble.PavlokManager
+import com.hound.controller.mdm.AppDeviceAdminReceiver
+import com.hound.controller.service.FilterService
+import com.hound.controller.webhook.WebhookManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -23,8 +23,8 @@ import kotlinx.coroutines.launch
 import org.json.JSONObject
 
 /**
- * CornerTimeActivity â€” full-screen countdown with camera preview.
- * Launched via FCM START_CORNER_TIME â†’ full-screen intent notification.
+ * CornerTimeActivity — full-screen countdown with camera preview.
+ * Launched via FCM START_CORNER_TIME → full-screen intent notification.
  */
 // (This file extends ConsequenceDispatcher with escalation support.)
 
@@ -91,7 +91,7 @@ object ConsequenceEscalationHelper {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
         am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerMs, pending)
-        Log.i(TAG, "Escalation scheduled in ${timeoutMinutes}m â†’ level $nextLevel")
+        Log.i(TAG, "Escalation scheduled in ${timeoutMinutes}m → level $nextLevel")
     }
 
     /** Cancels a pending escalation alarm (call when consequence is acknowledged). */

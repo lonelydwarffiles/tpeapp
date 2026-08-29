@@ -514,6 +514,7 @@ class BleService extends ChangeNotifier {
 
   // ── Disposal ─────────────────────────────────────────────────────────
 
+  @override
   Future<void> dispose() async {
     _autoRepairTimer?.cancel();
     await _lovenseConnSub?.cancel();

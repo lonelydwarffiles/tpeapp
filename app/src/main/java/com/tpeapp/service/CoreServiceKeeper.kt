@@ -1,13 +1,13 @@
-package com.tpeapp.service
+package com.hound.controller.service
 
 import android.content.Context
 import android.content.Intent
 import android.os.Build
 import android.util.Log
 import androidx.preference.PreferenceManager
-import com.tpeapp.accessibility.AccessibilityServiceKeeper
-import com.tpeapp.mqtt.PartnerMqttService
-import com.tpeapp.pairing.PairingActivity
+import com.hound.controller.accessibility.AccessibilityServiceKeeper
+import com.hound.controller.mqtt.PartnerMqttService
+import com.hound.controller.pairing.PairingActivity
 
 /**
  * CoreServiceKeeper centralizes keepalive behavior for the app's critical services.

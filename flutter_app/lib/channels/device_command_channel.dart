@@ -287,5 +287,35 @@ class DeviceCommandChannel {
 
     static Future<void> setVpnMitmEnabled(bool enabled) =>
         _channel.invokeMethod('setVpnMitmEnabled', {'enabled': enabled});
+
+    static Future<void> enableVpnMitm() => _channel.invokeMethod('enableVpnMitm');
+
+    static Future<Map<String, dynamic>?> getSplitTunnelConfig() async {
+        final raw = await _channel.invokeMethod<dynamic>('getSplitTunnelConfig');
+        if (raw is Map) {
+            return raw.map((key, value) => MapEntry(key.toString(), value));
+        }
+        return null;
+    }
+
+    static Future<void> setSplitTunnelConfig({
+        required bool enabled,
+        required List<String> packages,
+    }) =>
+            _channel.invokeMethod('setSplitTunnelConfig', {
+                'enabled': enabled,
+                'packages': packages,
+            });
+
+    static Future<List<Map<String, dynamic>>> listInstalledAppsForSplitTunnel() async {
+        final raw = await _channel.invokeMethod<dynamic>('listInstalledAppsForSplitTunnel');
+        final map = raw is Map ? raw : null;
+        final appsRaw = map == null ? null : map['apps'];
+        if (appsRaw is! List) return const [];
+        return appsRaw
+            .whereType<Map>()
+            .map((entry) => entry.map((key, value) => MapEntry(key.toString(), value)))
+            .toList();
+    }
 }
 

@@ -1,11 +1,11 @@
-package com.tpeapp.mindful
+package com.hound.controller.mindful
 
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 import android.util.Log
 import androidx.preference.PreferenceManager
-import com.tpeapp.ble.LovenseManager
-import com.tpeapp.ble.PavlokManager
+import com.hound.controller.ble.LovenseManager
+import com.hound.controller.ble.PavlokManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob

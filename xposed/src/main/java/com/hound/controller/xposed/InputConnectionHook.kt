@@ -1,4 +1,4 @@
-﻿package com.hound.controller.xposed
+package com.hound.controller.xposed
 
 import android.content.Intent
 import android.util.Log
@@ -38,8 +38,8 @@ import org.json.JSONArray
  * and [sessionWhitelistWords] is ignored.
  *
  * ### IPC
- * The vocabulary and tone mode are fetched from [com.tpeapp.service.FilterService]
- * via the [com.tpeapp.filter.IFilterService] AIDL interface and cached for
+ * The vocabulary and tone mode are fetched from [com.hound.controller.service.FilterService]
+ * via the [com.hound.controller.filter.IFilterService] AIDL interface and cached for
  * [CACHE_TTL_MS] to minimise inter-process round-trips.  Regex objects for
  * whole-word matching are pre-compiled when the vocabulary cache is refreshed,
  * so they are not re-created on every keystroke.  [MainHook.ensureServiceBound]

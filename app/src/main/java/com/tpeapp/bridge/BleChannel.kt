@@ -1,11 +1,11 @@
-package com.tpeapp.bridge
+package com.hound.controller.bridge
 
 import android.content.Context
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
-import com.tpeapp.ble.LovenseManager
-import com.tpeapp.ble.PavlokManager
+import com.hound.controller.ble.LovenseManager
+import com.hound.controller.ble.PavlokManager
 import io.flutter.plugin.common.BinaryMessenger
 import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodChannel
@@ -14,8 +14,8 @@ import io.flutter.plugin.common.MethodChannel
  * BleChannel — MethodChannel bridge for Lovense and Pavlok BLE devices.
  *
  * Channel names:
- *  - `com.tpeapp/ble`        (MethodChannel — commands)
- *  - `com.tpeapp/ble_events` (EventChannel  — connection-state changes)
+ *  - `com.hound.controller/ble`        (MethodChannel — commands)
+ *  - `com.hound.controller/ble_events` (EventChannel  — connection-state changes)
  *
  * ## Lovense methods
  *  - `lovense.scan`                         → starts BLE scan for Lovense toy
@@ -39,7 +39,7 @@ import io.flutter.plugin.common.MethodChannel
  *  - `pavlok.readBatteryLevel`                                → reads battery level from standard BLE Battery Service
  *
  * The underlying [LovenseManager] and [PavlokManager] singletons are also used
- * by [com.tpeapp.consequence.ConsequenceDispatcher] for automated punishment /
+ * by [com.hound.controller.consequence.ConsequenceDispatcher] for automated punishment /
  * reward — both paths share the same BLE connection.
  */
 object BleChannel {

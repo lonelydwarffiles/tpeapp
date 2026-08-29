@@ -1,12 +1,12 @@
-package com.tpeapp.vault
+package com.hound.controller.vault
 
 import android.content.Context
 import android.util.Log
 import androidx.preference.PreferenceManager
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
-import com.tpeapp.service.FilterService
-import com.tpeapp.webhook.WebhookManager
+import com.hound.controller.service.FilterService
+import com.hound.controller.webhook.WebhookManager
 import org.json.JSONArray
 import org.json.JSONObject
 import kotlin.math.pow

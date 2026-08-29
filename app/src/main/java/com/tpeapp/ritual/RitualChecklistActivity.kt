@@ -1,4 +1,4 @@
-package com.tpeapp.ritual
+package com.hound.controller.ritual
 
 import android.net.Uri
 import android.os.Bundle
@@ -14,11 +14,11 @@ import androidx.preference.PreferenceManager
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.google.android.material.button.MaterialButton
-import com.tpeapp.R
-import com.tpeapp.consequence.ConsequenceDispatcher
-import com.tpeapp.databinding.ActivityRitualChecklistBinding
-import com.tpeapp.service.FilterService
-import com.tpeapp.webhook.WebhookManager
+import com.hound.controller.R
+import com.hound.controller.consequence.ConsequenceDispatcher
+import com.hound.controller.databinding.ActivityRitualChecklistBinding
+import com.hound.controller.service.FilterService
+import com.hound.controller.webhook.WebhookManager
 import org.json.JSONObject
 
 class RitualChecklistActivity : AppCompatActivity() {
@@ -58,7 +58,7 @@ class RitualChecklistActivity : AppCompatActivity() {
             },
             onPhotoClick = { step ->
                 pendingPhotoStepId = step.id
-                val uri = Uri.parse("content://com.tpeapp.ritual/photo/${step.id}")
+                val uri = Uri.parse("content://com.hound.controller.ritual/photo/${step.id}")
                 photoLauncher.launch(uri)
             }
         )

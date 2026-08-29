@@ -1,11 +1,11 @@
-package com.tpeapp.review
+package com.hound.controller.review
 
 import android.content.Context
 import android.content.Intent
 import android.media.projection.MediaProjection
 import android.util.Log
 import android.view.WindowManager
-import com.tpeapp.ble.LovenseManager
+import com.hound.controller.ble.LovenseManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob

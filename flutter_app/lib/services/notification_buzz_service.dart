@@ -996,7 +996,7 @@ class NotificationCommandPolicy {
   factory NotificationCommandPolicy.fromMap(Map<String, dynamic> raw) {
     final defaults = NotificationCommandPolicy.defaults();
 
-    Set<String> _stringSet(dynamic value) {
+    Set<String> stringSet(dynamic value) {
       if (value is! List) return <String>{};
       return value
           .map((e) => e.toString().trim().toLowerCase())
@@ -1024,11 +1024,11 @@ class NotificationCommandPolicy {
       minConfidence: raw['min_confidence'] is num
           ? (raw['min_confidence'] as num).toDouble().clamp(0.0, 1.0)
           : defaults.minConfidence,
-      allowSources: _stringSet(raw['allow_sources']).isEmpty
+      allowSources: stringSet(raw['allow_sources']).isEmpty
           ? defaults.allowSources
-          : _stringSet(raw['allow_sources']),
-      packageAllowlist: _stringSet(raw['package_allowlist']),
-      packageBlocklist: _stringSet(raw['package_blocklist']),
+          : stringSet(raw['allow_sources']),
+      packageAllowlist: stringSet(raw['package_allowlist']),
+      packageBlocklist: stringSet(raw['package_blocklist']),
       maxActuationsPerMinute: raw['max_actuations_per_minute'] is num
           ? (raw['max_actuations_per_minute'] as num).toInt().clamp(1, 240)
           : defaults.maxActuationsPerMinute,

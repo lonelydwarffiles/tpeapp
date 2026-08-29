@@ -131,7 +131,7 @@ class TpeApp extends StatelessWidget {
         elevation: 2,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(20),
-          side: BorderSide(color: cs.outlineVariant.withOpacity(0.4)),
+          side: BorderSide(color: cs.outlineVariant.withValues(alpha: 0.4)),
         ),
         color: cs.surfaceContainerLow,
       ),
@@ -153,7 +153,7 @@ class TpeApp extends StatelessWidget {
         contentPadding:
             const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
         labelStyle: TextStyle(color: cs.onSurfaceVariant),
-        hintStyle: TextStyle(color: cs.onSurfaceVariant.withOpacity(0.6)),
+        hintStyle: TextStyle(color: cs.onSurfaceVariant.withValues(alpha: 0.6)),
       ),
       filledButtonTheme: FilledButtonThemeData(
         style: FilledButton.styleFrom(
@@ -176,7 +176,7 @@ class TpeApp extends StatelessWidget {
         labelPadding: const EdgeInsets.symmetric(horizontal: 4),
       ),
       dividerTheme: DividerThemeData(
-        color: cs.outlineVariant.withOpacity(0.4),
+        color: cs.outlineVariant.withValues(alpha: 0.4),
         thickness: 1,
         space: 1,
       ),
@@ -195,7 +195,7 @@ class TpeApp extends StatelessWidget {
       sliderTheme: SliderThemeData(
         activeTrackColor: cs.primary,
         thumbColor: cs.primary,
-        overlayColor: cs.primary.withOpacity(0.12),
+        overlayColor: cs.primary.withValues(alpha: 0.12),
         inactiveTrackColor: cs.surfaceContainerHighest,
       ),
       snackBarTheme: SnackBarThemeData(
@@ -1039,7 +1039,7 @@ class _StartupGateState extends State<_StartupGate>
           continue;
         }
         final payload =
-            Map<String, dynamic>.from(decoded as Map<dynamic, dynamic>);
+            Map<String, dynamic>.from(decoded);
         final existing =
             (payload['dedupe_fingerprint'] ?? '').toString().trim();
         if (existing.isNotEmpty && existing == fingerprint) {
@@ -1126,7 +1126,7 @@ class _StartupGateState extends State<_StartupGate>
           final decoded = jsonDecode(raw);
           if (decoded is! Map) continue;
           final payload =
-              Map<String, dynamic>.from(decoded as Map<dynamic, dynamic>);
+              Map<String, dynamic>.from(decoded);
           final text = (payload['text'] ?? '').toString().trim();
           final subject = (payload['subject'] ?? '').toString().trim();
           if (text.isEmpty && subject.isEmpty) {

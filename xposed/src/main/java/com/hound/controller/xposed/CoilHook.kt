@@ -1,8 +1,8 @@
-﻿package com.hound.controller.xposed
+package com.hound.controller.xposed
 
 import android.graphics.Bitmap
 import android.util.Log
-import com.tpeapp.filter.IFilterCallback
+import com.hound.controller.filter.IFilterCallback
 import de.robv.android.xposed.XC_MethodHook
 import de.robv.android.xposed.XposedHelpers
 import kotlinx.coroutines.CompletableDeferred
@@ -219,7 +219,7 @@ object CoilHook {
     }
 
     private fun scanAndReplaceStrict(
-        service: com.tpeapp.filter.IFilterService,
+        service: com.hound.controller.filter.IFilterService,
         bitmap: Bitmap,
     ) {
         if (!MediaFilterRuntimeConfig.tryAcquireScanBudget()) return

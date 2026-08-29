@@ -1,4 +1,4 @@
-package com.tpeapp.consequence
+package com.hound.controller.consequence
 
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -6,11 +6,11 @@ import android.content.Context
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.preference.PreferenceManager
-import com.tpeapp.R
-import com.tpeapp.ble.LovenseManager
-import com.tpeapp.ble.PavlokManager
-import com.tpeapp.service.FilterService
-import com.tpeapp.webhook.WebhookManager
+import com.hound.controller.R
+import com.hound.controller.ble.LovenseManager
+import com.hound.controller.ble.PavlokManager
+import com.hound.controller.service.FilterService
+import com.hound.controller.webhook.WebhookManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob

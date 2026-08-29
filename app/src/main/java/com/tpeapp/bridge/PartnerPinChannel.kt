@@ -1,14 +1,14 @@
-package com.tpeapp.bridge
+package com.hound.controller.bridge
 
 import android.content.Context
-import com.tpeapp.mdm.PartnerPinManager
+import com.hound.controller.mdm.PartnerPinManager
 import io.flutter.plugin.common.BinaryMessenger
 import io.flutter.plugin.common.MethodChannel
 
 /**
  * PartnerPinChannel — MethodChannel bridge for [PartnerPinManager].
  *
- * Channel name: `com.tpeapp/partner_pin`
+ * Channel name: `com.hound.controller/partner_pin`
  *
  * Methods exposed to Dart:
  *  - `isPinSet`                        → Boolean
